@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import pwd
 import subprocess
+import tomllib
 
 prefix = Path('/opt/lcu')
 command = str(prefix / 'current/bin/lcu')
@@ -29,9 +30,30 @@ for scope in ('user', 'project'):
     subprocess.run(args, check=True)
     configs = {p: p.read_bytes() for p in home.rglob('*') if p.is_file() and p.suffix in ('.json', '.toml') and 'lock' not in p.name}
     subprocess.run(args, check=True)
-    assert all(p.read_bytes() == before for p, before in configs.items()), 'Registration is not idempotent'
+    for path, before in configs.items():
+        after = path.read_bytes()
+        if path.name == 'config.toml' and path.parent.name == '.codex':
+            # Native hook installation first writes inline arrays. On repeat,
+            # the original add-mcp formatter expands them to table arrays.
+            # Preserve both upstream writers; every value, including exact
+            # hook trust hashes and unrelated settings, must remain identical.
+            assert tomllib.loads(after.decode()) == tomllib.loads(before.decode()), path
+        else:
+            assert after == before, path
+    # Original Codex formatting must then converge, not change on every setup.
+    stable = {p: p.read_bytes() for p in configs if p.name == 'config.toml' and p.parent.name == '.codex'}
+    codex_args = [command, 'setup', '--user', account, '--agent', 'codex', '--session', 'direct', '--yes']
+    if scope == 'project':
+        codex_args += ['--scope', 'project', '--project', str(project)]
+    subprocess.run(codex_args, check=True)
+    assert all(p.read_bytes() == before for p, before in stable.items()), 'Codex formatting did not converge'
 assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
 assert 'mcp_servers.lcu' in codex.read_text()
+policy = json.loads((prefix / 'current/host/plugins/unified-computer-use/.mcp.json').read_text())['mcpServers']['cua_repl']
+for path in (codex, project / '.codex/config.toml'):
+    registered = tomllib.loads(path.read_text())['mcp_servers']['lcu']
+    for key in ('enabled_tools', 'omit_tools_from', 'startup_timeout_sec', 'tools'):
+        assert registered[key] == policy[key], (path, key)
 for path in home.rglob('*'):
     assert path.lstat().st_uid == owner.pw_uid, path
 export = home / 'portable'
@@ -41,6 +63,9 @@ if export.exists():
 subprocess.run([command, 'setup', '--user', account, '--export', str(export), '--session', 'direct', '--yes'], check=True)
 config = json.loads((export / 'mcp.json').read_text())
 assert config['mcpServers']['lcu']['command'] == command
+contract = json.loads((export / 'host-contract.json').read_text())
+for key in ('enabled_tools', 'omit_tools_from', 'startup_timeout_sec', 'tools'):
+    assert contract[key] == policy[key]
 assert (export / 'skills/lcu/SKILL.md').is_file()
 # Complete references must survive every upstream installer and portable export.
 registered_skills = [p.parent for p in home.rglob('SKILL.md') if p.parent.name == 'lcu']

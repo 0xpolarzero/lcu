@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"></head><body><script type="module">
+try {
+ const moduleUrl = new URL(location.href).searchParams.get('module');
+ const {createHttpFetch} = await import(moduleUrl);
+ const client = createHttpFetch(window.fixtureHost);
+ const request = client.fetch('browser-window-stream', {
+  url: 'https://fixture.example/stream', method: 'GET', headers: {},
+ });
+ const result = await request;
+ const reader = result.response.body.getReader();
+ const first = await reader.read();
+ const continueAfterFirst = window.fixtureHost.waitContinue();
+ window.fixtureHost.report({stage: 'first', done: first.done,
+  chunk: new TextDecoder().decode(first.value)});
+ await continueAfterFirst;
+ await reader.cancel();
+ result[Symbol.dispose]();
+ request[Symbol.dispose]();
+ window.fixtureHost.report({stage: 'canceled'});
+} catch (error) {
+ window.fixtureHost.report({stage: 'error', message: error.message});
+}
+</script></body></html>

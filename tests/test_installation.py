@@ -11,7 +11,7 @@ from lcu.runtime import environment
 from lcu.session import discover
 from lcu.setup import Change, apply_changes, regular_path
 from install import checked_prefix, install
-from project_runtime import download, remove_arm, replace
+from project_runtime import download
 from bundle import seal
 
 
@@ -69,28 +69,12 @@ class InstallationTests(unittest.TestCase):
     def test_caller_security_settings_survive(self):
         settings = {'NODE_REPL_FORCE_STRICT_AUTO_REVIEW': '1', 'NODE_REPL_ENFORCE_MODEL_CHECK': '1',
                     'CODEX_CLI_PATH': '/trusted/codex', 'NODE_REPL_ENABLE_NETWORK_ISOLATION': '1',
-                    'NODE_REPL_JS_BANNER': 'unwanted code', 'NODE_REPL_TRUSTED_SERVICES': 'wrong runtime'}
+                    'NODE_REPL_JS_BANNER': 'configured startup', 'NODE_REPL_TRUSTED_SERVICES': 'configured services'}
         with patch.dict(os.environ, settings):
             result = environment(self.root)
-        for key in list(settings)[:4]:
+        for key in settings:
             self.assertEqual(result[key], settings[key])
-        self.assertNotIn('NODE_REPL_JS_BANNER', result)
-        self.assertNotIn('NODE_REPL_TRUSTED_SERVICES', result)
-        self.assertEqual(result['CUA_REPL_ENABLED_SURFACES'], 'computer')
-
-    def test_source_drift_fails_closed(self):
-        path = self.root / 'source.js'
-        path.write_text('unexpected upstream')
-        with self.assertRaises(ValueError):
-            replace(path, 'old code', 'new code')
-        self.assertEqual(path.read_text(), 'unexpected upstream')
-
-    def test_dispatch_reordering_fails_closed(self):
-        path = self.root / 'source.js'
-        path.write_text('end;start;')
-        with self.assertRaises(ValueError):
-            remove_arm(path, 'start;', 'end;')
-        self.assertEqual(path.read_text(), 'end;start;')
+        self.assertEqual(result['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
 
     def session(self, pid, display=':1'):
         process = self.root / str(pid)

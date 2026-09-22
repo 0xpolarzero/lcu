@@ -219,6 +219,31 @@ def preflight_mcp(node, mcp, client, scope, cwd, env):
         raise ValueError(result.stderr.strip() or 'MCP configuration preflight failed')
 
 
+MCP_REGISTER = r"""
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [cli, agent, scope, commandJson, policyJson] = process.argv.slice(1);
+const { agents, upsertServer } = await import(pathToFileURL(join(dirname(cli), 'lib.js')));
+if (agent === 'codex') {
+  const transform = agents.codex.transformConfig;
+  const policy = JSON.parse(policyJson);
+  agents.codex.transformConfig = (...args) => ({ ...transform(...args), ...policy });
+}
+const [command, ...args] = JSON.parse(commandJson);
+const result = upsertServer(agent, 'lcu', { command, args }, { local: scope === 'project', cwd: process.cwd() });
+if (!result.success) throw new Error(result.error);
+console.log(JSON.stringify(result));
+"""
+
+
+def host_policy():
+    """Use the shipped host contract, not reconstructed tool defaults."""
+    descriptor = Path(__file__).resolve().parents[1] / 'host/plugins/unified-computer-use/.mcp.json'
+    server = json.loads(descriptor.read_text())['mcpServers']['cua_repl']
+    # Codex replaces these launch fields at runtime. LCU supplies its own command.
+    return {key: value for key, value in server.items() if key not in ('command', 'args', 'enabled')}
+
+
 def configure(names, home, source, command, tools_root, *, scope='user', project=None, environ=None):
     """Delegate registration and return phase failures; no client executable needed."""
     env = installer_environment(home, names, environ)
@@ -233,9 +258,8 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
         commands = (
             ('skill', [str(node), str(skills), 'add', str(source), '--skill', 'lcu',
                        '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]),
-            ('MCP', [str(node), str(mcp), command[0], '--name', 'lcu',
-                     '--agent', client.mcp_agent, '--yes', *global_args,
-                     *['--args=' + arg for arg in command[1:]]]),
+            ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
+                     client.mcp_agent, scope, json.dumps(command), json.dumps(host_policy())]),
         )
         for phase, argv in commands:
             try:
@@ -257,6 +281,11 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
                         and item.get('status') == 'installed' for item in installed
                     ):
                         raise ValueError('skill installer did not report installing LCU')
+                elif name == 'codex':
+                    from .codex_hooks import install_hooks
+                    registered = json.loads(result.stdout)
+                    host = Path(__file__).resolve().parents[1] / 'host'
+                    install_hooks(host / 'bin/codex', Path(registered['path']), cwd, env, host)
                 print(f'{client.label}: {phase} registered.')
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))
@@ -275,7 +304,14 @@ def export_bundle(destination, source, command):
                 'name': 'lcu', 'description': 'Computer use for AI agents on Linux.'}
     mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': command[0], 'args': command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
-               Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode())]
+               Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode()),
+               Change(destination / 'host-contract.json', None, (json.dumps(host_policy(), indent=2) + '\n').encode())]
+    codex = {'mcpServers': {'lcu': {**host_policy(), 'command': command[0], 'args': command[1:]}}}
+    changes.append(Change(destination / 'codex.mcp.json', None, (json.dumps(codex, indent=2) + '\n').encode()))
+    from .codex_hooks import export_files
+    host = Path(__file__).resolve().parents[1] / 'host'
+    changes += [Change(destination / name, None, data)
+                for name, data in export_files(command, host).items()]
     changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
     apply_changes(changes)
 
@@ -291,6 +327,7 @@ def parser():
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
     p.add_argument('--session', choices=['discover', 'direct'], default='discover', help='discover attaches through lcu-session (XFCE); direct inherits agent desktop environment')
+    p.add_argument('--browser-host', action='store_true', help='Also launch the bundled original in-app browser host with the MCP connection (requires a graphical, non-root account)')
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
     return p
@@ -389,6 +426,8 @@ def main(argv=None):
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise ValueError(f'Managed runtime missing or inaccessible: {path}. Run scripts/install.sh first, or select its --prefix.')
         command = [str(runtime)] if args.session == 'direct' else [str(launcher), '--user', account.pw_name, '--', str(runtime)]
+        if args.browser_host:
+            command.append('--with-browser-host')
         if names == ['auto']:
             names = detect(home)
             if not names:
@@ -408,6 +447,8 @@ def main(argv=None):
             else:
                 print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
                 print('Existing LCU skill and MCP entries will be updated; unrelated configuration is preserved.')
+                if 'codex' in names:
+                    print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')
@@ -424,6 +465,8 @@ def main(argv=None):
                              '--scope', args.scope, '--session', args.session, '--yes']
                     if args.project:
                         retry += ['--project', str(args.project)]
+                    if args.browser_host:
+                        retry += ['--browser-host']
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
@@ -433,11 +476,13 @@ def main(argv=None):
             print('Import this plugin with a compatible client, or use its mcp.json and skills/lcu with your custom agent. Its command runs on this Linux machine.')
         if args.check_desktop:
             print('Checking the live desktop...')
-            subprocess.run([*command, 'doctor'], check=True, timeout=35)
+            doctor = [part for part in command if part != '--with-browser-host'] + ['doctor']
+            subprocess.run(doctor, check=True, timeout=35)
             print('Desktop readiness check passed. Tool and skill discovery inside the agent still needs its first connection.')
         else:
             print('Live desktop not checked (image builds need no running GUI). After starting the desktop, check with:')
-            print('  ' + shlex.join([*command, 'doctor']))
+            doctor = [part for part in command if part != '--with-browser-host'] + ['doctor']
+            print('  ' + shlex.join(doctor))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         p.exit(1, f'Setup failed: {exc}\n')
 

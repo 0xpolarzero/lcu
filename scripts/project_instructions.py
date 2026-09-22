@@ -1,4 +1,9 @@
-"""Reproduce Linux instructions from pinned upstream text and reviewed line edits."""
+"""Verify complete upstream instruction sets and byte-identical local references.
+
+The runtime is copied unchanged. This module verifies its guidance and the copies
+provided beside LCU's skill, including inactive modes and dynamic browser guides.
+Standalone integration notes belong in SKILL.md, never in rewritten upstream text.
+"""
 import argparse
 import hashlib
 import json
@@ -14,25 +19,16 @@ def digest(data):
 def project_text(data, entry):
     if digest(data) != entry['sha256']:
         raise ValueError(f'Upstream instruction changed: {entry["source"]}')
-    lines = data.decode().splitlines(keepends=True)
-    result, cursor = [], 0
-    for edit in entry['edits']:
-        start, end = edit['start'] - 1, edit['end']
-        if not cursor <= start < end <= len(lines) or not edit['reason'].strip():
-            raise ValueError(f'Invalid instruction edit: {entry["source"]}: {edit}')
-        result.extend(lines[cursor:start])
-        result.append(edit['replacement'])
-        cursor = end
-    result.extend(lines[cursor:])
-    output = ''.join(result).encode()
-    if digest(output) != entry['output_sha256']:
-        raise ValueError(f'Projected instruction differs from reviewed output: {entry["source"]}')
-    return output
+    if entry['edits']:
+        raise ValueError(f'Instruction edits are not allowed: {entry["source"]}')
+    if digest(data) != entry['output_sha256']:
+        raise ValueError(f'Instruction output differs from upstream: {entry["source"]}')
+    return data
 
 
 def entries(root=ROOT):
     manifest = json.loads((root / 'scripts/instructions.lock.json').read_text())
-    if manifest['format'] != 1:
+    if manifest['format'] != 2:
         raise ValueError('Unsupported instruction projection format')
     return manifest['files']
 
@@ -46,9 +42,31 @@ def verify_outputs(root=ROOT, files=None):
 
 
 def project(upstream_modules, root=ROOT, *, write=False):
+    upstream_modules, root = Path(upstream_modules), Path(root)
+    manifest = json.loads((root / 'scripts/instructions.lock.json').read_text())
     files = entries(root)
+    scopes = {'modules': upstream_modules, 'resources': upstream_modules.parents[2]}
+    expected_sources = {(entry.get('scope', 'modules'), entry['source']) for entry in files}
+    discovered = set()
+    for group in manifest['resource_roots']:
+        base = scopes[group['scope']]
+        source = base / group['source']
+        if not source.is_dir():
+            raise ValueError(f'Missing instruction resource root: {source}')
+        for path in source.rglob('*'):
+            if path.is_file() and (not group.get('suffixes') or path.suffix in group['suffixes']):
+                discovered.add((group['scope'], path.relative_to(base).as_posix()))
+    # Explicit individual sources cover package documentation and plugin skills.
+    discovered.update((entry.get('scope', 'modules'), entry['source']) for entry in files
+                      if entry.get('individual'))
+    if discovered != expected_sources:
+        raise ValueError('Instruction inventory drift: '
+                         f'missing={sorted(expected_sources - discovered)}, '
+                         f'unclassified={sorted(discovered - expected_sources)}')
     for entry in files:
-        output = project_text((upstream_modules / entry['source']).read_bytes(), entry)
+        if entry['edits'] or entry['sha256'] != entry['output_sha256']:
+            raise ValueError('Upstream instruction rewrites are forbidden; use standalone wrapper notes')
+        output = project_text((scopes[entry.get('scope', 'modules')] / entry['source']).read_bytes(), entry)
         if write:
             for target in entry['targets']:
                 path = root / target

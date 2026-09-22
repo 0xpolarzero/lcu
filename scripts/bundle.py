@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import platform
 
-VERSION = '0.2.1'
+VERSION = '0.3.0-dev'
 
 
 def architecture():

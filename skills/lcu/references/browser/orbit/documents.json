@@ -1,0 +1,134 @@
+[
+  {
+    "mode": "model",
+    "name": "bootstrap-troubleshooting"
+  },
+  {
+    "mode": "included",
+    "name": "browser-safety"
+  },
+  {
+    "mode": "included",
+    "name": "confirmations",
+    "requiredFor": [
+      "tab_cdp_call",
+      "tab_cdp_events",
+      "webmcp_list_tools",
+      "webmcp_invoke_tool"
+    ]
+  },
+  {
+    "mode": "included",
+    "name": "visibility",
+    "when": {
+      "requiredBrowserCapabilities": [
+        "visibility"
+      ]
+    }
+  },
+  {
+    "mode": "included",
+    "name": "cloud-no-auth",
+    "when": {
+      "excludedTabCapabilities": [
+        "browserAuth"
+      ]
+    }
+  },
+  {
+    "mode": "included",
+    "name": "orbit-auth",
+    "when": {
+      "requiredTabCapabilities": [
+        "browserAuth"
+      ]
+    }
+  },
+  {
+    "mode": "included",
+    "name": "browser-auth-orbit-intro",
+    "when": {
+      "requiredTabCapabilities": [
+        "browserAuth"
+      ]
+    }
+  },
+  {
+    "mode": "included",
+    "name": "api-use-behavior"
+  },
+  {
+    "mode": "included",
+    "name": "webmcp",
+    "requiredFor": [
+      "webmcp_list_tools",
+      "webmcp_invoke_tool"
+    ],
+    "when": {
+      "requiredTabCapabilities": [
+        "webmcp"
+      ]
+    }
+  },
+  {
+    "description": "read when a selected browser fails while interacting with a page",
+    "mode": "lookup",
+    "name": "browser-troubleshooting"
+  },
+  {
+    "description": "read before uploading files through a webpage",
+    "mode": "lookup",
+    "name": "file-uploads",
+    "when": {
+      "requiredApiMembers": [
+        "PlaywrightAPI.waitForEvent",
+        "PlaywrightFileChooser.setFiles"
+      ]
+    }
+  },
+  {
+    "description": "you MUST read this before uploading files or returning any screenshot, download, PDF, export, or other browser-produced file to the user",
+    "mode": "lookup",
+    "name": "cloud-shared-files"
+  },
+  {
+    "description": "read when the user asks for screenshots",
+    "mode": "lookup",
+    "name": "screenshots"
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/browser/management"
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/browser/visibility"
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/browser/viewport"
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/tab/cdp",
+    "requiredFor": [
+      "tab_cdp_call",
+      "tab_cdp_events"
+    ]
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/tab/botDetection"
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/tab/browserAuth",
+    "requiredFor": [
+      "tab_browser_auth_handoff"
+    ]
+  },
+  {
+    "mode": "model",
+    "name": "capabilities/tab/pageAssets"
+  }
+]

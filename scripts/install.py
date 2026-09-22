@@ -13,7 +13,24 @@ SOURCE = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 from lcu import setup
-from bundle import architecture, verify
+from bundle import VERSION, architecture, verify
+
+
+# Ubuntu 24.04 names for the pinned official application's Depends, plus LCU's
+# X11/audio/session prerequisites. See docs/INSTALLATION.md for source mappings.
+SYSTEM_PACKAGES = (
+    'at-spi2-core', 'bubblewrap', 'ca-certificates', 'dbus-x11', 'ffmpeg',
+    'libasound2t64', 'libatk-bridge2.0-0t64', 'libatk1.0-0t64', 'libatspi2.0-0t64',
+    'libc6', 'libcairo2', 'libcups2t64', 'libdbus-1-3', 'libdrm2', 'libexpat1',
+    'libgbm1', 'libgcc-s1', 'libgdk-pixbuf-2.0-0', 'libgl1', 'libglib2.0-bin',
+    'libglib2.0-0t64', 'libgtk-3-0t64', 'libnotify4', 'libnspr4', 'libnss3',
+    'libpango-1.0-0', 'libssl3t64', 'libstdc++6', 'libtss2-esys-3.0.2-0t64',
+    'libtss2-mu-4.0.1-0t64', 'libtss2-tcti-device0t64', 'libudev1', 'libusb-1.0-0',
+    'libx11-6', 'libx11-xcb1', 'libxcb-dri3-0', 'libxcb1', 'libxcomposite1',
+    'libxdamage1', 'libxext6', 'libxfixes3', 'libxi6', 'libxkbcommon0', 'libxrandr2',
+    'libxtst6', 'mesa-vulkan-drivers', 'pulseaudio', 'pulseaudio-utils', 'python3',
+    'x11-utils', 'xdg-utils', 'xz-utils',
+)
 
 
 def checked_prefix(path):
@@ -38,7 +55,7 @@ def validate_release(release):
     env = dict(os.environ, NODE_REPL_DISABLE_ANALYTICS='1')
     subprocess.run([str(release / 'runtime/bin/node'), '--input-type=module', '-e',
                     'const s = await import(process.argv[1]); const r = await s.handleRpc({type:"setup"}); if(r.target!=="linux") throw Error("Wrong platform");',
-                    (release / 'runtime/lib/node_modules/@oai/sky/index.js').as_uri()], env=env, check=True, timeout=20)
+                    (release / 'runtime/lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js').as_uri()], env=env, check=True, timeout=20)
 
 
 def install(prefix):
@@ -50,7 +67,7 @@ def install(prefix):
         fcntl.flock(lock, fcntl.LOCK_EX)
         releases = prefix / 'releases'
         releases.mkdir(exist_ok=True)
-        release = releases / ('0.2.1-' + uuid.uuid4().hex[:12])
+        release = releases / (VERSION + '-' + uuid.uuid4().hex[:12])
         release.mkdir(mode=0o755)
         try:
             shutil.copytree(SOURCE, release, dirs_exist_ok=True, symlinks=True)
@@ -91,7 +108,7 @@ def main(argv=None):
     account, names = setup.validate(args)
     prefix = checked_prefix(args.prefix)
     if args.runtime_only:
-        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.session != 'discover':
+        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.session != 'discover' or args.browser_host:
             raise ValueError('--runtime-only cannot include agent setup options')
     elif not names and not args.export and (args.yes or not sys.stdin.isatty()):
         raise ValueError('Select --agent NAME, --agent all, --agent auto, --export PATH, or --runtime-only')
@@ -103,9 +120,7 @@ def main(argv=None):
         if os.getuid() != 0 or not shutil.which('apt-get'):
             raise ValueError('Automatic system provisioning requires root and apt-get; otherwise provision dependencies and use --skip-system')
         subprocess.run(['apt-get', 'update'], check=True)
-        subprocess.run(['apt-get', 'install', '-y', 'ca-certificates', 'python3', 'libx11-6', 'libxtst6',
-                        'libxi6', 'libxrandr2', 'libxfixes3', 'libxcomposite1', 'libxdamage1', 'at-spi2-core',
-                        'dbus-x11', 'x11-utils'], check=True)
+        subprocess.run(['apt-get', 'install', '-y', *SYSTEM_PACKAGES], check=True)
     install(prefix)
     print(f'LCU installed: {prefix}/current/bin/lcu')
     if not args.runtime_only:
@@ -115,7 +130,7 @@ def main(argv=None):
         for flag in ('project', 'export'):
             if getattr(args, flag):
                 forwarded += ['--' + flag, str(getattr(args, flag))]
-        for flag in ('yes', 'check_desktop'):
+        for flag in ('yes', 'check_desktop', 'browser_host'):
             if getattr(args, flag):
                 forwarded += ['--' + flag.replace('_', '-')]
         # Run setup from the selected release, and drop privileges before account writes.

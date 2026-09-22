@@ -1,10 +1,10 @@
 # LCU
 
-**A Linux desktop API for AI agents.**
+**The upstream Codex Linux computer-use runtime, packaged for standalone agents.**
 
-LCU (Linux Computer Use) lets your agent read windows, click controls, type text, and take screenshots through MCP. It uses Codex's Linux computer-use runtime and includes a skill that teaches the agent how to use it.
+LCU (Linux Computer Use) bundles the complete original Linux runtime, public JavaScript exports, instructions, browser libraries, native host, and companion Codex executables. It runs on your Linux machine or VM and exposes the original persistent MCP JavaScript interface.
 
-It runs on your Linux machine or VM. Running LCU does not require the Codex app or an OpenAI account.
+**This is an unfinished `0.3.0-dev` parity build.** Native desktop operations work independently without an OpenAI account. The original browser provider requires Codex authentication for actions. The standalone in-app-browser host is under integration testing. Authenticated host services, cloud/Orbit providers and generic-agent lifecycle integration remain unresolved. See the [capability and dependency inventory](docs/INVENTORY.md) and [browser host status](docs/BROWSER-HOST-PARITY.md). No full-parity release is claimed.
 
 ## API
 
@@ -44,17 +44,12 @@ Then choose a position from the screenshot and call `app.click([x, y])`. The API
 
 Install **on the Linux machine whose desktop the agent will control**. You need Python 3.12+ and an existing X11 desktop. Ubuntu 24.04 is tested. Native Wayland is not supported.
 
-Download the archive and checksum for your machine from [v0.2.1](https://github.com/0xpolarzero/lcu/releases/tag/v0.2.1):
-
-| Machine | Archive | Checksum |
-| --- | --- | --- |
-| x86-64 | [linux-x64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz.sha256) |
-| ARM64 | [linux-arm64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz.sha256) |
+Build the development archive using the [build instructions](docs/DEVELOPMENT.md). The published [v0.2.1](https://github.com/0xpolarzero/lcu/releases/tag/v0.2.1) is the earlier native-only subset and does not contain this branch's restored features.
 
 In the download directory, run the following. Change `x64` to `arm64` for ARM64:
 
 ```sh
-archive=lcu-0.2.1-linux-x64.tar.gz
+archive=lcu-0.3.0-dev-linux-x64.tar.gz
 sha256sum -c "$archive.sha256" &&
   tar -xzf "$archive" &&
   cd "${archive%.tar.gz}" &&
@@ -65,13 +60,17 @@ Run this as your desktop user. If you are already root, replace `$(id -un)` with
 
 The installer adds the tools and skill to your agent's configuration. Restart or reconnect the agent, then ask: **“Use LCU to inspect my desktop.”**
 
-The runtime is included in the download. The installer uses apt for system libraries; add `--skip-system` if they are already installed. Default setup connects to your XFCE session. For another X11 desktop, use [`--session direct`](docs/INSTALLATION.md#connect-to-a-desktop).
+The runtime and original host executables are included in the archive. The installer uses apt for system libraries; add `--skip-system` if they are already installed. Default setup connects to your XFCE session. For another X11 desktop, use [`--session direct`](docs/INSTALLATION.md#connect-to-a-desktop).
+
+The experimental bundled in-app-browser host is explicit: register with `--browser-host`, or launch `lcu --with-browser-host`. This requires a graphical, non-root account and retains the original authentication and policy checks. See the [adaptation ledger](docs/STANDALONE-ADAPTATIONS.md).
+
+For the external-browser provider, run `lcu browser install` as the browser's Linux account, then enable the official ChatGPT browser extension. This uses the original native messaging installer. Browser actions retain upstream authentication and policy requirements; [connection and host requirements](docs/BROWSER-HOST-PARITY.md) explain the current limits.
 
 ## Agents
 
 Use `--agent codex`, `claude-code`, `cursor`, `gemini-cli`, `opencode`, `vscode`, or `copilot-cli`. Repeat `--agent` to select several, or use `--agent all`. Omit `--agent` and `--yes` for an interactive choice.
 
-Other agents can use the [MCP configuration and skill export](docs/INSTALLATION.md#other-agents). The [skill](skills/lcu/SKILL.md) and API instructions guide observation, actions, and checking results.
+Other agents can use the [MCP configuration and skill export](docs/INSTALLATION.md#other-agents). The [skill](skills/lcu/SKILL.md) links complete, unchanged upstream guides before the first call. Codex registration also installs the original tool filtering, routing, startup timeout, output allowance and exact lifecycle hooks. Portable export includes native Codex plugin files and tool/lifecycle contracts; another agent must honor those contracts for equivalent host behavior.
 
 ## More
 
@@ -79,7 +78,7 @@ Other agents can use the [MCP configuration and skill export](docs/INSTALLATION.
 - [API reference](instructions/api/tinysky-alt-core-cua-repl.md): methods, parameters, and examples.
 - [Development](docs/DEVELOPMENT.md): build and test a release.
 - [Test results](docs/VERIFICATION.md): what has been checked and known limits.
-- [Instruction fidelity](docs/INSTRUCTIONS.md): pinned upstream text, every Linux-specific edit, and delivery checks.
+- [Instruction fidelity](docs/INSTRUCTIONS.md): complete upstream text, zero runtime instruction edits, and delivery checks.
 - [Runtime sources](docs/PROVENANCE.md): where the bundled code comes from.
 
 LCU controls an existing desktop and runs with your Linux account's permissions. Use your VM or container to isolate it. Application support depends on accessibility; screenshots and coordinates are available when controls cannot be read.

@@ -1,6 +1,6 @@
 # LCU
 
-Keep computer-use behavior in the original Codex Linux runtime. Do not add another accessibility, input, screenshot, browser, or MCP implementation. The Python files manage installation and desktop-session selection only.
+Keep computer-use behavior in the original Codex Linux runtime. Do not add another accessibility, input, screenshot, browser, or MCP implementation. Standalone adapters may manage installation, desktop-session selection, and transport/lifetime wiring for original host services. Reuse original implementations and record each adaptation; missing host services remain parity blockers.
 
 Runtime changes require a pinned official package, documented source evidence, guarded projection, and real desktop integration tests on ARM64 and x86-64. Bundle the complete runtime and agent-registration dependencies in architecture-specific release archives. Downloads and projection belong to the build, never installation. Preserve upstream notices; LCU's MIT license does not relicense bundled dependencies.
 

@@ -19,7 +19,6 @@ try:
     assert {'js', 'js_reset', 'js_add_node_module_dir', 'turn_ended'} <= names
     js_tool = next(item for item in tools if item['name'] == 'js')
     description = js_tool['description']
-    assert 'windowId' in description and 'getApp("Example App")' not in description
     expected_description = '\n\n'.join((instructions / 'repl' / name).read_text().rstrip()
         for name in ('linux/description.md', 'browser-disabled.md', 'linux/computer.md', 'linux/output.md'))
     assert description == expected_description, 'First-call instructions were changed or truncated'
@@ -30,7 +29,6 @@ try:
     initial = client.js('await cua.getState();')
     assert core in text(initial), 'First-use API instructions were changed or truncated'
     assert policy in text(initial), 'Default confirmation policy was changed or truncated'
-    assert 'macOS' not in text(initial) and 'On Windows' not in text(initial)
     assert (source / 'skills/lcu/references/api.md').read_text() == core
     for attempt in range(30):
         response = client.js('nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));')
@@ -40,9 +38,8 @@ try:
             break
         time.sleep(0.1)
     assert len(targets) == 3, windows
-    # Exercise the same Linux client exposed by the upstream full-desktop skill.
-    # This binding is the only change to that reference's executable examples.
-    low_level = client.js(f'var sky = cua.computer; var window = (await sky.list_windows()).find(w => w.id === {targets["LCU Target"]["id"]}); var rawState = await sky.get_window_state({{window, include_screenshot:false}}); nodeRepl.write(rawState.ax_tree.to_string());')
+    # The unchanged upstream public import must execute, not merely resolve.
+    low_level = client.js(f'var {{sky}} = await import("@oai/sky"); var window = (await sky.list_windows()).find(w => w.id === {targets["LCU Target"]["id"]}); var rawState = await sky.get_window_state({{window, include_screenshot:false}}); nodeRepl.write(rawState.ax_tree.to_string());')
     assert 'Draft text' in text(low_level)
     full_image = client.js('await nodeRepl.emitImage((await sky.get_screenshot())[0].data_url);')
     assert any(item['type'] == 'image' for item in full_image['content'])

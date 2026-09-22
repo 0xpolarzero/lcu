@@ -1,4 +1,8 @@
-# Verification: 2026-09-22
+# Verification
+
+The historical results below describe v0.2.1 only. Current full-parity development evidence and unresolved requirements are recorded in [PARITY-STATUS.md](PARITY-STATUS.md). Passing earlier subset tests does not validate the current browser/host integration or establish full parity.
+
+# Historical v0.2.1 verification: 2026-09-22
 
 ## Bundled installation
 

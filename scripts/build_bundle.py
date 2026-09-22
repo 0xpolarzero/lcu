@@ -34,8 +34,11 @@ def build(output, package=None):
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
             shutil.copy2(SOURCE / filename, release / filename)
         (release / 'scripts').mkdir()
-        for filename in ('install.sh', 'install.py', 'bundle.py'):
+        for filename in ('install.sh', 'install.py', 'bundle.py', 'project_instructions.py',
+                         'instructions.lock.json', 'inventory_runtime.py', 'inventory_asar.py'):
             shutil.copy2(SOURCE / 'scripts' / filename, release / 'scripts' / filename)
+        for path in (SOURCE / 'scripts').glob('*inventory*.json'):
+            shutil.copy2(path, release / 'scripts' / path.name)
         provision(release, SOURCE, scratch, arch, package)
         provision_agents(release, SOURCE / 'scripts/agent-tools')
         # Test the same executable payload the installer will copy; no display needed.

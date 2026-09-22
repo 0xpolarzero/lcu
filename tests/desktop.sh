@@ -2,6 +2,7 @@
 set -euo pipefail
 test_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export DISPLAY=:99 GTK_MODULES=gail:atk-bridge NO_AT_BRIDGE=0
+export CUA_REPL_ENABLED_SURFACES=computer
 export XDG_RUNTIME_DIR=$(mktemp -d)
 export LCU_TEST_OUTPUT=$(mktemp -d)
 processes=()

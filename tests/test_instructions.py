@@ -16,12 +16,11 @@ def digest(text):
 class InstructionProjectionTests(unittest.TestCase):
     def setUp(self):
         self.source = 'Keep first rule.\nOther platform.\nKeep last rule.\n'
-        self.expected = 'Keep first rule.\nLinux correction.\nKeep last rule.\n'
+        self.expected = self.source
         self.entry = {
             'source': 'upstream.md', 'sha256': digest(self.source),
             'output_sha256': digest(self.expected), 'targets': ['instructions/api.md'],
-            'edits': [{'start': 2, 'end': 2, 'replacement': 'Linux correction.\n',
-                       'reason': 'Replace the other platform with the Linux signature.'}],
+            'edits': [],
         }
 
     def test_unchanged_rules_survive_exactly(self):
@@ -31,22 +30,16 @@ class InstructionProjectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Upstream instruction'):
             project_text((self.source + 'new rule\n').encode(), self.entry)
 
-    def test_unreviewed_output_fails(self):
+    def test_output_hash_must_match_unchanged_source(self):
         entry = copy.deepcopy(self.entry)
-        entry['edits'][0]['replacement'] = ''
-        with self.assertRaisesRegex(ValueError, 'Projected instruction'):
+        entry['output_sha256'] = digest('A summary')
+        with self.assertRaisesRegex(ValueError, 'differs from upstream'):
             project_text(self.source.encode(), entry)
 
-    def test_overlapping_edits_fail(self):
+    def test_runtime_instruction_rewriting_is_rejected(self):
         entry = copy.deepcopy(self.entry)
-        entry['edits'].append(entry['edits'][0])
-        with self.assertRaisesRegex(ValueError, 'Invalid instruction edit'):
-            project_text(self.source.encode(), entry)
-
-    def test_unexplained_edits_fail(self):
-        entry = copy.deepcopy(self.entry)
-        entry['edits'][0]['reason'] = ''
-        with self.assertRaisesRegex(ValueError, 'Invalid instruction edit'):
+        entry['edits'] = [{'replacement': 'A rewritten instruction'}]
+        with self.assertRaisesRegex(ValueError, 'edits are not allowed'):
             project_text(self.source.encode(), entry)
 
     def test_manual_condensation_is_rejected(self):

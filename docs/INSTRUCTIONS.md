@@ -1,161 +1,60 @@
 # Instruction fidelity
 
-## Source and scope
+LCU retains the complete original instruction resources from the pinned OpenAI Linux package `26.915.31945`, runtime `0.0.16/20260915001755-492f19756c31`. It does not condense or rewrite the upstream guides. The runtime's own files remain in their original locations; the skill also carries byte-identical copies that an agent can read before making its first tool call.
 
-The source is OpenAI's pinned Linux package `26.915.31945`, runtime `0.0.16/20260915001755-492f19756c31`. The [ARM64 package](https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_26.915.31945_arm64.deb) and [x86-64 package](https://persistent.oaistatic.com/codex-app-prod/linux/deb/pool/main/c/chatgpt/chatgpt_26.915.31945_amd64.deb) are verified against `runtime.lock.json`. All 12 instruction inputs have identical bytes in both packages.
+## Source inventory
 
-Versions through v0.2.0 replaced the core guide with a hand-written summary. That omitted applicable workflow rules, including avoiding repeated observations, preferring already-visible results, stopping after visible completion, and persistence after ineffective actions. v0.2.1 replaces the summary with a reproducible projection of the original text. It also restores the upstream Linux full-desktop skill as a reference.
+[`scripts/instructions.lock.json`](../scripts/instructions.lock.json) records every file in nine complete instruction roots, including its original SHA-256 and all local copies. The 195 source resources are identical across the ARM64 and x86-64 packages. They produce 385 byte-identical copies under `instructions/` and `skills/lcu/references/`; no ledger entry has an edit.
 
-`@oai/cua-repl` selects `core-cua-repl`, not `core-node-repl`. The latter documents a different host entrypoint, including `cua.initialize()`, which is absent from this runtime's selected interface; it is not substituted for the active guide. Other-platform instructions and dedicated browser-provider APIs are excluded. Browser application windows remain usable through Linux desktop APIs. The original confirmation policy is copied unchanged, and the original runtime's host-policy override behavior is retained.
+| Original source root | Included guidance |
+| --- | --- |
+| `cua_node/lib/node_modules/@oai/cua/docs` | Default and alternate core guides, confirmations, and alternate browser APIs |
+| `cua_node/lib/node_modules/@oai/cua-repl/instructions` | All platform/tool descriptions, browser environments, disabled-surface text, banner, output, reset, and server guidance |
+| `cua_node/lib/node_modules/@oai/sky/docs` | Native API guides and original platform skills, including the complete Linux desktop skill |
+| `cua_node/lib/node_modules/@oai/browser-desktop/environment-docs` | Codex-app, cloud, orbit, and training API/document manifests and every referenced guide |
+| `cua_node/lib/node_modules/@oai/cua/dist/lib/js/oai_js_browser/dist/skill/references` | Embedded browser-runtime references and capability/document manifests |
+| `plugins/openai-bundled/plugins/browser/docs` | Original in-app browser plugin documentation |
+| `plugins/openai-bundled/plugins/chrome/docs` | Original external-browser plugin documentation |
+| `plugins/openai-bundled/plugins/browser/skills` | Original in-app browser skill |
+| `plugins/openai-bundled/plugins/chrome/skills` | Original Chrome skill |
 
-The Linux full-desktop reference retains the upstream skill body. Its only executable change binds `sky` to the original initialized client at `cua.computer`, instead of importing a second client. The standalone skill wrapper supplies registration and routes to these references; it does not replace their workflow rules.
+The [complete runtime and host inventory](INVENTORY.md) separately covers every implementation file, public package export, API declaration, configuration identifier, plugin artifact, and dynamic-document graph. Shared packages retain their inactive platform branches and documentation as shipped; their presence does not make a non-Linux API available on Linux.
 
-This establishes traceable instruction fidelity to the selected files in this pinned package. It does not claim access to every Codex host prompt, parity with later packages, or equal agent task-success rates. The docs and runtime remain subject to their upstream terms, as described in [PROVENANCE.md](PROVENANCE.md).
+## Instruction producers
 
-## What the agent receives
+The original `@oai/cua-repl` launcher composes its `js` description from the selected platform's common, browser/computer or disabled-surface, and output guidance. It also supplies the original server instructions, code field description, reset description, and initialization banner.
 
-1. The registered LCU skill exposes full local references before any tool call.
-2. MCP initialization and tool discovery provide the upstream server, first-call, output, and reset instructions, with the edits below.
-3. The first documented call, `await cua.getState()` or `await cua.listWindows()`, initializes the original REPL, emits the full API guide plus the applicable confirmation policy, and reads inventory. It does not click, type, or launch an application. The agent reads that result before continuing.
-4. Reset and `cua.rewriteDocumentation()` use the original delivery and replay behavior.
+The banner loads `@oai/cua/tinyskyAlt`. Its instruction producer selects `core-cua-repl` by default, or the guide selected by `TINYSKY_ALT_INITIALIZE_DOCS` when the host exposes that setting. Both original core guides are retained. `cua.initialize()` exists as an alias of `cua.getState()`; it was incorrectly described as absent in the v0.2.1 audit.
 
-The integration suite compares the complete tool description, initial API text, default policy, reset output, and replay output with the reviewed files. It also exercises the full-desktop reference's client binding, structured accessibility, and screenshot example against independent Linux GUI fixtures. These are delivery and execution checks, not a claim that every agent model follows every instruction.
+The first entrypoint call emits the selected core guide and applicable policy before inventory/action output. The default confirmation policy remains unchanged; the original implementation accepts valid host policy metadata under `openai/confirmation_policies`. Reset and `cua.rewriteDocumentation()` retain the original caching, replay, and request-metadata behavior.
 
-## Reproduction and drift checks
+Browser selection additionally supplies the original alternate-API guidance and that browser's generated documentation. Its API and document manifests filter guidance according to browser type, available APIs, browser/tab capabilities, environment, and the original exclusion settings. All source manifests and referenced guides are retained; the agent must use the effective documentation returned for its selected browser rather than assume every cataloged capability is connected.
 
-[`scripts/instructions.lock.json`](../scripts/instructions.lock.json) records source paths, SHA-256 hashes, exact original line spans, replacements, reasons, and output hashes. Lines outside those edits survive byte-for-byte, in their original order. The build validates the extracted official text, reproduces the edits, and compares every packaged and skill-reference copy. Missing files, upstream drift, overlapping edits, unexplained edits, changed output, and manually condensed copies fail closed.
+## Standalone integration notes
+
+The [LCU skill wrapper](../skills/lcu/SKILL.md) contains the only additional integration guidance. It maps the upstream `cua_repl` name to the standalone `js`/`js_reset` tools, links full original guides, and records these implementation-backed differences without altering the originals:
+
+- Native Linux `cua.getApp` requires an observed `{ windowId }`. The shipped Linux tool-description example uses a string incorrectly; the original full core guide and implementation both specify the window-ID form.
+- Within this initialized REPL, the original full-desktop client is already available at `cua.computer`. The standalone Sky examples import `sky`; binding `const sky = cua.computer` uses the existing original client and trusted service.
+- Legacy browser plugin bootstrap instructions apply to their own plugin modes. The unified LCU entrypoint is already initialized. Browser capabilities that depend on the Codex application, such as its in-app browser, require that host; copying their instructions is not a claim that their host exists.
+
+Original policy files are available as references, but host-provided policy metadata remains authoritative for the runtime's emitted policy. No additional policy or task-success guarantee is introduced by the wrapper.
+
+## Verification
 
 ```sh
-# Check every committed projection and reference against the reviewed hashes.
+# Verify every checked-in upstream reference against its recorded original hash.
 python3 scripts/project_instructions.py
 
-# Reproduce against an extracted, checksum-verified official runtime.
-python3 scripts/project_instructions.py --upstream-modules /absolute/runtime/lib/node_modules
+# Also enumerate all original resource roots and reject omissions/additions/drift.
+python3 scripts/project_instructions.py --upstream-modules /absolute/resources/cua_node/lib/node_modules
 
-# Regenerate after reviewing any deliberate changes to the ledger.
-python3 scripts/project_instructions.py --upstream-modules /absolute/runtime/lib/node_modules --write
+# Recreate reference copies from a separately verified original extraction.
+python3 scripts/project_instructions.py --upstream-modules /absolute/resources/cua_node/lib/node_modules --write
 ```
 
-## Complete edit inventory
+Build verification rejects changed bytes, missing resources, unclassified additions inside any resource root, and attempted instruction rewrites. Runtime inventory checks also reject changes anywhere outside those roots. This proves source preservation and reproducible delivery inputs. Equal agent reliability additionally depends on the original host configuration, full agent-visible output, connected backends, policies, model behavior, and differential tests; file equality alone does not establish it.
 
-Source paths below are relative to `lib/node_modules` in the official runtime. Line numbers refer to the pinned original, not the generated output. The exact replacement text is in the ledger.
+## Earlier releases
 
-### `@oai/cua/docs/tinysky-alt-core-cua-repl.md`
-
-Outputs: `instructions/api/tinysky-alt-core-cua-repl.md`, `skills/lcu/references/api.md`.
-
-| Original lines | Reason |
-| --- | --- |
-| 5 | The standalone MCP exposes js; cua_repl is the upstream host namespace. |
-| 6 | Retain the tool restriction and user exception; remove examples specific to macOS. |
-| 8 | Use the standalone tool name. |
-| 9 | The dedicated browser provider is disabled. |
-| 18 | The Linux implementation rejects non-text paste formats. |
-| 20–24 | SelectTextOptions applies to selectText, which always throws on Linux. |
-| 26 | SelectionType applies to selectText, which always throws on Linux. |
-| 35 | Linux rejects page counts and accepts a positive pixel distance or its native default. |
-| 36–37 | selectText and setValue always throw on Linux; retain their explicit warning in Notes. |
-| 55 | Linux rejects page counts. |
-| 62–99 | Dedicated browser and tab provider types are outside this computer-only runtime. |
-| 102 | The browser inventory is empty when the dedicated provider is disabled. |
-| 103 | Only the native app inventory is enabled. |
-| 106–123 | Dedicated browser options and Tab methods are outside this computer-only runtime. |
-| 127 | Only the Linux platform is retained. |
-| 128 | launch_app is present in the pinned Linux client. |
-| 131 | Linux getApp requires an observed window ID; strings throw. |
-| 133 | listWindows is present on Linux. |
-| 134 | Document the existing runtime method prescribed by the upstream first-use tool description. |
-| 135–149 | Dedicated browser-provider methods are disabled. |
-| 155 | Remove macOS target selection and Windows applicability; retain exact-window selection and multi-window guidance. |
-| 157 | Retain Linux inventory and launch behavior; remove Windows applicability. |
-| 159 | Remove the Windows-only activation and screenshot-coordinate mapping behavior. |
-| 164 | Linux always returns full trees; retain the requirement to refresh indices after a screenshot-only observation. |
-| 165 | Retain all Linux accessibility-source guidance. |
-| 169 | Remove dedicated tab-provider calls; retain automatic app observation. |
-| 177–182 | Use native app text/key signatures and pixel scrolling; omit methods that always throw on Linux. |
-| 191 | Remove disabled browser-provider output rules; preserve automatic output and first-use documentation behavior. |
-| 192 | Remove Windows-only screenshot emission and error behavior. |
-| 196 | This element-first input convention applies only to dedicated browser tabs. |
-| 198 | Remove macOS/browser clipboard behavior and formatted paste unsupported on Linux; retain native text input and multiline advice. |
-| 199 | Remove macOS page counts and Windows coordinate-only scrolling; retain every Linux rule. |
-| 200 | Both unsupported-method warnings remain for Linux. |
-| 203 | selectText always throws on Linux; its operational instructions apply to other platforms. |
-| 205 | This app-name resolution and implicit launch behavior is macOS-only. |
-
-### `@oai/cua-repl/instructions/banner.js`
-
-Outputs: `instructions/repl/banner.js`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/browser-disabled.md`
-
-Outputs: `instructions/repl/browser-disabled.md`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/computer-disabled.md`
-
-Outputs: `instructions/repl/computer-disabled.md`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/server.md`
-
-Outputs: `instructions/repl/server.md`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/code.md`
-
-Outputs: `instructions/repl/code.md`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/linux/output.md`
-
-Outputs: `instructions/repl/linux/output.md`.
-
-Copied unchanged.
-
-### `@oai/cua-repl/instructions/reset.md`
-
-Outputs: `instructions/repl/reset.md`.
-
-| Original lines | Reason |
-| --- | --- |
-| 1 | Use the standalone MCP tool name; retain reset semantics verbatim. |
-
-### `@oai/cua-repl/instructions/linux/description.md`
-
-Outputs: `instructions/repl/linux/description.md`.
-
-| Original lines | Reason |
-| --- | --- |
-| 4 | Remove dedicated browser/tab selection; retain the requirement to read the first result before further calls. |
-| 7 | Only the native computer surface is enabled. |
-
-### `@oai/cua-repl/instructions/linux/computer.md`
-
-Outputs: `instructions/repl/linux/computer.md`.
-
-| Original lines | Reason |
-| --- | --- |
-| 1 | Fix the shipped Linux entrypoint that incorrectly accepts names/paths; the Linux branch requires { windowId }. |
-| 4 | Use an observed window ID as required by the Linux implementation. |
-
-### `@oai/cua/docs/tinysky-alt-confirmations.md`
-
-Outputs: `instructions/api/tinysky-alt-confirmations.md`.
-
-Copied unchanged.
-
-### `@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md`
-
-Outputs: `skills/lcu/references/linux-desktop.md`.
-
-| Original lines | Reason |
-| --- | --- |
-| 1–5 | Store the upstream Linux skill body as a reference under the registered lcu skill. |
-| 33 | The original Linux client is already initialized behind the trusted service at cua.computer; no new client or import is needed. |
-
+Versions through v0.2.0 used a hand-written core summary. Version v0.2.1 restored a reviewed Linux-native projection but excluded browser providers and selected instruction modes. The complete-copy design supersedes that selected-subset approach. Earlier successful fixture tests do not establish completeness of the omitted interfaces.

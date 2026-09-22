@@ -1,17 +1,33 @@
 # Installation
 
-Start with the [README](../README.md#install) to download and install a release. Run all commands on the Linux machine that hosts the desktop and agent backend.
+Start with the [README](../README.md#install) to build and install the current development archive; full standalone parity is still under verification. Run all commands on the Linux machine that hosts the desktop and agent backend.
 
 ## Requirements
 
-- Linux ARM64 or x86-64 with glibc. Ubuntu 24.04 is tested; musl systems are unsupported.
+- Linux ARM64 or x86-64 with glibc. Native-runtime tests use Ubuntu 24.04; provisioning for the newly bundled full application remains unvalidated. Musl systems are unsupported.
 - Python 3.12 or newer.
 - An X11 desktop with a D-Bus session. Native Wayland is unsupported.
 - A Linux account for the desktop and agent. The account and its home directory must already exist.
 
-LCU supplies its own runtime and Node. The installer can install system libraries with apt. On another distribution, provide equivalent libraries and use `--skip-system`; those distributions have not been verified.
+LCU supplies its own Node, computer-use runtime, and complete original Owl application. Automatic apt provisioning targets Ubuntu 24.04 on both supported architectures. On another distribution, provide equivalent libraries and use `--skip-system`; those distributions have not been verified. The installer installs system dependencies separately, without installing the ChatGPT `.deb` or registering its desktop application.
 
-The required apt packages are `ca-certificates`, `python3`, `libx11-6`, `libxtst6`, `libxi6`, `libxrandr2`, `libxfixes3`, `libxcomposite1`, `libxdamage1`, `at-spi2-core`, `dbus-x11`, and `x11-utils`.
+The package list in [scripts/install.py](../scripts/install.py) covers every dependency declared by both pinned upstream packages, plus LCU's X11, session, audio, and sandbox prerequisites. The verification [Dockerfile](../tests/Dockerfile) contains the same runtime list and adds its desktop fixtures. It includes GTK/GLib and accessibility libraries; X11, DRM, GBM, OpenGL, and Mesa Vulkan drivers; NSS/NSPR and OpenSSL; ALSA/PulseAudio and FFmpeg; CUPS; USB/udev; TPM libraries; and the usual C/C++ runtime libraries. Apt resolves their transitive dependencies. The original dependency alternatives select `libglib2.0-bin` and `mesa-vulkan-drivers`.
+
+Ubuntu 24.04 uses these names where the upstream control file uses older names:
+
+| Upstream dependency name | Ubuntu 24.04 package |
+| --- | --- |
+| `libasound2`, `libcups2` | `libasound2t64`, `libcups2t64` |
+| `libatk-bridge2.0-0`, `libatk1.0-0`, `libatspi2.0-0` | `libatk-bridge2.0-0t64`, `libatk1.0-0t64`, `libatspi2.0-0t64` |
+| `libglib2.0-0`, `libgtk-3-0` | `libglib2.0-0t64`, `libgtk-3-0t64` |
+| `libssl3` | `libssl3t64` |
+| `libtss2-esys-3.0.2-0` | `libtss2-esys-3.0.2-0t64` |
+| `libtss2-mu0` or `libtss2-mu-4.0.1-0t64` | `libtss2-mu-4.0.1-0t64` |
+| `libtss2-tcti-device0` | `libtss2-tcti-device0t64` |
+
+The UI/audio mappings come from the bundled Playwright 1.57.0 `lib/server/registry/nativeDeps.js` for `ubuntu24.04-x64`; its ARM64 entry uses the same lists. TPM and OpenSSL mappings are confirmed by Ubuntu's [ESYS](https://packages.ubuntu.com/noble/libtss2-esys-3.0.2-0t64), [MU](https://packages.ubuntu.com/noble/libtss2-mu-4.0.1-0t64), and [device transport](https://packages.ubuntu.com/noble/libtss2-tcti-device0t64) package records. See [provenance](PROVENANCE.md) for pinned source evidence.
+
+These revised package lists have been checked against their sources but have **not yet passed a fresh apt installation or full Owl launch test**. Audio also requires a working Pulse-compatible monitor. Browser-provider requirements remain documented in [BROWSER-HOST-PARITY.md](BROWSER-HOST-PARITY.md).
 
 LCU does not install a desktop or agent. It does not start a login session or sign in to an agent service.
 
@@ -41,6 +57,10 @@ sudo ./scripts/install.sh --user alice --agent all --yes
 Omit `--agent` and `--yes` to choose interactively. `--agent auto` selects detected agents. Automated installs need an explicit agent selection, `--export`, or `--runtime-only`.
 
 Registration uses pinned versions of [skills](https://github.com/vercel-labs/skills) and [add-mcp](https://github.com/neon-solutions/add-mcp), included in the archive. They preserve unrelated configuration values, but can rewrite comments and formatting. Restart or reconnect your agent after setup so it loads the tools and skill.
+
+On the first repeat of Codex setup, the original formatter expands the native
+hook writer's inline arrays into TOML table arrays. Configuration values and
+exact hook trust hashes stay unchanged; subsequent setup keeps the same bytes.
 
 ## Connect to a desktop
 
@@ -78,7 +98,7 @@ The default directory is `/opt/lcu`. To install without root after system librar
 ./scripts/install.sh --prefix "$HOME/.local/share/lcu" --skip-system --agent codex --yes
 ```
 
-The archive includes the runtime and agent-registration dependencies. With `--skip-system`, installation and registration work without network access. The agent's model service can still require a network connection.
+The archive includes the complete original application, its runtime and host executables/plugins, and agent-registration dependencies. With the required system libraries preinstalled, `--skip-system` requires no installation-time downloads. The agent's model service and the original browser authentication/policy services can still require network connections; offline installation does not imply all capabilities work offline.
 
 The installer checks the archive's file inventory, architecture, permissions, and symlinks before installing. A source checkout has no runtime: use a release archive, or [build one](DEVELOPMENT.md).
 
@@ -121,9 +141,9 @@ Install [the complete skill directory](../skills/lcu/), including `references/`,
 /opt/lcu/current/bin/lcu setup --export /absolute/new/lcu-plugin --yes
 ```
 
-The destination must not exist. The export contains `plugin.json`, `mcp.json`, and `skills/lcu/SKILL.md` with its `references/` directory. Import it if your client supports that format, or use the files separately. Choose either `--agent` or `--export`, not both. Custom clients have not all been tested; see [verification](VERIFICATION.md).
+The destination must not exist. The export contains `plugin.json`, `mcp.json`, `codex.mcp.json`, `host-contract.json`, and `skills/lcu/SKILL.md` with its complete `references/` directory. Import it if your client supports that format, or use the files separately. Choose either `--agent` or `--export`, not both. Custom clients have not all been tested; see [verification](VERIFICATION.md).
 
-LCU exposes `js`, `js_reset`, `js_add_node_module_dir`, and `turn_ended`. Agents use `js` for the [desktop API](../instructions/api/tinysky-alt-core-cua-repl.md); the tool returns its instructions on first use.
+The raw original MCP server exposes `js`, `js_reset`, `js_add_node_module_dir`, and `turn_ended`. Codex host configuration filters module-directory injection and keeps `turn_ended` for lifecycle integration; the model sees `js` and `js_reset`. Other agent hosts must honor the exported tool/output contract and supply real turn completion signals. Agents use `js` for the [desktop API](../instructions/api/tinysky-alt-core-cua-repl.md); the tool returns its instructions on first use.
 
 ## VM and container images
 
