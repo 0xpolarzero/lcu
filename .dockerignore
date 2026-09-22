@@ -3,3 +3,4 @@
 .runtime
 __pycache__
 *.deb
+dist

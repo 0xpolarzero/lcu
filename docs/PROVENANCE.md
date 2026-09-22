@@ -22,16 +22,16 @@ Paths below are relative to `usr/lib/chatgpt/resources/cua_node` in the verified
 
 | Component | Source | Treatment |
 | --- | --- | --- |
-| JavaScript runtime | `bin/node` | Copied unchanged at install time |
+| JavaScript runtime | `bin/node` | Bundled unchanged at build time |
 | MCP server and persistent execution | `bin/node_repl` | Copied unchanged; no substitute MCP implementation |
 | Trusted Linux service | `lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js` | Bundled with original Linux dependencies |
 | Linux actions and observations | `.../sky_js/src/targets/linux/` | Original implementation, including settling, compact IDs, screenshots, transport, and optional audio methods |
 | Native desktop engine | `lib/node_modules/@oai/sky/bin/linux/sky_linux_{arch}` | Copied unchanged |
 | Agent-facing API | `lib/node_modules/@oai/cua/dist/lib/js/oai_js_cua/src/tinysky_alt/create_tinysky_alt.js` | Retains Linux branch; removes other platforms and disables browser-provider branch |
 | REPL launcher | `lib/node_modules/@oai/cua-repl/dist/lib/js/oai_js_cua_repl/src/launch.js` | Original launcher bundled with Linux instruction selection |
-| Confirmation policy | `lib/node_modules/@oai/cua/docs/tinysky-alt-confirmations.md` | Copied at install time; original metadata override behavior retained |
+| Confirmation policy | `lib/node_modules/@oai/cua/docs/tinysky-alt-confirmations.md` | Bundled at build time; original metadata override behavior retained |
 
-`project_runtime.py` has guarded transformations tied to the package hash. Unexpected source shapes abort installation. The native action implementation is never rewritten. The build rejects dependencies on other platform engines or the browser provider, and rejects remaining platform dispatch in generated code. Generated build-input manifests and upstream notices remain beside the installed runtime.
+`project_runtime.py` has guarded transformations tied to the package hash. Unexpected source shapes abort the release build. The native action implementation is never rewritten. The build rejects dependencies on other platform engines or the browser provider, and rejects remaining platform dispatch in generated code. Generated build-input manifests and upstream notices remain beside the installed runtime.
 
 Two documentation corrections are intentional: the shipped Linux entrypoint incorrectly accepts an app-name example, and the common API document mixes all platforms and browser providers. Cual documents observed Linux behavior: select an exact window ID, use window-relative coordinates, distinguish AT-SPI from X11 fallback, use pixel scrolling, and avoid unsupported `setValue`/`selectText`.
 
@@ -39,7 +39,7 @@ Cual's short launcher supplies explicit module search and trusted-code paths. Th
 
 ## Distribution boundary
 
-No OpenAI runtime files are checked into this repository. Public download availability is not an open-source license grant. The installer derives a local Linux-only runtime from the user's downloaded official package and retains its notices. The repository's MIT license applies to Cual-owned code and the MIT Luda-derived packaging code only.
+Architecture-specific release archives include the OpenAI runtime, its Linux projection, and all agent-registration dependencies. The build fetches and verifies the official package, projects Linux code, and packages the result with upstream notices. The installer only verifies and copies the bundled files. It has no download fallback and requires no .deb, npm, or build tool on the target machine. Generated archives live in dist/ and are excluded from source commits. The repository's MIT license applies to Cual-owned code and the MIT Luda-derived packaging code; bundled dependencies retain their own terms.
 
 The Luda code supplies registration, validation, account ownership handling, portable export, and provisioning of pinned upstream `skills` 1.7.0 / `add-mcp` 2.4.0. No Luda screenshot, input, accessibility, browser, or MCP engine is used.
 

@@ -1,10 +1,12 @@
 """Validate the public installation interface against an installed release."""
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 source = Path(__file__).resolve().parents[1]
-installer = str(source / 'scripts/install.sh')
+bundle = Path(sys.argv[1])
+installer = str(bundle / 'scripts/install.sh')
 with tempfile.TemporaryDirectory() as directory:
     scratch = Path(directory)
     prefix = scratch / 'uncreated'
@@ -15,11 +17,19 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode != 0, args
         assert not prefix.exists(), args
     active = Path('/opt/cual/current').resolve()
-    bad = scratch / 'bad.deb'
-    bad.write_bytes(b'not the pinned official package')
-    result = subprocess.run([installer, '--prefix', '/opt/cual', '--skip-system', '--user', 'root',
-                             '--runtime-only', '--package', str(bad)], capture_output=True)
-    assert result.returncode != 0 and b'checksum mismatch' in result.stderr
+    payload = bundle / 'runtime/lib/node_modules/@oai/cua/index.js'
+    before = payload.read_bytes()
+    try:
+        payload.write_bytes(before + b'\n// corrupted\n')
+        result = subprocess.run([installer, '--prefix', '/opt/cual', '--skip-system', '--user', 'root',
+                                 '--runtime-only'], capture_output=True)
+        assert result.returncode != 0 and b'integrity check failed' in result.stderr
+    finally:
+        payload.write_bytes(before)
     assert Path('/opt/cual/current').resolve() == active
     assert (active / 'bin/cual').is_file()
-print('PASS: invalid arguments have no installation side effects; corrupt package preserves active release')
+    result = subprocess.run([str(source / 'scripts/install.sh'), '--prefix', str(prefix), '--skip-system',
+                             '--user', 'root', '--runtime-only'], capture_output=True)
+    assert result.returncode != 0 and b'release bundle' in result.stderr
+    assert not prefix.exists()
+print('PASS: invalid arguments and missing payload have no side effects; corrupt bundle preserves active release')

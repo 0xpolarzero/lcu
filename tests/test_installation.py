@@ -12,6 +12,7 @@ from cual.session import discover
 from cual.setup import Change, apply_changes, regular_path
 from install import checked_prefix, install
 from project_runtime import download, remove_arm, replace
+from bundle import seal
 
 
 class InstallationTests(unittest.TestCase):
@@ -35,6 +36,11 @@ class InstallationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             checked_prefix(Path('relative/cual'))
 
+    def test_installation_inside_its_source_bundle_is_rejected(self):
+        with patch('install.SOURCE', self.root):
+            with self.assertRaisesRegex(ValueError, 'outside'):
+                checked_prefix(self.root / 'nested-prefix')
+
     def test_corrupt_download_never_executes(self):
         source = self.root / 'source'
         source.write_bytes(b'corrupt')
@@ -48,8 +54,13 @@ class InstallationTests(unittest.TestCase):
         (old / 'data').write_text('previous version')
         (prefix / '.cual-install').touch()
         (prefix / 'current').symlink_to('releases/old')
-        with patch('install.provision', side_effect=ValueError('bad upstream hash')):
-            with self.assertRaisesRegex(ValueError, 'bad upstream'):
+        source = self.root / 'bundle'
+        source.mkdir()
+        (source / 'payload').write_text('new version')
+        seal(source, 'arm64')
+        with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
+             patch('install.validate_release', side_effect=ValueError('runtime validation failed')):
+            with self.assertRaisesRegex(ValueError, 'runtime validation failed'):
                 install(prefix)
         self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
         self.assertEqual(list((prefix / 'releases').iterdir()), [old])

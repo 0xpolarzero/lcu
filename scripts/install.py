@@ -4,24 +4,24 @@ import argparse
 import fcntl
 import os
 from pathlib import Path
-import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 import uuid
 
 SOURCE = Path(__file__).resolve().parent.parent
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 from cual import setup
-from project_runtime import provision
-from provision_agent_tools import provision as provision_agents
+from bundle import architecture, verify
 
 
 def checked_prefix(path):
     if not path.is_absolute():
         raise ValueError('The installation prefix must be absolute')
     path = setup.regular_path(path)
+    if path.resolve().is_relative_to(SOURCE.resolve()):
+        raise ValueError('Choose an installation prefix outside the extracted release bundle.')
     if not path.is_absolute() or len(path.parts) < 3 or path in (Path('/usr/local'), Path('/opt/cual').parent):
         raise ValueError('Choose a dedicated absolute prefix, such as /opt/cual.')
     if path.exists() and any(path.iterdir()) and not (path / '.cual-install').is_file():
@@ -32,10 +32,19 @@ def checked_prefix(path):
     return path
 
 
-def install(prefix, package=None):
-    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
-    if platform.system() != 'Linux' or arch is None:
-        raise ValueError('Cual requires Linux ARM64 or x86-64.')
+def validate_release(release):
+    subprocess.run([str(release / 'bin/cual'), '--version'], check=True, timeout=20)
+    subprocess.run([str(release / 'runtime/bin/node_repl'), '--help'], check=True, timeout=20, stdout=subprocess.DEVNULL)
+    env = dict(os.environ, NODE_REPL_DISABLE_ANALYTICS='1')
+    subprocess.run([str(release / 'runtime/bin/node'), '--input-type=module', '-e',
+                    'const s = await import(process.argv[1]); const r = await s.handleRpc({type:"setup"}); if(r.target!=="linux") throw Error("Wrong platform");',
+                    (release / 'runtime/lib/node_modules/@oai/sky/index.js').as_uri()], env=env, check=True, timeout=20)
+
+
+def install(prefix):
+    prefix = checked_prefix(prefix)
+    arch = architecture()
+    verify(SOURCE, arch)
     prefix.mkdir(parents=True, exist_ok=True)
     with (prefix / '.cual-install').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -44,20 +53,9 @@ def install(prefix, package=None):
         release = releases / ('0.1.0-' + uuid.uuid4().hex[:12])
         release.mkdir(mode=0o755)
         try:
-            # Use disk beside the release; /tmp may be a small tmpfs in a VM.
-            with tempfile.TemporaryDirectory(prefix='.build-', dir=prefix) as temporary:
-                for name in ('bin', 'cual', 'skills', 'scripts'):
-                    shutil.copytree(SOURCE / name, release / name, ignore=shutil.ignore_patterns('__pycache__', 'node_modules'))
-                provision(release, SOURCE, Path(temporary), arch, package)
-                provision_agents(release, SOURCE / 'scripts/agent-tools')
-                for binary in (release / 'bin').iterdir():
-                    binary.chmod(0o755)
-                subprocess.run([str(release / 'bin/cual'), '--version'], check=True, timeout=20)
-                subprocess.run([str(release / 'runtime/bin/node_repl'), '--help'], check=True, timeout=20, stdout=subprocess.DEVNULL)
-                env = dict(os.environ, NODE_REPL_DISABLE_ANALYTICS='1')
-                subprocess.run([str(release / 'runtime/bin/node'), '--input-type=module', '-e',
-                                'const s = await import(process.argv[1]); const r = await s.handleRpc({type:"setup"}); if(r.target!=="linux") throw Error("Wrong platform");',
-                                (release / 'runtime/lib/node_modules/@oai/sky/index.js').as_uri()], env=env, check=True, timeout=20)
+            shutil.copytree(SOURCE, release, dirs_exist_ok=True, symlinks=True)
+            verify(release, arch)
+            validate_release(release)
             current = prefix / 'current'
             if current.exists() and not current.is_symlink():
                 raise ValueError('Refusing to replace a non-symlink current path')
@@ -81,15 +79,13 @@ def main(argv=None):
     parser.description = __doc__ + ' Requires Linux, Python 3.12+, X11 and D-Bus; apt system provisioning requires root.'
     parser.add_argument('--runtime-only', action='store_true', help='Install without registering an agent')
     parser.add_argument('--skip-system', action='store_true', help='Skip apt; system libraries must already exist')
-    parser.add_argument('--package', type=Path, help='Offline official .deb matching runtime.lock.json')
     args = parser.parse_args(argv)
     if args.list_agents:
         setup.main(['--list-agents'])
         return
     if sys.version_info < (3, 12):
         raise ValueError('Python 3.12 or later is required')
-    if platform.system() != 'Linux':
-        raise ValueError('Install Cual inside the Linux desktop machine')
+    arch = architecture()
     if legacy and not args.agent and not args.export:
         args.runtime_only = True
     account, names = setup.validate(args)
@@ -101,16 +97,16 @@ def main(argv=None):
         raise ValueError('Select --agent NAME, --agent all, --agent auto, --export PATH, or --runtime-only')
     if not args.runtime_only:
         setup.installer_environment(Path(account.pw_dir), names, {} if os.getuid() == 0 and account.pw_uid else os.environ)
-    if args.package and not args.package.is_file():
-        raise ValueError('--package must name an existing official .deb')
+    # Refuse absent, corrupt, or wrong-architecture payloads before apt or any writes.
+    verify(SOURCE, arch)
     if not args.skip_system:
         if os.getuid() != 0 or not shutil.which('apt-get'):
             raise ValueError('Automatic system provisioning requires root and apt-get; otherwise provision dependencies and use --skip-system')
         subprocess.run(['apt-get', 'update'], check=True)
-        subprocess.run(['apt-get', 'install', '-y', 'ca-certificates', 'python3', 'dpkg', 'libx11-6', 'libxtst6',
+        subprocess.run(['apt-get', 'install', '-y', 'ca-certificates', 'python3', 'libx11-6', 'libxtst6',
                         'libxi6', 'libxrandr2', 'libxfixes3', 'libxcomposite1', 'libxdamage1', 'at-spi2-core',
                         'dbus-x11', 'x11-utils'], check=True)
-    install(prefix, args.package)
+    install(prefix)
     print(f'Cual installed: {prefix}/current/bin/cual')
     if not args.runtime_only:
         forwarded = ['--prefix', str(prefix), '--user', account.pw_name, '--scope', args.scope, '--session', args.session]

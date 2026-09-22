@@ -4,17 +4,22 @@ Computer use agent Linux: the shipped Codex Linux computer-use runtime, packaged
 
 Cual uses OpenAI's original Linux Sky executable, Node REPL, trusted-service protocol, and Linux `cua` implementation. It adds installation, desktop-session selection, agent registration, and Linux-only instructions. It contains no replacement desktop automation engine.
 
-The installer downloads an exact official OpenAI package, verifies its checksum, extracts the runtime without installing the desktop app, and removes the other platform and browser-provider implementations. The repository contains packaging code and instructions; OpenAI's runtime is an external dependency, not vendored or relicensed here. See [provenance and boundaries](docs/PROVENANCE.md).
+Release archives bundle the Linux engine, Node, the original REPL, projected JavaScript, agent-registration dependencies, instructions, and upstream notices. Installation verifies and copies those local files. It never downloads the runtime, invokes npm, or rebuilds computer use. Maintainers fetch pinned inputs when building a release. See [provenance and boundaries](docs/PROVENANCE.md).
 
 ## Install
 
-Run from this checkout **inside the Linux machine whose desktop will be controlled**:
+Extract the archive for your architecture **inside the Linux machine whose desktop will be controlled**:
 
 ```sh
+sha256sum -c cual-0.1.0-linux-arm64.tar.gz.sha256
+tar -xzf cual-0.1.0-linux-arm64.tar.gz
+cd cual-0.1.0-linux-arm64
 sudo ./scripts/install.sh --user alice --agent codex --yes
 ```
 
-Requirements: Linux ARM64 or x86-64, Python 3.12+, a glibc system, X11, and a D-Bus desktop session. Ubuntu 24.04 is tested. Automatic system provisioning uses apt. Other distributions need equivalent libraries plus `dpkg-deb`, then `--skip-system`; they are not yet verified. Native Wayland and musl are not supported by this release.
+Requirements: Linux ARM64 or x86-64, Python 3.12+, a glibc system, X11, and a D-Bus desktop session. Ubuntu 24.04 is tested. Automatic system provisioning uses apt. Other distributions need equivalent libraries, then `--skip-system`; they are not yet verified. Native Wayland and musl are not supported by this release.
+
+For x86-64, use the `linux-x64` archive. With system dependencies already present, `--skip-system` makes installation and agent registration fully offline. Without that flag, apt can install missing operating-system libraries.
 
 Cual does not install a desktop, start a login session, install an agent, or authenticate one. Installation and registration work during image builds without a running GUI.
 
@@ -85,9 +90,23 @@ Observe the returned accessibility state, perform the intended actions, and obse
 
 `doctor` checks the inherited desktop connection and asks the original engine for its window inventory. An empty inventory means the connection worked but no windows were found; it does not prove accessibility or input works in every app.
 
-Rerun the installer to install a new version. It builds a separate release and atomically changes `current` only after validation. Failed downloads and builds leave the previous release selected. Old releases remain available. To roll back, select the intended directory under `releases` and atomically replace the `current` symlink; restart connected MCP clients afterward. No automatic runtime updates happen during agent use.
+Extract the next release bundle and rerun its installer to upgrade. It copies a separate release and atomically changes `current` only after validation. Corrupt bundles and failed validation leave the previous release selected. Old releases remain available. To roll back, select the intended directory under `releases` and atomically replace the `current` symlink; restart connected MCP clients afterward. No automatic runtime updates happen during agent use.
 
-`--package /absolute/chatgpt_arm64.deb` or its x86-64 counterpart uses a locally cached official package with the same mandatory checksum. Installer dependencies still require network access. [runtime.lock.json](runtime.lock.json) pins the OpenAI version and esbuild downloads; agent installers have a separate npm lockfile. Unknown package hashes and unexpected source shapes fail closed.
+The installer checks the bundle architecture, SHA-256 file inventory, executable permissions, and symlink targets before modifying the installation. Missing payloads fail with a release-bundle error; source checkouts never fall back to a download.
+
+## Build a release
+
+Building requires Linux, Python 3.12+, `dpkg-deb`, CA certificates, and network access. Run on the target architecture, or in a matching Linux container:
+
+```sh
+python3 scripts/build_bundle.py --output dist
+# Reuse an already downloaded, checksum-verified official package:
+python3 scripts/build_bundle.py --output dist --package /absolute/chatgpt_arm64.deb
+```
+
+The build creates `cual-0.1.0-linux-arm64.tar.gz` or `cual-0.1.0-linux-x64.tar.gz`, plus a `.sha256` sidecar. It bundles the original runtime and all npm dependencies required for registration. Build/download utilities are excluded from the release archive. No OpenAI desktop-app package is needed on the target machine.
+
+[runtime.lock.json](runtime.lock.json) pins the OpenAI version and esbuild downloads; agent installers have a separate npm lockfile. Unknown package hashes and unexpected source shapes fail closed. Generated archives belong in `dist/`; they contain the runtime but are not committed as source code.
 
 ## Runtime boundaries
 
@@ -99,7 +118,7 @@ The official Linux app preview does not yet advertise Computer Use as an enabled
 
 ## Verify
 
-The tests use disposable Docker containers and independent GTK/Xlib applications. No personal desktop or agent account is accessed.
+The tests build a release, then install it and exercise independent GTK/Xlib applications in a separate Docker container with `--network none`. No personal desktop or agent account is accessed.
 
 ```sh
 ./tests/run.sh linux/arm64
@@ -112,4 +131,4 @@ See [verification results](docs/VERIFICATION.md) for exactly what passed and wha
 
 ## License
 
-Cual's original packaging code and Luda-derived installation code are MIT licensed. OpenAI's downloaded runtime and its dependencies retain their own terms and notices. This repository grants no rights to redistribute or relicense those files. It is an independent project, not an OpenAI release.
+Cual's original packaging code and Luda-derived installation code are MIT licensed. The bundled OpenAI runtime and third-party dependencies retain their own terms and notices; Cual's MIT license does not relicense them. It is an independent project, not an OpenAI release.

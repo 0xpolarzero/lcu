@@ -1,5 +1,19 @@
 # Verification: 2026-09-22
 
+## Bundled installation
+
+ARM64 and x86-64 release archives passed installation, all seven agent registrations in both scopes, portable export, and the full desktop suite in fresh Docker containers launched with `--network none`. The test asserts that the only network interface is loopback before installation. System libraries were present in the test image; the installer used `--skip-system`.
+
+Both archives include Node, the original REPL and Sky engine, the Linux JavaScript projection, instructions, upstream notices, and registration dependencies. No .deb or build/download utility is required on the target machine. Archives are about 53 MiB each.
+
+The current 22 unit tests include bundle relocation, corruption, injected or missing files, wrong architecture, malformed manifests, escaping symlinks, executable-mode changes, and rejecting installation inside the source bundle. The installer also rejects missing payloads without downloading and preserves the active release after corrupted-bundle or runtime-validation failures.
+
+Build commands: `python3 scripts/build_bundle.py --output /out --package /package.deb` inside matching Linux containers. Offline verification: `bash /src/tests/offline.sh /bundles/cual-0.1.0-linux-{arm64,x64}.tar.gz`, each with `--network none`.
+
+## Original runtime validation
+
+The following results record the initial engine and desktop validation.
+
 The installed standalone MCP command operated independent Linux GUI fixtures successfully on ARM64 and x86-64. Tests used Ubuntu 24.04 containers, Xvfb, Openbox, a session D-Bus, GTK 3/AT-SPI, and an Xlib window without accessibility. ARM64 ran natively on an Apple Silicon Docker host; x86-64 ran under the host's emulation. No personal desktop, agent credentials, or app login was used.
 
 ## Results
@@ -37,7 +51,7 @@ Regression tests cover conflicting session discovery, rejecting another user's s
 
 ## Size and fingerprints
 
-Measured with `du -sh` after installation. ARM64: 148 MiB runtime plus 8.2 MiB agent setup dependencies. x86-64: 153 MiB runtime plus 8.2 MiB agent setup dependencies. Desktop libraries and temporary build/download space are additional. Installation downloads the complete official package (about 396 MB ARM64 or 417 MB x86-64) and needs roughly 2 GB of temporary disk space.
+Measured with `du -sh` after installation. ARM64: 148 MiB runtime plus 8.2 MiB agent setup dependencies. x86-64: 153 MiB runtime plus 8.2 MiB agent setup dependencies. Desktop libraries and temporary build/download space are additional. Release builds download the complete official package (about 396 MB ARM64 or 417 MB x86-64) and need roughly 2 GB of temporary disk space. Installation uses the smaller bundled payload without downloads.
 
 | Installed binary | ARM64 SHA-256 | x86-64 SHA-256 |
 | --- | --- | --- |
