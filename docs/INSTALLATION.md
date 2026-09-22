@@ -115,13 +115,13 @@ Agents that support stdio MCP and images can connect manually. For XFCE, run thi
 
 For direct mode, set `command` to `/opt/lcu/current/bin/lcu` and `args` to `[]`. Supply the desktop environment described above.
 
-Install [the skill](../skills/lcu/SKILL.md) in the location your agent uses for skills. You can also export the configuration and skill together:
+Install [the complete skill directory](../skills/lcu/), including `references/`, in the location your agent uses for skills. You can also export the configuration and skill together:
 
 ```sh
 /opt/lcu/current/bin/lcu setup --export /absolute/new/lcu-plugin --yes
 ```
 
-The destination must not exist. The export contains `plugin.json`, `mcp.json`, and `skills/lcu/SKILL.md`. Import it if your client supports that format, or use the files separately. Choose either `--agent` or `--export`, not both. Custom clients have not all been tested; see [verification](VERIFICATION.md).
+The destination must not exist. The export contains `plugin.json`, `mcp.json`, and `skills/lcu/SKILL.md` with its `references/` directory. Import it if your client supports that format, or use the files separately. Choose either `--agent` or `--export`, not both. Custom clients have not all been tested; see [verification](VERIFICATION.md).
 
 LCU exposes `js`, `js_reset`, `js_add_node_module_dir`, and `turn_ended`. Agents use `js` for the [desktop API](../instructions/api/tinysky-alt-core-cua-repl.md); the tool returns its instructions on first use.
 

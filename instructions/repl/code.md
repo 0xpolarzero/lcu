@@ -1,1 +1,1 @@
-JavaScript to execute in the persistent LCU session.
+JavaScript to execute using the initialized cua_repl runtime.

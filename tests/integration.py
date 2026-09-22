@@ -8,16 +8,30 @@ import time
 from mcp_client import Client, text
 
 command = sys.argv[1:] or ['/opt/lcu/current/bin/lcu']
+source = Path(__file__).resolve().parents[1]
+instructions = source / 'instructions'
+core = (instructions / 'api/tinysky-alt-core-cua-repl.md').read_text()
+policy = (instructions / 'api/tinysky-alt-confirmations.md').read_text()
 client = Client(command)
 try:
     tools = client.call('tools/list', {})['tools']
     names = {item['name'] for item in tools}
     assert {'js', 'js_reset', 'js_add_node_module_dir', 'turn_ended'} <= names
-    description = next(item['description'] for item in tools if item['name'] == 'js')
+    js_tool = next(item for item in tools if item['name'] == 'js')
+    description = js_tool['description']
     assert 'windowId' in description and 'getApp("Example App")' not in description
+    expected_description = '\n\n'.join((instructions / 'repl' / name).read_text().rstrip()
+        for name in ('linux/description.md', 'browser-disabled.md', 'linux/computer.md', 'linux/output.md'))
+    assert description == expected_description, 'First-call instructions were changed or truncated'
+    assert client.initialization['instructions'] == (instructions / 'repl/server.md').read_text().rstrip()
+    assert js_tool['inputSchema']['properties']['code']['description'] == (instructions / 'repl/code.md').read_text().rstrip()
+    reset_tool = next(item for item in tools if item['name'] == 'js_reset')
+    assert reset_tool['description'] == (instructions / 'repl/reset.md').read_text().rstrip()
     initial = client.js('await cua.getState();')
-    assert 'Linux computer use' in text(initial)
+    assert core in text(initial), 'First-use API instructions were changed or truncated'
+    assert policy in text(initial), 'Default confirmation policy was changed or truncated'
     assert 'macOS' not in text(initial) and 'On Windows' not in text(initial)
+    assert (source / 'skills/lcu/references/api.md').read_text() == core
     for attempt in range(30):
         response = client.js('nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));')
         windows = json.loads(text(response))
@@ -26,6 +40,12 @@ try:
             break
         time.sleep(0.1)
     assert len(targets) == 3, windows
+    # Exercise the same Linux client exposed by the upstream full-desktop skill.
+    # This binding is the only change to that reference's executable examples.
+    low_level = client.js(f'var sky = cua.computer; var window = (await sky.list_windows()).find(w => w.id === {targets["LCU Target"]["id"]}); var rawState = await sky.get_window_state({{window, include_screenshot:false}}); nodeRepl.write(rawState.ax_tree.to_string());')
+    assert 'Draft text' in text(low_level)
+    full_image = client.js('await nodeRepl.emitImage((await sky.get_screenshot())[0].data_url);')
+    assert any(item['type'] == 'image' for item in full_image['content'])
     state = text(client.js(f'let app = await cua.getApp({{windowId:{targets["LCU Target"]["id"]}}});'))
     assert 'at_spi' in state, state
     print('Initial accessibility:', state, flush=True)
@@ -74,9 +94,11 @@ try:
     client.js('let persisted = 41;')
     assert text(client.js('nodeRepl.write(persisted + 1);')) == '42'
     client.call('tools/call', {'name': 'js_reset', 'arguments': {}})
-    client.js('await cua.listWindows();')
+    reset = client.js('await cua.listWindows({emit:false});')
+    assert core in text(reset) and policy in text(reset), 'Reset lost full documentation'
     assert text(client.js('nodeRepl.write(typeof persisted);')) == 'undefined'
-    assert 'Linux computer use' in text(client.js('await cua.rewriteDocumentation();'))
+    replay = client.js('await cua.rewriteDocumentation();')
+    assert core in text(replay) and policy in text(replay), 'Compaction replay lost full documentation'
     # Timeout and recovery use the original REPL behavior.
     client.js('await new Promise(() => {});', error=True, timeout_ms=100)
     client.js('await cua.listWindows();')

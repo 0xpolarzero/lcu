@@ -31,7 +31,7 @@ def main(root, argv):
         print('Usage: lcu [setup OPTIONS | doctor | --version]\nWith no arguments, starts the stdio MCP server.\nRun lcu setup --help for agent registration options.')
         return
     if argv[:1] == ['--version']:
-        print('lcu 0.2.0 (Codex Linux runtime 0.0.16)')
+        print('lcu 0.2.1 (Codex Linux runtime 0.0.16)')
         return
     if argv[:1] == ['setup']:
         from .setup import main as setup

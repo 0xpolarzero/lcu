@@ -10,7 +10,7 @@ It runs on your Linux machine or VM. Running LCU does not require the Codex app 
 
 Your agent calls the `js` MCP tool with JavaScript. Variables persist between calls.
 
-First, list the open windows. This call also returns the API instructions:
+First, list the open windows. This read-only call also returns the API instructions. The same [full guide](skills/lcu/references/api.md) is available before any tool call:
 
 ```javascript
 await cua.listWindows();
@@ -44,17 +44,17 @@ Then choose a position from the screenshot and call `app.click([x, y])`. The API
 
 Install **on the Linux machine whose desktop the agent will control**. You need Python 3.12+ and an existing X11 desktop. Ubuntu 24.04 is tested. Native Wayland is not supported.
 
-Download the archive and checksum for your machine from [v0.2.0](https://github.com/0xpolarzero/lcu/releases/tag/v0.2.0):
+Download the archive and checksum for your machine from [v0.2.1](https://github.com/0xpolarzero/lcu/releases/tag/v0.2.1):
 
 | Machine | Archive | Checksum |
 | --- | --- | --- |
-| x86-64 | [linux-x64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.0/lcu-0.2.0-linux-x64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.0/lcu-0.2.0-linux-x64.tar.gz.sha256) |
-| ARM64 | [linux-arm64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.0/lcu-0.2.0-linux-arm64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.0/lcu-0.2.0-linux-arm64.tar.gz.sha256) |
+| x86-64 | [linux-x64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz.sha256) |
+| ARM64 | [linux-arm64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz.sha256) |
 
 In the download directory, run the following. Change `x64` to `arm64` for ARM64:
 
 ```sh
-archive=lcu-0.2.0-linux-x64.tar.gz
+archive=lcu-0.2.1-linux-x64.tar.gz
 sha256sum -c "$archive.sha256" &&
   tar -xzf "$archive" &&
   cd "${archive%.tar.gz}" &&
@@ -79,6 +79,7 @@ Other agents can use the [MCP configuration and skill export](docs/INSTALLATION.
 - [API reference](instructions/api/tinysky-alt-core-cua-repl.md): methods, parameters, and examples.
 - [Development](docs/DEVELOPMENT.md): build and test a release.
 - [Test results](docs/VERIFICATION.md): what has been checked and known limits.
+- [Instruction fidelity](docs/INSTRUCTIONS.md): pinned upstream text, every Linux-specific edit, and delivery checks.
 - [Runtime sources](docs/PROVENANCE.md): where the bundled code comes from.
 
 LCU controls an existing desktop and runs with your Linux account's permissions. Use your VM or container to isolate it. Application support depends on accessibility; screenshots and coordinates are available when controls cannot be read.

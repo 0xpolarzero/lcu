@@ -1,3 +1,11 @@
-Control Linux X11 applications through the initialized cua API. Prefer a task-specific connector or API when available.
+Control native apps or browsers on the user’s computer by reading or operating UI. Prefer purpose-built skills, connectors, APIs, or CLIs when available.
 
-On the first call, or after js_reset, execute exactly one entrypoint: `await cua.getState()`, `await cua.listWindows()`, or `let app = await cua.getApp({ windowId: 123 })` when that exact ID is already known. Read the returned documentation and state before continuing. Use only the documented API.
+On your first call, or after a reset, execute exactly one of the API calls shown below, optionally assigning its result to a variable. Do not add other API calls, waits, or snapshots to that invocation.
+The tool result will include documentation and, when selecting an app, its initial UI state. Read that result before continuing.
+Use only APIs described in the tool instructions or returned documentation.
+
+When you need an inventory of available apps and windows, get a snapshot of all enabled surfaces. Otherwise, use the relevant entry point below:
+
+```javascript
+await cua.getState();
+```

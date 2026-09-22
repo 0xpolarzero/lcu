@@ -1,1 +1,1 @@
-Linux UI automation using the initialized cua API.
+UI automation through cua_repl using the initialized cua API.

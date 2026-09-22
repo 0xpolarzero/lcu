@@ -1,0 +1,372 @@
+{
+  "format": 1,
+  "package_version": "26.915.31945",
+  "files": [
+    {
+      "source": "@oai/cua/docs/tinysky-alt-core-cua-repl.md",
+      "sha256": "416ed1677ab06745ec6e6d8aa781a9e29e6f339c569f3202c49d267c029e6426",
+      "targets": [
+        "instructions/api/tinysky-alt-core-cua-repl.md",
+        "skills/lcu/references/api.md"
+      ],
+      "edits": [
+        {
+          "start": 5,
+          "end": 5,
+          "replacement": "- Use `js` (JavaScript) for all UI actions.\n",
+          "reason": "The standalone MCP exposes js; cua_repl is the upstream host namespace."
+        },
+        {
+          "start": 6,
+          "end": 6,
+          "replacement": "- Do not use other technologies besides `js` for computer interactions, unless specifically requested by the user.\n",
+          "reason": "Retain the tool restriction and user exception; remove examples specific to macOS."
+        },
+        {
+          "start": 8,
+          "end": 8,
+          "replacement": "- `js` state is persistent across calls\n",
+          "reason": "Use the standalone tool name."
+        },
+        {
+          "start": 9,
+          "end": 9,
+          "replacement": "- If you get an app, the initial UI state is automatically included in the tool result.\n",
+          "reason": "The dedicated browser provider is disabled."
+        },
+        {
+          "start": 18,
+          "end": 18,
+          "replacement": "type PasteOptions = { format?: \"text\" };\n",
+          "reason": "The Linux implementation rejects non-text paste formats."
+        },
+        {
+          "start": 20,
+          "end": 24,
+          "replacement": "",
+          "reason": "SelectTextOptions applies to selectText, which always throws on Linux."
+        },
+        {
+          "start": 26,
+          "end": 26,
+          "replacement": "",
+          "reason": "SelectionType applies to selectText, which always throws on Linux."
+        },
+        {
+          "start": 35,
+          "end": 35,
+          "replacement": "  scroll(target: number | Vec2, direction: Direction, distance?: { pixels: number }): Promise<void>;\n",
+          "reason": "Linux rejects page counts and accepts a positive pixel distance or its native default."
+        },
+        {
+          "start": 36,
+          "end": 37,
+          "replacement": "",
+          "reason": "selectText and setValue always throw on Linux; retain their explicit warning in Notes."
+        },
+        {
+          "start": 55,
+          "end": 55,
+          "replacement": "    distance?: { pixels: number },\n",
+          "reason": "Linux rejects page counts."
+        },
+        {
+          "start": 62,
+          "end": 99,
+          "replacement": "",
+          "reason": "Dedicated browser and tab provider types are outside this computer-only runtime."
+        },
+        {
+          "start": 102,
+          "end": 102,
+          "replacement": "  browsers: [];\n",
+          "reason": "The browser inventory is empty when the dedicated provider is disabled."
+        },
+        {
+          "start": 103,
+          "end": 103,
+          "replacement": "  errors?: string[]; // Inventory failures.\n",
+          "reason": "Only the native app inventory is enabled."
+        },
+        {
+          "start": 106,
+          "end": 123,
+          "replacement": "",
+          "reason": "Dedicated browser options and Tab methods are outside this computer-only runtime."
+        },
+        {
+          "start": 127,
+          "end": 127,
+          "replacement": "    target: \"linux\";\n",
+          "reason": "Only the Linux platform is retained."
+        },
+        {
+          "start": 128,
+          "end": 128,
+          "replacement": "    launch_app(input: { app: string }): Promise<void>;\n",
+          "reason": "launch_app is present in the pinned Linux client."
+        },
+        {
+          "start": 131,
+          "end": 131,
+          "replacement": "  getApp(target: { windowId: number }): Promise<App>;\n",
+          "reason": "Linux getApp requires an observed window ID; strings throw."
+        },
+        {
+          "start": 133,
+          "end": 133,
+          "replacement": "  listWindows(options?: ObservationOptions): Promise<WindowInfo[]>;\n",
+          "reason": "listWindows is present on Linux."
+        },
+        {
+          "start": 134,
+          "end": 134,
+          "replacement": "  rewriteDocumentation(): Promise<void>;\n\n",
+          "reason": "Document the existing runtime method prescribed by the upstream first-use tool description."
+        },
+        {
+          "start": 135,
+          "end": 149,
+          "replacement": "",
+          "reason": "Dedicated browser-provider methods are disabled."
+        },
+        {
+          "start": 155,
+          "end": 155,
+          "replacement": "On Linux, use `cua.getApp({ windowId: 123 })` with an exact open window ID from the app inventory. If an app has multiple windows, use their titles to choose the requested one. Do not choose the first window without checking it.\n",
+          "reason": "Remove macOS target selection and Windows applicability; retain exact-window selection and multi-window guidance."
+        },
+        {
+          "start": 157,
+          "end": 157,
+          "replacement": "`cua.listWindows()` is available on Linux and includes open windows that have no app entry. If the requested app has no open window, launch its inventory ID with `await cua.computer.launch_app({ app: appId })`, then refresh the inventory and select a window. `getApp` does not launch apps on Linux.\n",
+          "reason": "Retain Linux inventory and launch behavior; remove Windows applicability."
+        },
+        {
+          "start": 159,
+          "end": 159,
+          "replacement": "Linux input stays bound to the selected window. Sky sends it without activating that window or moving the desktop pointer. The app can still activate a new window or grab the pointer during a held click, drag, or menu interaction. Coordinates are relative to the selected window.\n",
+          "reason": "Remove the Windows-only activation and screenshot-coordinate mapping behavior."
+        },
+        {
+          "start": 164,
+          "end": 164,
+          "replacement": "After a screenshot-only observation, request a full tree before relying on accessibility indexes again.\n",
+          "reason": "Linux always returns full trees; retain the requirement to refresh indices after a screenshot-only observation."
+        },
+        {
+          "start": 165,
+          "end": 165,
+          "replacement": "Linux always returns full accessibility state. Linux reports the tree source. `at_spi` elements support the actions listed in the tree; `x11` fallback elements are observation-only, so use a screenshot and window-relative coordinates for input.\n",
+          "reason": "Retain all Linux accessibility-source guidance."
+        },
+        {
+          "start": 169,
+          "end": 169,
+          "replacement": "- Calling `cua.getApp(...)` returns an app binding and automatically displays the latest AX state after it runs.\n",
+          "reason": "Remove dedicated tab-provider calls; retain automatic app observation."
+        },
+        {
+          "start": 177,
+          "end": 182,
+          "replacement": "await target.typeText(\"hello\");\nawait target.pressKey(\"Return\");\nawait target.scroll(42, \"down\", { pixels: 500 });\nawait target.scroll([640, 480], \"down\", { pixels: 500 });\n",
+          "reason": "Use native app text/key signatures and pixel scrolling; omit methods that always throw on Linux."
+        },
+        {
+          "start": 191,
+          "end": 191,
+          "replacement": "- The following APIs output their result internally, calling `nodeRepl.write(...)` and/or `nodeRepl.emitImage(...)` will duplicate the output: `getAXState()`, `getScreenshot()`, `getAXStateAndScreenshot()`, `cua.getState()`, `cua.getApp(...)`, and `cua.listApps()`. Pass `{ emit: false }` to observation and discovery methods to disable their result output. First-use documentation is still displayed.\n",
+          "reason": "Remove disabled browser-provider output rules; preserve automatic output and first-use documentation behavior."
+        },
+        {
+          "start": 192,
+          "end": 192,
+          "replacement": "- `cua.listWindows()` also displays its result unless `emit: false`.\n",
+          "reason": "Remove Windows-only screenshot emission and error behavior."
+        },
+        {
+          "start": 196,
+          "end": 196,
+          "replacement": "",
+          "reason": "This element-first input convention applies only to dedicated browser tabs."
+        },
+        {
+          "start": 198,
+          "end": 198,
+          "replacement": "- Linux app `paste` supports only `text` and uses the platform's native text input. Prefer `paste` for multiline text.\n",
+          "reason": "Remove macOS/browser clipboard behavior and formatted paste unsupported on Linux; retain native text input and multiline advice."
+        },
+        {
+          "start": 199,
+          "end": 199,
+          "replacement": "- On Linux, omit the distance for the native default or pass `{ pixels: 500 }`. Linux element clicks support one left or right click. Use coordinates for other click options.\n",
+          "reason": "Remove macOS page counts and Windows coordinate-only scrolling; retain every Linux rule."
+        },
+        {
+          "start": 200,
+          "end": 200,
+          "replacement": "- `selectText` is unavailable on Linux. `setValue` is unavailable on Linux. These methods throw before sending input. Use the supported bound actions to edit the UI and verify the result.\n",
+          "reason": "Both unsupported-method warnings remain for Linux."
+        },
+        {
+          "start": 203,
+          "end": 203,
+          "replacement": "",
+          "reason": "selectText always throws on Linux; its operational instructions apply to other platforms."
+        },
+        {
+          "start": 205,
+          "end": 205,
+          "replacement": "",
+          "reason": "This app-name resolution and implicit launch behavior is macOS-only."
+        }
+      ],
+      "output_sha256": "7113a70aa5e24307759265f7c8208f92d0bb4c5b72ec313ac802453a2e987b49"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/banner.js",
+      "sha256": "db4a56c4a1cb6f9ec2ca663694fbe8941846aaa83d0bf12d3a5699f92126105a",
+      "targets": [
+        "instructions/repl/banner.js"
+      ],
+      "edits": [],
+      "output_sha256": "db4a56c4a1cb6f9ec2ca663694fbe8941846aaa83d0bf12d3a5699f92126105a"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/browser-disabled.md",
+      "sha256": "6d1be6d881b8b340dabb04d277bfc5c0690fb855031f023bc882284904dd6d9a",
+      "targets": [
+        "instructions/repl/browser-disabled.md"
+      ],
+      "edits": [],
+      "output_sha256": "6d1be6d881b8b340dabb04d277bfc5c0690fb855031f023bc882284904dd6d9a"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/computer-disabled.md",
+      "sha256": "c34c37e1549a55281eaecf6e29b4878313cfecf5983559a98a6fca1f6d1cf53c",
+      "targets": [
+        "instructions/repl/computer-disabled.md"
+      ],
+      "edits": [],
+      "output_sha256": "c34c37e1549a55281eaecf6e29b4878313cfecf5983559a98a6fca1f6d1cf53c"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/server.md",
+      "sha256": "6001fb94250c49c234d96cbe08913ad9340e71e48b1709d8c0d598b46a25ea9e",
+      "targets": [
+        "instructions/repl/server.md"
+      ],
+      "edits": [],
+      "output_sha256": "6001fb94250c49c234d96cbe08913ad9340e71e48b1709d8c0d598b46a25ea9e"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/code.md",
+      "sha256": "c0cc551f6c6116c5276baecc68c1139d25c205570281e02b6ad483526e4bede9",
+      "targets": [
+        "instructions/repl/code.md"
+      ],
+      "edits": [],
+      "output_sha256": "c0cc551f6c6116c5276baecc68c1139d25c205570281e02b6ad483526e4bede9"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/linux/output.md",
+      "sha256": "e239db8a09d3fb3b2a626e19a64be96da0130374675acf709649bef99430d486",
+      "targets": [
+        "instructions/repl/linux/output.md"
+      ],
+      "edits": [],
+      "output_sha256": "e239db8a09d3fb3b2a626e19a64be96da0130374675acf709649bef99430d486"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/reset.md",
+      "sha256": "8293a9ec45999391940bdfce1637fb5c4d708f89b5d726b4d03800df9cb795af",
+      "targets": [
+        "instructions/repl/reset.md"
+      ],
+      "edits": [
+        {
+          "start": 1,
+          "end": 1,
+          "replacement": "Reset the persistent cua_repl JavaScript session. All JavaScript bindings are discarded. The next js call initializes a fresh runtime for the enabled surfaces. This does not close browser tabs or native apps, or erase their state.\n",
+          "reason": "Use the standalone MCP tool name; retain reset semantics verbatim."
+        }
+      ],
+      "output_sha256": "87a9b4942080fc0113cea158bef3bfc069308c4ff7cd3e306216fff77f41e170"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/linux/description.md",
+      "sha256": "43cc1857cdae559e3ecf2ab4062c3a6f391a8ede8222b036a3eb8d3a4b2d1f18",
+      "targets": [
+        "instructions/repl/linux/description.md"
+      ],
+      "edits": [
+        {
+          "start": 4,
+          "end": 4,
+          "replacement": "The tool result will include documentation and, when selecting an app, its initial UI state. Read that result before continuing.\n",
+          "reason": "Remove dedicated browser/tab selection; retain the requirement to read the first result before further calls."
+        },
+        {
+          "start": 7,
+          "end": 7,
+          "replacement": "When you need an inventory of available apps and windows, get a snapshot of all enabled surfaces. Otherwise, use the relevant entry point below:\n",
+          "reason": "Only the native computer surface is enabled."
+        }
+      ],
+      "output_sha256": "38d6141a760677550b04d7398d1ca20c6091f5fed7ae43853cfa1c89ca71200b"
+    },
+    {
+      "source": "@oai/cua-repl/instructions/linux/computer.md",
+      "sha256": "e8318bd16b9792b517d300802583961317d7e0cb3a3a4ed776a681ed20f16f7d",
+      "targets": [
+        "instructions/repl/linux/computer.md"
+      ],
+      "edits": [
+        {
+          "start": 1,
+          "end": 1,
+          "replacement": "If the user specifies an app to use, get the app by its exact open window ID from `cua.getState()` or `cua.listWindows()`. If an app has multiple windows, use their titles to choose the requested one. Do not choose the first window without checking it.\n",
+          "reason": "Fix the shipped Linux entrypoint that incorrectly accepts names/paths; the Linux branch requires { windowId }."
+        },
+        {
+          "start": 4,
+          "end": 4,
+          "replacement": "let app = await cua.getApp({ windowId: 123 });\n",
+          "reason": "Use an observed window ID as required by the Linux implementation."
+        }
+      ],
+      "output_sha256": "79fd1fb7af171d1bc1d4d099db803d1ff9382d1f3e9dae8ab9c1b2317440115f"
+    },
+    {
+      "source": "@oai/cua/docs/tinysky-alt-confirmations.md",
+      "sha256": "68474884543a6a1e72275b59f27f383313fd6aa8604ccedabb5d5cd37077e6fc",
+      "targets": [
+        "instructions/api/tinysky-alt-confirmations.md"
+      ],
+      "edits": [],
+      "output_sha256": "68474884543a6a1e72275b59f27f383313fd6aa8604ccedabb5d5cd37077e6fc"
+    },
+    {
+      "source": "@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md",
+      "sha256": "eb359da74f45692b55cf9d56e85484072e2d963907d23d877567c7b08ee1c056",
+      "targets": [
+        "skills/lcu/references/linux-desktop.md"
+      ],
+      "edits": [
+        {
+          "start": 1,
+          "end": 5,
+          "replacement": "",
+          "reason": "Store the upstream Linux skill body as a reference under the registered lcu skill."
+        },
+        {
+          "start": 33,
+          "end": 33,
+          "replacement": "const sky = cua.computer;\n",
+          "reason": "The original Linux client is already initialized behind the trusted service at cua.computer; no new client or import is needed."
+        }
+      ],
+      "output_sha256": "462d28da337a8e07fab7bf9c665aa4e3d36a076783f1c86536166fa484b47b06"
+    }
+  ]
+}

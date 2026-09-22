@@ -7,11 +7,12 @@ import shutil
 import subprocess
 import tarfile
 from urllib.request import Request, urlopen
+from project_instructions import project as project_instructions
 
 
 def download(url, path, digest, algorithm='sha256'):
     hasher = hashlib.new(algorithm)
-    request = Request(url, headers={'User-Agent': 'lcu/0.2.0'})
+    request = Request(url, headers={'User-Agent': 'lcu/0.2.1'})
     with urlopen(request, timeout=60) as response, path.open('xb') as output:
         while data := response.read(1024 * 1024):
             hasher.update(data)
@@ -39,6 +40,9 @@ def remove_arm(path, start, end):
 
 
 def project(source, destination, esbuild, instructions, arch):
+    # Every instruction is derived from pinned upstream text with reviewed edits.
+    # Reject source drift and hand-written summaries before packaging anything.
+    project_instructions(source / 'lib/node_modules', instructions.parent)
     modules = source / 'lib/node_modules/@oai'
     # Modify the extracted scratch copy, never the package or an active release.
     for package in ('sky', 'cua'):
@@ -84,9 +88,7 @@ def project(source, destination, esbuild, instructions, arch):
             raise ValueError(f'Non-Linux implementation survived projection: {name}')
     shutil.copytree(instructions / 'repl', destination / 'lib/node_modules/@oai/cua-repl/instructions')
     shutil.copytree(instructions / 'api', destination / 'lib/node_modules/@oai/cua/docs')
-    # Preserve the upstream confirmation policy, without broadening agent authority.
-    shutil.copyfile(modules / 'cua/docs/tinysky-alt-confirmations.md',
-                    destination / 'lib/node_modules/@oai/cua/docs/tinysky-alt-confirmations.md')
+    # The verified API files include the unchanged upstream confirmation policy.
     for name in ('node', 'node_repl'):
         out = destination / 'bin' / name
         out.parent.mkdir(exist_ok=True)

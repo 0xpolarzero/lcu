@@ -9,6 +9,7 @@ python3 -c 'from pathlib import Path; assert {p.name for p in Path("/sys/class/n
 tar -xzf "$name" -C /opt
 bundle="/opt/${name%.tar.gz}"
 "$bundle/scripts/install.sh" --user root --runtime-only --skip-system --yes
+python3 /src/scripts/project_instructions.py
 python3 -m unittest discover -s /src/tests -p 'test_*.py' -v
 python3 /src/tests/installer_cli.py "$bundle"
 python3 /src/tests/registration.py

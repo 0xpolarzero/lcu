@@ -50,7 +50,7 @@ def install(prefix):
         fcntl.flock(lock, fcntl.LOCK_EX)
         releases = prefix / 'releases'
         releases.mkdir(exist_ok=True)
-        release = releases / ('0.2.0-' + uuid.uuid4().hex[:12])
+        release = releases / ('0.2.1-' + uuid.uuid4().hex[:12])
         release.mkdir(mode=0o755)
         try:
             shutil.copytree(SOURCE, release, dirs_exist_ok=True, symlinks=True)

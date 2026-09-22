@@ -6,9 +6,13 @@ ARM64 and x86-64 release archives passed installation, all seven agent registrat
 
 Both archives include Node, the original REPL and Sky engine, the Linux JavaScript projection, instructions, upstream notices, and registration dependencies. No .deb or build/download utility is required on the target machine. Archives are about 53 MiB each.
 
-The current 22 unit tests include bundle relocation, corruption, injected or missing files, wrong architecture, malformed manifests, escaping symlinks, executable-mode changes, and rejecting installation inside the source bundle. The installer also rejects missing payloads without downloading and preserves the active release after corrupted-bundle or runtime-validation failures.
+The current 28 unit tests include bundle relocation, corruption, injected or missing files, wrong architecture, malformed manifests, escaping symlinks, executable-mode changes, and rejecting installation inside the source bundle. The installer also rejects missing payloads without downloading and preserves the active release after corrupted-bundle or runtime-validation failures.
 
-Build commands: `python3 scripts/build_bundle.py --output /out --package /package.deb` inside matching Linux containers. Offline verification: `bash /src/tests/offline.sh /bundles/lcu-0.2.0-linux-{arm64,x64}.tar.gz`, each with `--network none`.
+Build commands: `python3 scripts/build_bundle.py --output /out --package /package.deb` inside matching Linux containers. Offline verification: `bash /src/tests/offline.sh /bundles/lcu-0.2.1-linux-{arm64,x64}.tar.gz`, each with `--network none`.
+
+## Instruction fidelity in v0.2.1
+
+The instruction projection is checked against all 12 original source files from both checksum-pinned architecture packages. Six regression tests cover unchanged rule preservation and rejection of upstream drift, unreviewed output, overlapping or unexplained edits, and manual condensation. The desktop suite checks complete first-use tool descriptions, complete API and default policy delivery, reset, and documentation replay, plus the original full-desktop client binding and screenshot example. See [the instruction audit](INSTRUCTIONS.md).
 
 ## Original runtime validation
 

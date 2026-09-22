@@ -1,1 +1,5 @@
-Select an exact window ID from the inventory with `await cua.getApp({ windowId })`. App names, bundle IDs, and paths are not accepted by Linux getApp. Coordinates are relative to that window. After actions, observe fresh state before choosing the next action.
+If the user specifies an app to use, get the app by its exact open window ID from `cua.getState()` or `cua.listWindows()`. If an app has multiple windows, use their titles to choose the requested one. Do not choose the first window without checking it.
+
+```javascript
+let app = await cua.getApp({ windowId: 123 });
+```

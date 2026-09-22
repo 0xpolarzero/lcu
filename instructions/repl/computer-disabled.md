@@ -1,1 +1,1 @@
-Computer APIs are disabled.
+Native computer APIs are disabled.

@@ -1,1 +1,1 @@
-Dedicated browser APIs are disabled.
+Browser APIs are disabled.

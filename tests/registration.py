@@ -42,6 +42,12 @@ subprocess.run([command, 'setup', '--user', account, '--export', str(export), '-
 config = json.loads((export / 'mcp.json').read_text())
 assert config['mcpServers']['lcu']['command'] == command
 assert (export / 'skills/lcu/SKILL.md').is_file()
+# Complete references must survive every upstream installer and portable export.
+registered_skills = [p.parent for p in home.rglob('SKILL.md') if p.parent.name == 'lcu']
+assert registered_skills
+for skill in registered_skills:
+    for name in ('api.md', 'linux-desktop.md'):
+        assert (skill / 'references' / name).read_bytes() == (prefix / 'current/skills/lcu/references' / name).read_bytes(), skill
 # A malformed existing config must be left byte-for-byte intact.
 cursor = home / '.cursor/mcp.json'
 before = cursor.read_bytes()
