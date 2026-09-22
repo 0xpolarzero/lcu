@@ -272,7 +272,7 @@ def export_bundle(destination, source, command):
     if 'SKILL.md' not in files:
         raise ValueError('Complete LCU skill missing.')
     manifest = {'$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-                'name': 'lcu', 'description': 'Linux desktop tools and skill'}
+                'name': 'lcu', 'description': 'Computer use for AI agents on Linux.'}
     mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': command[0], 'args': command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
                Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode())]

@@ -1,6 +1,6 @@
 ---
 name: lcu
-description: Read and operate Linux desktop windows using the LCU MCP computer-use tools. Use for tasks that require GUI interaction on the connected Linux machine.
+description: Use a Linux desktop through LCU. Read windows, click controls, type text, and take screenshots when a task needs the GUI on the connected Linux machine.
 ---
 
 Use LCU's `js` tool. On first use or after `js_reset`, run only `await cua.getState()` or `await cua.listWindows()`. Read the returned API documentation before continuing.

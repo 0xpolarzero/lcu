@@ -2,7 +2,7 @@
   "name": "lcu-agent-installers",
   "version": "1.0.0",
   "private": true,
-  "description": "Pinned upstream installers used by lcu setup",
+  "description": "Install LCU tools and skills in coding agents.",
   "dependencies": {
     "skills": "1.7.0",
     "add-mcp": "2.4.0"
