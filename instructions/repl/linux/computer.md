@@ -1,0 +1,1 @@
+Select an exact window ID from the inventory with `await cua.getApp({ windowId })`. App names, bundle IDs, and paths are not accepted by Linux getApp. Coordinates are relative to that window. After actions, observe fresh state before choosing the next action.

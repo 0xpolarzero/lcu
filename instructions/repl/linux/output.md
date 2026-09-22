@@ -1,0 +1,1 @@
+Inventory, selection, and observation methods already display their output. Use `nodeRepl.write(value)` for other data and `await nodeRepl.emitImage(image)` for images. After context compaction, call `await cua.rewriteDocumentation()` before continuing.
