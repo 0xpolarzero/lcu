@@ -7,7 +7,7 @@ from gi.repository import Gtk
 
 windows = []
 for name in ('Target', 'Other'):
-    window = Gtk.Window(title='Cual ' + name)
+    window = Gtk.Window(title='LCU ' + name)
     window.set_default_size(480, 180)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
     box.set_border_width(20)
@@ -20,10 +20,10 @@ for name in ('Target', 'Other'):
     for widget in (entry, button, status):
         box.pack_start(widget, False, False, 0)
     def save(_, entry=entry, status=status, name=name):
-        Path(os.environ['CUAL_TEST_OUTPUT'], name + '.txt').write_text(entry.get_text())
+        Path(os.environ['LCU_TEST_OUTPUT'], name + '.txt').write_text(entry.get_text())
         status.set_text('Saved: ' + entry.get_text())
     button.connect('clicked', save)
-    entry.connect('activate', lambda _, name=name: Path(os.environ['CUAL_TEST_OUTPUT'], name + '-activated').write_text('yes'))
+    entry.connect('activate', lambda _, name=name: Path(os.environ['LCU_TEST_OUTPUT'], name + '-activated').write_text('yes'))
     window.show_all()
     windows.append(window)
 Gtk.main()

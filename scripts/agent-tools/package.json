@@ -1,8 +1,8 @@
 {
-  "name": "cual-agent-installers",
+  "name": "lcu-agent-installers",
   "version": "1.0.0",
   "private": true,
-  "description": "Pinned upstream installers used by luda setup",
+  "description": "Pinned upstream installers used by lcu setup",
   "dependencies": {
     "skills": "1.7.0",
     "add-mcp": "2.4.0"

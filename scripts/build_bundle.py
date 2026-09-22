@@ -21,15 +21,15 @@ SOURCE = Path(__file__).resolve().parents[1]
 def build(output, package=None):
     arch = architecture()
     output.mkdir(parents=True, exist_ok=True)
-    name = f'cual-{VERSION}-linux-{arch}'
+    name = f'lcu-{VERSION}-linux-{arch}'
     destination = output / (name + '.tar.gz')
     if destination.exists() or destination.with_suffix(destination.suffix + '.sha256').exists():
         raise ValueError(f'Release already exists: {destination}; use a new output directory.')
-    with tempfile.TemporaryDirectory(prefix='cual-build-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='lcu-build-') as temporary:
         scratch = Path(temporary)
         release = scratch / name
         release.mkdir()
-        for directory in ('bin', 'cual', 'skills', 'docs', 'instructions'):
+        for directory in ('bin', 'lcu', 'skills', 'docs', 'instructions'):
             shutil.copytree(SOURCE / directory, release / directory, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
             shutil.copy2(SOURCE / filename, release / filename)
@@ -44,7 +44,7 @@ def build(output, package=None):
         validate_release(release)
         seal(release, arch)
         verify(release, arch)
-        fd, temporary_archive = tempfile.mkstemp(prefix='.cual-', suffix='.tar.gz', dir=output)
+        fd, temporary_archive = tempfile.mkstemp(prefix='.lcu-', suffix='.tar.gz', dir=output)
         os.close(fd)
         try:
             with tarfile.open(temporary_archive, 'w:gz', compresslevel=6) as archive:
@@ -70,4 +70,4 @@ if __name__ == '__main__':
             raise ValueError('Python 3.12 or later is required')
         build(args.output.resolve(), args.package.resolve() if args.package else None)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
-        sys.exit(f'Cual build: {exc}')
+        sys.exit(f'LCU build: {exc}')

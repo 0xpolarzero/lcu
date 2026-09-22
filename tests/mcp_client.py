@@ -1,4 +1,4 @@
-"""Small protocol test client; no dependency on Cual implementation details."""
+"""Small protocol test client; no dependency on LCU implementation details."""
 import json
 import selectors
 import subprocess
@@ -13,7 +13,7 @@ class Client:
         self.selector = selectors.DefaultSelector()
         self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.call('initialize', {'protocolVersion': '2024-11-05', 'capabilities': {},
-                                'clientInfo': {'name': 'cual-verification', 'version': '1'}})
+                                'clientInfo': {'name': 'lcu-verification', 'version': '1'}})
         self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
 
     def send(self, message):

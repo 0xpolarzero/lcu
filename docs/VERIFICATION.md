@@ -8,7 +8,7 @@ Both archives include Node, the original REPL and Sky engine, the Linux JavaScri
 
 The current 22 unit tests include bundle relocation, corruption, injected or missing files, wrong architecture, malformed manifests, escaping symlinks, executable-mode changes, and rejecting installation inside the source bundle. The installer also rejects missing payloads without downloading and preserves the active release after corrupted-bundle or runtime-validation failures.
 
-Build commands: `python3 scripts/build_bundle.py --output /out --package /package.deb` inside matching Linux containers. Offline verification: `bash /src/tests/offline.sh /bundles/cual-0.1.0-linux-{arm64,x64}.tar.gz`, each with `--network none`.
+Build commands: `python3 scripts/build_bundle.py --output /out --package /package.deb` inside matching Linux containers. Offline verification: `bash /src/tests/offline.sh /bundles/lcu-0.2.0-linux-{arm64,x64}.tar.gz`, each with `--network none`.
 
 ## Original runtime validation
 

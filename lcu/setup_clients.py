@@ -1,4 +1,4 @@
-"""Cual names mapped to upstream installers; configuration formats belong upstream."""
+"""LCU names mapped to upstream installers; configuration formats belong upstream."""
 from dataclasses import dataclass
 
 

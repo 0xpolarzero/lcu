@@ -6,8 +6,8 @@ sys.dont_write_bytecode = True
 
 root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root))
-from cual.runtime import main
+from lcu.runtime import main
 try:
     main(root, sys.argv[1:])
 except (ValueError, OSError, subprocess.SubprocessError) as exc:
-    sys.exit(f'Cual: {exc}')
+    sys.exit(f'LCU: {exc}')

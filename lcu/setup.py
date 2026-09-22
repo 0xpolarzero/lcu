@@ -1,4 +1,4 @@
-"""Configure Cual tools and skill together, without requiring a running desktop."""
+"""Configure LCU tools and skill together, without requiring a running desktop."""
 from __future__ import annotations
 
 import argparse
@@ -68,7 +68,7 @@ def atomic_write(path, data):
         path.unlink(missing_ok=True)
         return
     previous_mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
-    fd, temporary = tempfile.mkstemp(prefix='.cual-setup-', dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix='.lcu-setup-', dir=path.parent)
     try:
         with os.fdopen(fd, 'wb') as stream:
             stream.write(data)
@@ -104,7 +104,7 @@ def apply_changes(changes):
 
 @contextmanager
 def setup_lock(home):
-    path = regular_path(home / '.local/state/cual/setup.lock')
+    path = regular_path(home / '.local/state/lcu/setup.lock')
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
@@ -224,16 +224,16 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
     if not (source / 'SKILL.md').is_file():
-        raise ValueError(f'Complete Cual skill missing: {source}')
+        raise ValueError(f'Complete LCU skill missing: {source}')
     cwd = project if scope == 'project' else home
     global_args = ['--global'] if scope == 'user' else []
     failures = []
     for name in names:
         client = CLIENTS[name]
         commands = (
-            ('skill', [str(node), str(skills), 'add', str(source), '--skill', 'cual',
+            ('skill', [str(node), str(skills), 'add', str(source), '--skill', 'lcu',
                        '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]),
-            ('MCP', [str(node), str(mcp), command[0], '--name', 'cual',
+            ('MCP', [str(node), str(mcp), command[0], '--name', 'lcu',
                      '--agent', client.mcp_agent, '--yes', *global_args,
                      *['--args=' + arg for arg in command[1:]]]),
         )
@@ -253,10 +253,10 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
                     except json.JSONDecodeError as exc:
                         raise ValueError('skill installer returned invalid JSON') from exc
                     if not isinstance(installed, list) or not any(
-                        isinstance(item, dict) and item.get('name') == 'cual'
+                        isinstance(item, dict) and item.get('name') == 'lcu'
                         and item.get('status') == 'installed' for item in installed
                     ):
-                        raise ValueError('skill installer did not report installing Cual')
+                        raise ValueError('skill installer did not report installing LCU')
                 print(f'{client.label}: {phase} registered.')
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))
@@ -270,19 +270,19 @@ def export_bundle(destination, source, command):
         raise ValueError('Export destination already exists; choose a new directory.')
     files = tree_files(source)
     if 'SKILL.md' not in files:
-        raise ValueError('Complete Cual skill missing.')
+        raise ValueError('Complete LCU skill missing.')
     manifest = {'$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-                'name': 'cual', 'description': 'Linux desktop tools and skill'}
-    mcp = {'mcpServers': {'cual': {'type': 'stdio', 'command': command[0], 'args': command[1:]}}}
+                'name': 'lcu', 'description': 'Linux desktop tools and skill'}
+    mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': command[0], 'args': command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
                Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode())]
-    changes += [Change(destination / 'skills/cual' / name, None, data) for name, data in files.items()]
+    changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
     apply_changes(changes)
 
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, epilog='Run on the machine hosting the agent backend. For Codex SSH remote projects, that is the VM. This command never installs or authenticates the agent itself.')
-    p.add_argument('--prefix', type=Path, default=Path('/opt/cual'), help='Managed runtime prefix (default: /opt/cual)')
+    p.add_argument('--prefix', type=Path, default=Path('/opt/lcu'), help='Managed runtime prefix (default: /opt/lcu)')
     p.add_argument('--user', help='Target Linux account; root must select one explicitly')
     p.add_argument('--agent', action='append', default=[], help='Agent ID; repeat for several, all for every supported client, or auto for detected clients. Use --list-agents.')
     p.add_argument('--scope', choices=['user', 'project'], default='user')
@@ -290,7 +290,7 @@ def parser():
     p.add_argument('--yes', action='store_true', help='Apply explicit choices without a confirmation prompt')
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
-    p.add_argument('--session', choices=['discover', 'direct'], default='discover', help='discover attaches through cual-session (XFCE); direct inherits agent desktop environment')
+    p.add_argument('--session', choices=['discover', 'direct'], default='discover', help='discover attaches through lcu-session (XFCE); direct inherits agent desktop environment')
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
     return p
@@ -299,7 +299,7 @@ def parser():
 def validate(args):
     prefix = args.prefix
     if not prefix.is_absolute() or len(prefix.parts) < 3 or '..' in prefix.parts or any(ord(c) < 32 for c in str(prefix)):
-        raise ValueError('Use a dedicated absolute prefix, such as /opt/cual.')
+        raise ValueError('Use a dedicated absolute prefix, such as /opt/lcu.')
     if os.getuid() == 0 and args.user is None:
         raise ValueError('Root must specify --user ACCOUNT.')
     try:
@@ -326,7 +326,7 @@ def validate(args):
     names = list(dict.fromkeys(ALIASES.get(name, name) for name in args.agent))
     unknown = set(names) - set(CLIENTS) - {'auto', 'all'}
     if unknown:
-        raise ValueError('Unknown agent: ' + ', '.join(sorted(unknown)) + '. Run cual setup --list-agents, or use --export for a custom client.')
+        raise ValueError('Unknown agent: ' + ', '.join(sorted(unknown)) + '. Run lcu setup --list-agents, or use --export for a custom client.')
     if {'auto', 'all'} & set(names) and len(names) > 1:
         raise ValueError('Use --agent all or --agent auto alone, or select explicit agent IDs.')
     if names == ['all']:
@@ -382,9 +382,9 @@ def main(argv=None):
                               PATH=f'{account.pw_dir}/.local/bin:/usr/local/bin:/usr/bin:/bin', LANG='C.UTF-8')
             os.chdir(account.pw_dir)
         home = Path(account.pw_dir)
-        runtime = args.prefix / 'current/bin/cual'
-        launcher = args.prefix / 'current/bin/cual-session'
-        source = (args.prefix / 'current/skills/cual').resolve()
+        runtime = args.prefix / 'current/bin/lcu'
+        launcher = args.prefix / 'current/bin/lcu-session'
+        source = (args.prefix / 'current/skills/lcu').resolve()
         for path in (runtime, launcher):
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise ValueError(f'Managed runtime missing or inaccessible: {path}. Run scripts/install.sh first, or select its --prefix.')
@@ -407,7 +407,7 @@ def main(argv=None):
                 print(f'Export tools and skill to {args.export}')
             else:
                 print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
-                print('Existing Cual skill and MCP entries will be updated; unrelated configuration is preserved.')
+                print('Existing LCU skill and MCP entries will be updated; unrelated configuration is preserved.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')
@@ -428,9 +428,9 @@ def main(argv=None):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
-        print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use Cual to inspect the desktop.')
+        print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.export:
-            print('Import this plugin with a compatible client, or use its mcp.json and skills/cual with your custom agent. Its command runs on this Linux machine.')
+            print('Import this plugin with a compatible client, or use its mcp.json and skills/lcu with your custom agent. Its command runs on this Linux machine.')
         if args.check_desktop:
             print('Checking the live desktop...')
             subprocess.run([*command, 'doctor'], check=True, timeout=35)

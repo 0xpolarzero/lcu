@@ -3,7 +3,7 @@ set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 platform=${1:-linux/arm64}
 case "$platform" in linux/arm64|linux/amd64) ;; *) echo 'Expected linux/arm64 or linux/amd64' >&2; exit 2 ;; esac
-tag="cual-verification:${platform#linux/}"
+tag="lcu-verification:${platform#linux/}"
 docker build --platform "$platform" -t "$tag" -f "$repo/tests/Dockerfile" "$repo"
 mounts=(-v "$repo:/src:ro")
 build_options=()

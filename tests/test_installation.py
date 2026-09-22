@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'scripts')]
-from cual.runtime import environment
-from cual.session import discover
-from cual.setup import Change, apply_changes, regular_path
+from lcu.runtime import environment
+from lcu.session import discover
+from lcu.setup import Change, apply_changes, regular_path
 from install import checked_prefix, install
 from project_runtime import download, remove_arm, replace
 from bundle import seal
@@ -30,11 +30,11 @@ class InstallationTests(unittest.TestCase):
     def test_symlink_destination_is_rejected(self):
         (self.root / 'link').symlink_to(self.root, target_is_directory=True)
         with self.assertRaises(ValueError):
-            checked_prefix(self.root / 'link/cual')
+            checked_prefix(self.root / 'link/lcu')
 
     def test_relative_prefix_is_rejected(self):
         with self.assertRaises(ValueError):
-            checked_prefix(Path('relative/cual'))
+            checked_prefix(Path('relative/lcu'))
 
     def test_installation_inside_its_source_bundle_is_rejected(self):
         with patch('install.SOURCE', self.root):
@@ -48,11 +48,11 @@ class InstallationTests(unittest.TestCase):
             download(source.as_uri(), self.root / 'download', '0' * 64)
 
     def test_failed_upgrade_preserves_active_release(self):
-        prefix = self.root / 'cual'
+        prefix = self.root / 'lcu'
         old = prefix / 'releases/old'
         old.mkdir(parents=True)
         (old / 'data').write_text('previous version')
-        (prefix / '.cual-install').touch()
+        (prefix / '.lcu-install').touch()
         (prefix / 'current').symlink_to('releases/old')
         source = self.root / 'bundle'
         source.mkdir()

@@ -5,9 +5,9 @@ from pathlib import Path
 import pwd
 import subprocess
 
-prefix = Path('/opt/cual')
-command = str(prefix / 'current/bin/cual')
-account = 'cualtester'
+prefix = Path('/opt/lcu')
+command = str(prefix / 'current/bin/lcu')
+account = 'lcutester'
 try:
     owner = pwd.getpwnam(account)
 except KeyError:
@@ -31,7 +31,7 @@ for scope in ('user', 'project'):
     subprocess.run(args, check=True)
     assert all(p.read_bytes() == before for p, before in configs.items()), 'Registration is not idempotent'
 assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
-assert 'mcp_servers.cual' in codex.read_text()
+assert 'mcp_servers.lcu' in codex.read_text()
 for path in home.rglob('*'):
     assert path.lstat().st_uid == owner.pw_uid, path
 export = home / 'portable'
@@ -40,8 +40,8 @@ if export.exists():
     shutil.rmtree(export)  # Disposable fixture owned by this test account.
 subprocess.run([command, 'setup', '--user', account, '--export', str(export), '--session', 'direct', '--yes'], check=True)
 config = json.loads((export / 'mcp.json').read_text())
-assert config['mcpServers']['cual']['command'] == command
-assert (export / 'skills/cual/SKILL.md').is_file()
+assert config['mcpServers']['lcu']['command'] == command
+assert (export / 'skills/lcu/SKILL.md').is_file()
 # A malformed existing config must be left byte-for-byte intact.
 cursor = home / '.cursor/mcp.json'
 before = cursor.read_bytes()

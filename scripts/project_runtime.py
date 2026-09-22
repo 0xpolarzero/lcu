@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 def download(url, path, digest, algorithm='sha256'):
     hasher = hashlib.new(algorithm)
-    request = Request(url, headers={'User-Agent': 'cual/0.1.0'})
+    request = Request(url, headers={'User-Agent': 'lcu/0.2.0'})
     with urlopen(request, timeout=60) as response, path.open('xb') as output:
         while data := response.read(1024 * 1024):
             hasher.update(data)

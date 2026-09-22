@@ -4,8 +4,8 @@ import sys
 sys.dont_write_bytecode = True
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from cual.session import main
+from lcu.session import main
 try:
     main()
 except (ValueError, OSError) as exc:
-    sys.exit(f'Cual session: {exc}')
+    sys.exit(f'LCU session: {exc}')

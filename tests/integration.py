@@ -7,7 +7,7 @@ import sys
 import time
 from mcp_client import Client, text
 
-command = sys.argv[1:] or ['/opt/cual/current/bin/cual']
+command = sys.argv[1:] or ['/opt/lcu/current/bin/lcu']
 client = Client(command)
 try:
     tools = client.call('tools/list', {})['tools']
@@ -21,12 +21,12 @@ try:
     for attempt in range(30):
         response = client.js('nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));')
         windows = json.loads(text(response))
-        targets = {w['title']: w for w in windows if w.get('title') in ('Cual Target', 'Cual Other', 'Cual Fallback')}
+        targets = {w['title']: w for w in windows if w.get('title') in ('LCU Target', 'LCU Other', 'LCU Fallback')}
         if len(targets) == 3:
             break
         time.sleep(0.1)
     assert len(targets) == 3, windows
-    state = text(client.js(f'let app = await cua.getApp({{windowId:{targets["Cual Target"]["id"]}}});'))
+    state = text(client.js(f'let app = await cua.getApp({{windowId:{targets["LCU Target"]["id"]}}});'))
     assert 'at_spi' in state, state
     print('Initial accessibility:', state, flush=True)
     # Read actual IDs from the observed accessibility text, not implementation state.
@@ -42,7 +42,7 @@ try:
     button = element(state, 'Save draft')
     saved = text(client.js(f'await app.click({json.dumps(button)}); await app.getAXState();'))
     assert 'Saved: ' + expected in saved, saved
-    assert Path(os.environ['CUAL_TEST_OUTPUT'], 'Target.txt').read_text() == expected
+    assert Path(os.environ['LCU_TEST_OUTPUT'], 'Target.txt').read_text() == expected
     # Native key combinations, text paste, and an advertised secondary action.
     entry = element(saved, 'Draft text')
     expected = 'Second pass Δ'
@@ -50,27 +50,27 @@ try:
     assert expected in state
     entry, button = element(state, 'Draft text'), element(state, 'Save draft')
     client.js(f'await app.performSecondaryAction({json.dumps(entry)}, "activate"); await app.getAXState();')
-    assert Path(os.environ['CUAL_TEST_OUTPUT'], 'Target-activated').read_text() == 'yes'
+    assert Path(os.environ['LCU_TEST_OUTPUT'], 'Target-activated').read_text() == 'yes'
     client.js(f'await app.click({json.dumps(button)}); await app.getAXState();')
-    assert Path(os.environ['CUAL_TEST_OUTPUT'], 'Target.txt').read_text() == expected
-    other = text(client.js(f'let other = await cua.getApp({{windowId:{targets["Cual Other"]["id"]}}});'))
+    assert Path(os.environ['LCU_TEST_OUTPUT'], 'Target.txt').read_text() == expected
+    other = text(client.js(f'let other = await cua.getApp({{windowId:{targets["LCU Other"]["id"]}}});'))
     assert 'untouched' in other and expected not in other
     image = client.js('await app.getScreenshot();')
     images = [c for c in image['content'] if c['type'] == 'image']
     assert len(images) == 1 and images[0]['mimeType'] == 'image/jpeg'
     assert len(images[0]['data']) > 1000
-    fallback = text(client.js(f'let fallback = await cua.getApp({{windowId:{targets["Cual Fallback"]["id"]}}});'))
+    fallback = text(client.js(f'let fallback = await cua.getApp({{windowId:{targets["LCU Fallback"]["id"]}}});'))
     assert 'Accessibility source: x11' in fallback, fallback
     client.js('await fallback.getScreenshot();')
     client.js('await fallback.click([40,40]); await fallback.getAXState();')
-    assert Path(os.environ['CUAL_TEST_OUTPUT'], 'fallback-click.txt').read_text() == '40,40'
+    assert Path(os.environ['LCU_TEST_OUTPUT'], 'fallback-click.txt').read_text() == '40,40'
     client.js('await app.setValue(1, "bad");', error=True)
     client.js('await app.selectText(1, "bad");', error=True)
     client.js('await app.scroll([50,50], "down", 2);', error=True)
-    client.js('await cua.getApp("Cual Target");', error=True)
+    client.js('await cua.getApp("LCU Target");', error=True)
     client.js('await app.click("not-an-element");', error=True)
     # A failed input must not silently write to another window or change the file.
-    assert Path(os.environ['CUAL_TEST_OUTPUT'], 'Target.txt').read_text() == expected
+    assert Path(os.environ['LCU_TEST_OUTPUT'], 'Target.txt').read_text() == expected
     client.js('let persisted = 41;')
     assert text(client.js('nodeRepl.write(persisted + 1);')) == '42'
     client.call('tools/call', {'name': 'js_reset', 'arguments': {}})

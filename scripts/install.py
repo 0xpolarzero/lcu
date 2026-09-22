@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a versioned Cual runtime and optionally register agents."""
+"""Install a versioned LCU runtime and optionally register agents."""
 import argparse
 import fcntl
 import os
@@ -12,7 +12,7 @@ import uuid
 SOURCE = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
-from cual import setup
+from lcu import setup
 from bundle import architecture, verify
 
 
@@ -22,18 +22,18 @@ def checked_prefix(path):
     path = setup.regular_path(path)
     if path.resolve().is_relative_to(SOURCE.resolve()):
         raise ValueError('Choose an installation prefix outside the extracted release bundle.')
-    if not path.is_absolute() or len(path.parts) < 3 or path in (Path('/usr/local'), Path('/opt/cual').parent):
-        raise ValueError('Choose a dedicated absolute prefix, such as /opt/cual.')
-    if path.exists() and any(path.iterdir()) and not (path / '.cual-install').is_file():
-        raise ValueError('Installation prefix is not an existing Cual installation or an empty directory.')
-    for name in ('.cual-install', 'releases'):
+    if not path.is_absolute() or len(path.parts) < 3 or path in (Path('/usr/local'), Path('/opt/lcu').parent):
+        raise ValueError('Choose a dedicated absolute prefix, such as /opt/lcu.')
+    if path.exists() and any(path.iterdir()) and not (path / '.lcu-install').is_file():
+        raise ValueError('Installation prefix is not an existing LCU installation or an empty directory.')
+    for name in ('.lcu-install', 'releases'):
         if (path / name).is_symlink():
             raise ValueError(f'Refusing a symlink at {path / name}')
     return path
 
 
 def validate_release(release):
-    subprocess.run([str(release / 'bin/cual'), '--version'], check=True, timeout=20)
+    subprocess.run([str(release / 'bin/lcu'), '--version'], check=True, timeout=20)
     subprocess.run([str(release / 'runtime/bin/node_repl'), '--help'], check=True, timeout=20, stdout=subprocess.DEVNULL)
     env = dict(os.environ, NODE_REPL_DISABLE_ANALYTICS='1')
     subprocess.run([str(release / 'runtime/bin/node'), '--input-type=module', '-e',
@@ -46,11 +46,11 @@ def install(prefix):
     arch = architecture()
     verify(SOURCE, arch)
     prefix.mkdir(parents=True, exist_ok=True)
-    with (prefix / '.cual-install').open('a') as lock:
+    with (prefix / '.lcu-install').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         releases = prefix / 'releases'
         releases.mkdir(exist_ok=True)
-        release = releases / ('0.1.0-' + uuid.uuid4().hex[:12])
+        release = releases / ('0.2.0-' + uuid.uuid4().hex[:12])
         release.mkdir(mode=0o755)
         try:
             shutil.copytree(SOURCE, release, dirs_exist_ok=True, symlinks=True)
@@ -107,7 +107,7 @@ def main(argv=None):
                         'libxi6', 'libxrandr2', 'libxfixes3', 'libxcomposite1', 'libxdamage1', 'at-spi2-core',
                         'dbus-x11', 'x11-utils'], check=True)
     install(prefix)
-    print(f'Cual installed: {prefix}/current/bin/cual')
+    print(f'LCU installed: {prefix}/current/bin/lcu')
     if not args.runtime_only:
         forwarded = ['--prefix', str(prefix), '--user', account.pw_name, '--scope', args.scope, '--session', args.session]
         for name in args.agent:
@@ -119,11 +119,11 @@ def main(argv=None):
             if getattr(args, flag):
                 forwarded += ['--' + flag.replace('_', '-')]
         # Run setup from the selected release, and drop privileges before account writes.
-        subprocess.run([str(prefix / 'current/bin/cual'), 'setup', *forwarded], check=True)
+        subprocess.run([str(prefix / 'current/bin/lcu'), 'setup', *forwarded], check=True)
 
 
 if __name__ == '__main__':
     try:
         main()
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
-        sys.exit(f'Cual installer: {exc}')
+        sys.exit(f'LCU installer: {exc}')

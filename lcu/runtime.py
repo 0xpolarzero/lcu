@@ -28,10 +28,10 @@ def environment(root):
 
 def main(root, argv):
     if argv[:1] in (['--help'], ['-h']):
-        print('Usage: cual [setup OPTIONS | doctor | --version]\nWith no arguments, starts the stdio MCP server.\nRun cual setup --help for agent registration options.')
+        print('Usage: lcu [setup OPTIONS | doctor | --version]\nWith no arguments, starts the stdio MCP server.\nRun lcu setup --help for agent registration options.')
         return
     if argv[:1] == ['--version']:
-        print('cual 0.1.0 (Codex Linux runtime 0.0.16)')
+        print('lcu 0.2.0 (Codex Linux runtime 0.0.16)')
         return
     if argv[:1] == ['setup']:
         from .setup import main as setup
@@ -40,12 +40,12 @@ def main(root, argv):
         setup(argv[1:])
         return
     if argv and argv != ['doctor']:
-        raise ValueError('Usage: cual [setup OPTIONS | doctor | --version]')
+        raise ValueError('Usage: lcu [setup OPTIONS | doctor | --version]')
     runtime = root / 'runtime'
     env = environment(root)
     if argv == ['doctor']:
         if not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS'):
-            raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use cual-session or run inside the desktop session.')
+            raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use lcu-session or run inside the desktop session.')
         script = 'import {handleRpc} from "./lib/node_modules/@oai/sky/index.js"; const result = await handleRpc({type:"execute", method:"list_windows", args:[]}); console.log(JSON.stringify({windows:result}));'
         subprocess.run([str(runtime / 'bin/node'), '--input-type=module', '-e', script],
                        cwd=runtime, env=env, check=True, timeout=30)

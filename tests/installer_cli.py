@@ -16,18 +16,18 @@ with tempfile.TemporaryDirectory() as directory:
         result = subprocess.run([installer, '--prefix', str(prefix), '--skip-system', *args], capture_output=True)
         assert result.returncode != 0, args
         assert not prefix.exists(), args
-    active = Path('/opt/cual/current').resolve()
+    active = Path('/opt/lcu/current').resolve()
     payload = bundle / 'runtime/lib/node_modules/@oai/cua/index.js'
     before = payload.read_bytes()
     try:
         payload.write_bytes(before + b'\n// corrupted\n')
-        result = subprocess.run([installer, '--prefix', '/opt/cual', '--skip-system', '--user', 'root',
+        result = subprocess.run([installer, '--prefix', '/opt/lcu', '--skip-system', '--user', 'root',
                                  '--runtime-only'], capture_output=True)
         assert result.returncode != 0 and b'integrity check failed' in result.stderr
     finally:
         payload.write_bytes(before)
-    assert Path('/opt/cual/current').resolve() == active
-    assert (active / 'bin/cual').is_file()
+    assert Path('/opt/lcu/current').resolve() == active
+    assert (active / 'bin/lcu').is_file()
     result = subprocess.run([str(source / 'scripts/install.sh'), '--prefix', str(prefix), '--skip-system',
                              '--user', 'root', '--runtime-only'], capture_output=True)
     assert result.returncode != 0 and b'release bundle' in result.stderr
