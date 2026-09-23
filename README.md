@@ -1,87 +1,55 @@
 # LCU
 
-**A Linux desktop API for AI agents.**
+LCU installs a fixed official ChatGPT Linux application as a private dependency and launches its original computer-use runtime for an existing Linux desktop. It exposes the original persistent MCP JavaScript tools to supported agents. LCU releases contain LCU code and installer metadata, not OpenAI application files.
 
-LCU (Linux Computer Use) lets your agent read windows, click controls, type text, and take screenshots through MCP. It uses Codex's Linux computer-use runtime and includes a skill that teaches the agent how to use it.
+**Development status:** native computer use and the thin installed-app path passed the prior offline differential checks. The installed ARM64 build passed a no-sign-in Chrome action in Ubuntu 24.04.5 with AppArmor active. LCU now installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. This is still an unpublished development build; see [current status](docs/PARITY-STATUS.md) for remaining checks.
 
-It runs on your Linux machine or VM. Running LCU does not require the Codex app or an OpenAI account.
+## Requirements
 
-## API
+Use Ubuntu 24.04-compatible glibc Linux on ARM64 or x86-64, Python 3.12 or newer, an existing X11 desktop and D-Bus session, and a Linux account that owns the desktop. The application runs on that Linux machine, including inside a VM. A macOS installation cannot supply its executables.
 
-Your agent calls the `js` MCP tool with JavaScript. Variables persist between calls.
-
-First, list the open windows. This read-only call also returns the API instructions. The same [full guide](skills/lcu/references/api.md) is available before any tool call:
-
-```javascript
-await cua.listWindows();
-```
-
-In the next call, select a window using its returned ID:
-
-```javascript
-let app = await cua.getApp({ windowId: 123 });
-```
-
-Selection returns the window's controls and their IDs. Click a text field, type, then read the updated window:
-
-```javascript
-await app.click(2);
-await app.typeText("Hello from LCU");
-await app.getAXState();
-```
-
-`123` and `2` are examples. Use the window and control IDs from your actual observations.
-
-For apps without accessible controls, take a screenshot and use coordinates relative to the window:
-
-```javascript
-await app.getScreenshot();
-```
-
-Then choose a position from the screenshot and call `app.click([x, y])`. The API also supports keyboard shortcuts, paste, drag, and scrolling. See the [API reference](instructions/api/tinysky-alt-core-cua-repl.md) for arguments and examples.
+The fixed dependency is ChatGPT Linux 26.915.31945 with CUA runtime 0.0.16/20260915001755-492f19756c31. [runtime.lock.json](runtime.lock.json) pins the official package URLs, hashes and critical files. Setup verifies the package before extraction. A hash checks integrity; it is not a package signature.
 
 ## Install
 
-Install **on the Linux machine whose desktop the agent will control**. You need Python 3.12+ and an existing X11 desktop. Ubuntu 24.04 is tested. Native Wayland is not supported.
+Build the thin archive on matching Linux first; see [development](docs/DEVELOPMENT.md). On the target desktop machine, extract it and run:
 
-Download the archive and checksum for your machine from [v0.2.1](https://github.com/0xpolarzero/lcu/releases/tag/v0.2.1):
+~~~sh
+sudo ./scripts/install.sh --user alice --agent codex --yes
+~~~
 
-| Machine | Archive | Checksum |
-| --- | --- | --- |
-| x86-64 | [linux-x64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-x64.tar.gz.sha256) |
-| ARM64 | [linux-arm64.tar.gz](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz) | [SHA-256](https://github.com/0xpolarzero/lcu/releases/download/v0.2.1/lcu-0.2.1-linux-arm64.tar.gz.sha256) |
+Replace alice with the existing desktop account. The installer downloads the pinned official package during setup, stores one immutable app generation under the managed prefix, selects it for LCU, and registers the agent after validation. To use an already downloaded pinned package without acquisition network access:
 
-In the download directory, run the following. Change `x64` to `arm64` for ARM64:
+~~~sh
+sudo ./scripts/install.sh --user alice --agent codex --app-package /absolute/chatgpt.deb --offline --skip-system --yes
+~~~
 
-```sh
-archive=lcu-0.2.1-linux-x64.tar.gz
-sha256sum -c "$archive.sha256" &&
-  tar -xzf "$archive" &&
-  cd "${archive%.tar.gz}" &&
-  sudo ./scripts/install.sh --user "$(id -un)" --agent codex --yes
-```
+Use --skip-system only when the required Ubuntu libraries are already installed. It does not skip app acquisition. For a user-owned prefix after system dependencies are in place, add --prefix and --skip-system. The installer does not change an existing system ChatGPT installation or add OpenAI's apt repository. See the [installation guide](docs/INSTALLATION.md) for agent choices, desktop sessions, rollback and failure states.
 
-Run this as your desktop user. If you are already root, replace `$(id -un)` with that user's name.
+## Use
 
-The installer adds the tools and skill to your agent's configuration. Restart or reconnect the agent, then ask: **“Use LCU to inspect my desktop.”**
+After setup, reconnect the agent and ask it to inspect the existing desktop. The generated user-local LCU skill links byte-identical original Linux and Chrome guides before the first tool call. The original provider supplies dynamic instructions and capability checks during use.
 
-The runtime is included in the download. The installer uses apt for system libraries; add `--skip-system` if they are already installed. Default setup connects to your XFCE session. For another X11 desktop, use [`--session direct`](docs/INSTALLATION.md#connect-to-a-desktop).
+An agent starts with one documented call:
 
-## Agents
+~~~javascript
+await cua.getState();
+~~~
 
-Use `--agent codex`, `claude-code`, `cursor`, `gemini-cli`, `opencode`, `vscode`, or `copilot-cli`. Repeat `--agent` to select several, or use `--agent all`. Omit `--agent` and `--yes` for an interactive choice.
+Then it can select an observed Linux window by its ID:
 
-Other agents can use the [MCP configuration and skill export](docs/INSTALLATION.md#other-agents). The [skill](skills/lcu/SKILL.md) and API instructions guide observation, actions, and checking results.
+~~~javascript
+let app = await cua.getApp({ windowId: 123 });
+~~~
 
-## More
+The ID is an example; use a real observed ID. Screenshots, accessibility, mouse and keyboard actions, clipboard, audio paths and reset remain in the original runtime. The desktop must already be running.
 
-- [Installation guide](docs/INSTALLATION.md): desktop sessions, VM images, custom agents, upgrades, and migration from Cual.
-- [API reference](instructions/api/tinysky-alt-core-cua-repl.md): methods, parameters, and examples.
-- [Development](docs/DEVELOPMENT.md): build and test a release.
-- [Test results](docs/VERIFICATION.md): what has been checked and known limits.
-- [Instruction fidelity](docs/INSTRUCTIONS.md): pinned upstream text, every Linux-specific edit, and delivery checks.
-- [Runtime sources](docs/PROVENANCE.md): where the bundled code comes from.
+Agent setup configures the original native host for that Linux account. To refresh its registration, run:
 
-LCU controls an existing desktop and runs with your Linux account's permissions. Use your VM or container to isolate it. Application support depends on accessibility; screenshots and coordinates are available when controls cannot be read.
+~~~sh
+/opt/lcu/current/bin/lcu browser install
+~~~
 
-LCU's own code is [MIT licensed](LICENSE). The bundled runtime and dependencies keep their own terms and notices. LCU is an independent project, not an official OpenAI release.
+Install and enable the [official ChatGPT browser extension](https://learn.chatgpt.com/docs/chrome-extension) in the selected Chrome profile. LCU does not sign in, choose a personal profile, grant site permissions, or substitute another browser. Its local native-host relay enables the official extension's `x-browser-agent` request label, so the original browser service can act without the Codex account feature-gate lookup. The MCP client must still approve the requested site. The user and agent can view the same browser through the existing desktop viewer.
+
+LCU's code is [MIT licensed](LICENSE). The installed official application retains its original files, notices and terms. LCU is an independent project.

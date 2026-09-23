@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert result.returncode != 0, args
         assert not prefix.exists(), args
     active = Path('/opt/lcu/current').resolve()
-    payload = bundle / 'runtime/lib/node_modules/@oai/cua/index.js'
+    payload = bundle / 'runtime/lib/node_modules/@oai/cua/package.json'
     before = payload.read_bytes()
     try:
         payload.write_bytes(before + b'\n// corrupted\n')

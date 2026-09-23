@@ -1,16 +1,16 @@
 ---
 name: lcu
-description: Use a Linux desktop through LCU. Read windows, click controls, type text, and take screenshots when a task needs the GUI on the connected Linux machine.
+description: Control Linux desktop windows and supported Chrome tabs through the original Codex computer-use runtime.
 ---
 
-Use LCU's `js` tool. On first use or after `js_reset`, run only `await cua.getState()` or `await cua.listWindows()`. Read the returned API documentation before continuing.
+Use LCU's `js` and `js_reset` tools. JavaScript state persists between calls.
 
-That first call reads the window inventory and returns the full instructions; it does not send clicks or keystrokes. Do not add other API calls, waits, or snapshots to that invocation.
+Before the first call, read the complete original Linux computer-use guide at [references/upstream/cua/docs/tinysky-alt-core-cua-repl.md](references/upstream/cua/docs/tinysky-alt-core-cua-repl.md), the Linux launcher description at [references/upstream/cua-repl/instructions/linux/description.md](references/upstream/cua-repl/instructions/linux/description.md), the native Linux guide at [references/upstream/sky/linux/SKILL.md](references/upstream/sky/linux/SKILL.md), and the Codex-app browser API and document-selection graph at [api.json](references/upstream/browser-desktop/codex-app/api.json) and [documents.json](references/upstream/browser-desktop/codex-app/documents.json). LCU uses the unified original `cua` entrypoints and the capability-specific guidance returned by its runtime.
 
-The full [computer-use instructions and API](references/api.md) are also available here before making any tool call. They retain the pinned upstream wording with explicit Linux and standalone-tool corrections. The runtime supplies the upstream confirmation policy, including any policy override supplied by the host.
+On first use or after reset, make one documented entrypoint call by itself, normally `await cua.getState()`. Do not combine it with other API calls, waits, or snapshots. Read the returned tool descriptions, policies, and inventory before continuing. After context compaction, call `await cua.rewriteDocumentation()` by itself and reread the returned guidance.
 
-For desktop-wide input, pointer movement, structured accessibility trees, or a drag that must stay held during an observation, read the [upstream Linux desktop reference](references/linux-desktop.md) before using those methods. Its `sky` binding is the original client already available as `cua.computer`.
+Use the original `cua` entrypoints and only capabilities shown by the connected provider and effective policy. For native Linux windows, target an exact observed window ID. For Chrome, use the original browser and tab APIs; read capability-specific documentation returned by the provider. Do not substitute another browser when the user requested Chrome.
 
-Select the intended window with `await cua.getApp({ windowId: id })`, using its exact observed ID and title. Follow the runtime's Linux instructions, including fresh observations after actions. After context compaction, run `await cua.rewriteDocumentation()`.
+The original [Chrome plugin skill](references/upstream/chrome/skill/SKILL.md) and [Chrome plugin docs](references/upstream/chrome/docs) remain available byte-for-byte as references to that separate plugin mode. Its legacy `setupBrowserRuntime()` and `agent.browsers` instructions do not describe LCU's unified `cua` runtime; follow the entrypoints and returned docs above.
 
-If the tool is missing, connect the exported MCP configuration or run `lcu setup` for the selected agent. A connected X11 desktop must already exist; installing LCU does not start one. Do not substitute another desktop automation engine.
+This skill's references are generated from the selected installed Linux application during setup. If they are missing, run `lcu setup` on the Linux machine that hosts the agent.

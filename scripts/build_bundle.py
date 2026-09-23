@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a complete architecture-specific release; downloads occur only here."""
+"""Build a thin LCU archive; the official app is provisioned during setup."""
 import argparse
 import hashlib
 import os
@@ -12,13 +12,14 @@ import tempfile
 
 sys.dont_write_bytecode = True
 from bundle import VERSION, architecture, seal, verify
-from project_runtime import provision
 from provision_agent_tools import provision as provision_agents
 
 SOURCE = Path(__file__).resolve().parents[1]
 
 
 def build(output, package=None):
+    if package is not None:
+        raise ValueError('The official app is acquired during installation. Pass --app-package to scripts/install.sh instead.')
     arch = architecture()
     output.mkdir(parents=True, exist_ok=True)
     name = f'lcu-{VERSION}-linux-{arch}'
@@ -29,19 +30,29 @@ def build(output, package=None):
         scratch = Path(temporary)
         release = scratch / name
         release.mkdir()
-        for directory in ('bin', 'lcu', 'skills', 'docs', 'instructions'):
-            shutil.copytree(SOURCE / directory, release / directory, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copytree(SOURCE / 'bin', release / 'bin')
+        (release / 'lcu').mkdir()
+        for filename in ('__init__.py', 'runtime.py', 'session.py', 'setup.py',
+                         'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
+                         'native_host.py'):
+            shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
+        (release / 'docs').mkdir()
+        for filename in ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
+                         'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
+                         'STANDALONE-ADAPTATIONS.md'):
+            shutil.copy2(SOURCE / 'docs' / filename, release / 'docs' / filename)
+        (release / 'skills/lcu').mkdir(parents=True)
+        shutil.copy2(SOURCE / 'skills/lcu/SKILL.md', release / 'skills/lcu/SKILL.md')
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
             shutil.copy2(SOURCE / filename, release / filename)
         (release / 'scripts').mkdir()
-        for filename in ('install.sh', 'install.py', 'bundle.py'):
+        for filename in ('install.sh', 'install.py', 'installed_app.py', 'bundle.py'):
             shutil.copy2(SOURCE / 'scripts' / filename, release / 'scripts' / filename)
-        provision(release, SOURCE, scratch, arch, package)
         provision_agents(release, SOURCE / 'scripts/agent-tools')
-        # Test the same executable payload the installer will copy; no display needed.
-        sys.path.insert(0, str(SOURCE))
-        from install import validate_release
-        validate_release(release)
+        # The installer selects and validates the matching app before registration.
+        subprocess.run([sys.executable, '-B', '-c',
+                        'import lcu.runtime, lcu.session, lcu.setup, lcu.browser, lcu.codex_hooks'],
+                       cwd=release, check=True, timeout=20)
         seal(release, arch)
         verify(release, arch)
         fd, temporary_archive = tempfile.mkstemp(prefix='.lcu-', suffix='.tar.gz', dir=output)
@@ -63,7 +74,7 @@ def build(output, package=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=SOURCE / 'dist')
-    parser.add_argument('--package', type=Path, help='Cached official .deb with the pinned checksum (build-time only)')
+    parser.add_argument('--package', type=Path, help='Deprecated; use scripts/install.sh --app-package PATH')
     args = parser.parse_args()
     try:
         if sys.version_info < (3, 12):

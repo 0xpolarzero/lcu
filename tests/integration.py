@@ -8,10 +8,12 @@ import time
 from mcp_client import Client, text
 
 command = sys.argv[1:] or ['/opt/lcu/current/bin/lcu']
-source = Path(__file__).resolve().parents[1]
-instructions = source / 'instructions'
-core = (instructions / 'api/tinysky-alt-core-cua-repl.md').read_text()
-policy = (instructions / 'api/tinysky-alt-confirmations.md').read_text()
+resources = Path('/opt/lcu/current/app/resources')
+modules = resources / 'cua_node/lib/node_modules'
+repl_instructions = modules / '@oai/cua-repl/instructions'
+cua_docs = modules / '@oai/cua/docs'
+core = (cua_docs / 'tinysky-alt-core-cua-repl.md').read_text()
+policy = (cua_docs / 'tinysky-alt-confirmations.md').read_text()
 client = Client(command)
 try:
     tools = client.call('tools/list', {})['tools']
@@ -19,19 +21,17 @@ try:
     assert {'js', 'js_reset', 'js_add_node_module_dir', 'turn_ended'} <= names
     js_tool = next(item for item in tools if item['name'] == 'js')
     description = js_tool['description']
-    assert 'windowId' in description and 'getApp("Example App")' not in description
-    expected_description = '\n\n'.join((instructions / 'repl' / name).read_text().rstrip()
+    expected_description = '\n\n'.join((repl_instructions / name).read_text().rstrip()
         for name in ('linux/description.md', 'browser-disabled.md', 'linux/computer.md', 'linux/output.md'))
     assert description == expected_description, 'First-call instructions were changed or truncated'
-    assert client.initialization['instructions'] == (instructions / 'repl/server.md').read_text().rstrip()
-    assert js_tool['inputSchema']['properties']['code']['description'] == (instructions / 'repl/code.md').read_text().rstrip()
+    assert client.initialization['instructions'] == (repl_instructions / 'server.md').read_text().rstrip()
+    assert js_tool['inputSchema']['properties']['code']['description'] == (repl_instructions / 'code.md').read_text().rstrip()
     reset_tool = next(item for item in tools if item['name'] == 'js_reset')
-    assert reset_tool['description'] == (instructions / 'repl/reset.md').read_text().rstrip()
+    assert reset_tool['description'] == (repl_instructions / 'reset.md').read_text().rstrip()
     initial = client.js('await cua.getState();')
     assert core in text(initial), 'First-use API instructions were changed or truncated'
     assert policy in text(initial), 'Default confirmation policy was changed or truncated'
-    assert 'macOS' not in text(initial) and 'On Windows' not in text(initial)
-    assert (source / 'skills/lcu/references/api.md').read_text() == core
+    assert (Path.home() / '.local/share/lcu/skills/lcu/references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').read_text() == core
     for attempt in range(30):
         response = client.js('nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));')
         windows = json.loads(text(response))
@@ -40,9 +40,8 @@ try:
             break
         time.sleep(0.1)
     assert len(targets) == 3, windows
-    # Exercise the same Linux client exposed by the upstream full-desktop skill.
-    # This binding is the only change to that reference's executable examples.
-    low_level = client.js(f'var sky = cua.computer; var window = (await sky.list_windows()).find(w => w.id === {targets["LCU Target"]["id"]}); var rawState = await sky.get_window_state({{window, include_screenshot:false}}); nodeRepl.write(rawState.ax_tree.to_string());')
+    # The unchanged upstream public import must execute, not merely resolve.
+    low_level = client.js(f'var {{sky}} = await import("@oai/sky"); var window = (await sky.list_windows()).find(w => w.id === {targets["LCU Target"]["id"]}); var rawState = await sky.get_window_state({{window, include_screenshot:false}}); nodeRepl.write(rawState.ax_tree.to_string());')
     assert 'Draft text' in text(low_level)
     full_image = client.js('await nodeRepl.emitImage((await sky.get_screenshot())[0].data_url);')
     assert any(item['type'] == 'image' for item in full_image['content'])

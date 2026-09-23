@@ -1,1 +1,0 @@
-Browser APIs are disabled.

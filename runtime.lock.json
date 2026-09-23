@@ -6,17 +6,35 @@
     "arm64": {
       "deb_arch": "arm64",
       "sha256": "b94c494b5f0fd7c720fa6fccd5ef609879affc62332ca930ed29b907d537bc6d",
-      "esbuild": {
-        "tarball": "https://registry.npmjs.org/@esbuild/linux-arm64/-/linux-arm64-0.25.12.tgz",
-        "integrity": "sha512-8bwX7a8FghIgrupcxb4aUmYDLp8pX06rGh5HqDT7bB+8Rdells6mHvrFHHW2JAOPZUbnjUpKTLg6ECyzvas2AQ=="
+      "components": {
+        "ChatGPT": "15f4066aff635c8e4ffc39b3653cb8aa8b91481d731e88c8e5a7aaca5c133f41",
+        "resources/app.asar": "70b6f7f8df841ade1ee9910d93c46c5defaa26914624fe70498983719228bbc9",
+        "resources/cua_node/bin/node": "0f8949d1028f6d61506b2d5bc57e7e6fe893d7b1997509b7847294fc9c616584",
+        "resources/cua_node/bin/node_repl": "dd56678070aae3788052b79b62a145c279c61fcd3e9f7d9613905f2b4972a931",
+        "resources/cua_node/manifest.json": "8099665da0857dea828417f7e069d1077d8dee689523f98a39c2583bc2bdbfa7",
+        "resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs": "992174a5e637645aeb444adfdb1bae688e997bb84d7db07532f68e358e60f278",
+        "resources/codex": "93f24dcb0b24d9f9ebe55b0c293d2e095ac76e3bb9b3feffb6c824ac67a10c8e",
+        "resources/codex-code-mode-host": "d05e48b9c8955f1f15780b3ca9708578a1da6fec07b0b89737c75f5acdf2ebb2",
+        "resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json": "1720b800ba7af063312c13ee7623011673621f3d29f9eb23c9d81fc0a560c93b",
+        "resources/plugins/openai-bundled/plugins/chrome/extension-host/linux/arm64/extension-host": "f95a820a5f025263f00b44eea861e2029c62d88be7a36a18a0882e6512bccc5f",
+        "resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json": "e7297a8851d46bb5d7f53d57e82d86cfdf4b04524bedf8c2ce6cf4a80ffe71da"
       }
     },
     "x64": {
       "deb_arch": "amd64",
       "sha256": "d27a9c02919cfe484dcc5f34584b9ea9fd0d7a65c69dcc872b5bdcfa0efb5983",
-      "esbuild": {
-        "tarball": "https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.25.12.tgz",
-        "integrity": "sha512-uqZMTLr/zR/ed4jIGnwSLkaHmPjOjJvnm6TVVitAa08SLS9Z0VM8wIRx7gWbJB5/J54YuIMInDquWyYvQLZkgw=="
+      "components": {
+        "ChatGPT": "3ac47769a211d64007c7dd072142cd32f9cbea0aaeb5d1e632eec507689fa7a2",
+        "resources/app.asar": "8889a6e9aeba678a5d77876bcc9cfce3168ab47cc7bb4ba5856f80a3a32157a8",
+        "resources/cua_node/bin/node": "7fde7b8afa198da66257f42ee2001d874c7355631e6d1579a5fb5ef1f246df4c",
+        "resources/cua_node/bin/node_repl": "a42e393a4e1332014275ca64f41e5ce80137d32d57a24658e568fe5ab9ada3f9",
+        "resources/cua_node/manifest.json": "6d7e9fddae05247f08e2c1639b18f2f63ff429e062d89c1f13a6825b4a6341e2",
+        "resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs": "992174a5e637645aeb444adfdb1bae688e997bb84d7db07532f68e358e60f278",
+        "resources/codex": "c544a899873ce1a51506304bb2818af6975a97715bb8c4c9ff0abd566a3fe3f6",
+        "resources/codex-code-mode-host": "8ae7c0ba6e1ddfb3b1b6210e0fd1b0860bb2c90d8b4ecfad44f27351b61b1c8a",
+        "resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json": "1720b800ba7af063312c13ee7623011673621f3d29f9eb23c9d81fc0a560c93b",
+        "resources/plugins/openai-bundled/plugins/chrome/extension-host/linux/x64/extension-host": "b3d387924712f51e962ade60aa151997d3c8ac0776875f93d65061d4078ca364",
+        "resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json": "e7297a8851d46bb5d7f53d57e82d86cfdf4b04524bedf8c2ce6cf4a80ffe71da"
       }
     }
   }

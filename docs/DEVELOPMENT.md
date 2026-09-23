@@ -1,42 +1,40 @@
-# Build and test
+# Development and validation
 
-Use a [release archive](https://github.com/0xpolarzero/lcu/releases) to install LCU. The source checkout contains the installer, instructions, and build scripts; it does not contain the runtime binaries.
+LCU releases are thin architecture-specific tarballs. The official ChatGPT Linux app is acquired on the target Linux machine during installation and is never part of the archive. [runtime.lock.json](../runtime.lock.json) pins app 26.915.31945, runtime 0.0.16/20260915001755-492f19756c31, package SHA-256 values and critical component hashes.
 
-## Build a release
+## Build
 
-Build on Linux with Python 3.12+, `dpkg-deb`, CA certificates, and network access. Use the target architecture or a matching Linux container:
+Use Python 3.12+ on matching Linux ARM64 or x86-64:
 
-```sh
+~~~sh
 python3 scripts/build_bundle.py --output dist
-```
+~~~
 
-To reuse a downloaded official package:
+The builder creates a tarball and SHA-256 sidecar. It provisions the fixed third-party agent registration tools and links their Node executable to the application that setup selects later. It does not download or extract the OpenAI app. Build-time --package is retired; pass --app-package to scripts/install.sh on the target machine.
 
-```sh
-python3 scripts/build_bundle.py --output dist --package /absolute/chatgpt_arm64.deb
-```
+Before publishing, inspect the tar member list and unpacked tree. They must contain LCU-owned launchers, wrapper skill, lock/installer metadata and redistributable registration dependencies only. They must not contain app binaries, upstream instruction copies, generated app fragments, profiles or tokens. Portable exports have the same no-OpenAI-payload requirement.
 
-The builder verifies the package checksum even when using a local file. It creates an architecture-specific `.tar.gz` and `.sha256` file in `dist/`. Existing output files are not overwritten.
+## Install and exercise an isolated fixture
 
-The archive includes the desktop engine, Node, the MCP server, Linux JavaScript, instructions, agent-registration dependencies, and license notices. Downloads happen during this build. Installation verifies and copies the bundled files.
+Prepare a disposable Ubuntu 24.04-compatible Linux desktop and account, and use a verified local official .deb:
 
-[runtime.lock.json](../runtime.lock.json) pins the official package and build tool. Agent-registration dependencies use their own [npm lockfile](../scripts/agent-tools/package-lock.json). Generated archives and binaries stay out of Git.
+~~~sh
+./scripts/install.sh --prefix /absolute/test-prefix --user testuser --skip-system --app-package /absolute/chatgpt.deb --offline --runtime-only --yes
+/absolute/test-prefix/current/bin/lcu doctor
+~~~
 
-## Run tests
+Root is required only for apt and another account's setup; the target app/REPL must be exercised as that unprivileged desktop account. Use an isolated HOME, CODEX_HOME, X11 session and browser profile. Keep the untouched original package baseline independent of LCU helpers, then compare observable GTK/X11/file/clipboard outcomes. Do not count a matching failure, tools/list, browser inventory or extension discovery as a successful browser action.
 
-These commands require Docker:
+Run focused unit checks during implementation:
 
-```sh
-./tests/run.sh linux/arm64
-./tests/run.sh linux/amd64
-```
+~~~sh
+python3 -m unittest discover -s tests -p 'test_runtime.py'
+python3 -m unittest discover -s tests -p 'test_instructions.py'
+python3 -m unittest discover -s tests -p 'test_installation.py'
+~~~
 
-A cached official package can be passed as the second argument:
+The final gate must test both architectures, mark emulation explicitly, and run native and Chrome actions under a normal Ubuntu host policy outside a privileged container. Inspect the actual process confinement labels and policy denials; the ChatGPT Electron profile is not a prerequisite for LCU's direct Node/REPL path. The [ARM64 Ubuntu AppArmor host run](verification/installed-app-2026-09-23.md) passed native use and a no-sign-in Chrome action with actual process labels. Native x86-64 host behavior remains open. Docker fixtures alone prove bounded native behavior and offline failure paths, not host OS confinement.
 
-```sh
-./tests/run.sh linux/arm64 /absolute/chatgpt_arm64.deb
-```
+Chrome verification uses the original MCP → browser service → LCU relay → original native host → extension chain and an isolated Chrome profile. The target path must complete navigation, input, click, screenshot and lifecycle without Codex sign-in, and the fixture server must observe `x-browser-agent` on the requests. The original browser also requests scoped MCP site approval; a test client may approve its own disposable localhost fixture, but must not synthesize a broader grant. Never copy a personal credential store. The [current status](PARITY-STATUS.md) distinguishes this local policy override from the original Codex account policy.
 
-The script builds an archive, then installs and tests it in a fresh container with networking disabled. It checks installation, agent registration, and desktop actions against GTK and Xlib test applications. It does not use your desktop or agent accounts.
-
-See [test results and limits](VERIFICATION.md) for the evidence behind the current release. The original binaries and Linux API come from the pinned upstream package; [runtime sources](PROVENANCE.md) explains what is included and how updates are checked.
+Historical IAB fixture and full-copy bundle evidence predates this migration. [Verification](VERIFICATION.md) and [current status](PARITY-STATUS.md) separate those results from final thin-artifact claims.

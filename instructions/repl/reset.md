@@ -1,1 +1,0 @@
-Reset the persistent cua_repl JavaScript session. All JavaScript bindings are discarded. The next js call initializes a fresh runtime for the enabled surfaces. This does not close browser tabs or native apps, or erase their state.

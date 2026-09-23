@@ -69,11 +69,11 @@ def provision(release, source):
                     raise ValueError(f'Unexpected installed {package} version.')
                 subprocess.run([str(node), str(destination / 'node_modules' / package / entry), '--version'],
                                cwd=scratch, env=environment, check=True, timeout=20)
-            # Registration uses the official CUA Node already installed in this release.
+            # Registration uses the official CUA Node selected at install time.
             # npm is only a build dependency; keep no second Node distribution.
             shutil.rmtree(destination / 'node')
             (destination / 'node/bin').mkdir(parents=True)
-            (destination / 'node/bin/node').symlink_to('../../../runtime/bin/node')
+            (destination / 'node/bin/node').symlink_to('../../../app/resources/cua_node/bin/node')
     except BaseException:
         shutil.rmtree(destination)
         raise

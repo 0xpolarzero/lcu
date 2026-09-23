@@ -14,6 +14,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import uuid
 
 from .setup_clients import CLIENTS, ALIASES
 
@@ -43,22 +44,6 @@ def read_file(path):
             raise ValueError(f'Expected a regular file: {path}')
         return path.read_bytes()
     return None
-
-
-def tree_files(path):
-    regular_path(path)
-    if not path.exists():
-        return {}
-    if not path.is_dir():
-        raise ValueError(f'Expected a skill directory: {path}')
-    result = {}
-    for item in path.rglob('*'):
-        regular_path(item)
-        if item.is_file():
-            result[str(item.relative_to(path))] = item.read_bytes()
-        elif not item.is_dir():
-            raise ValueError(f'Unsupported skill file: {item}')
-    return result
 
 
 def atomic_write(path, data):
@@ -219,23 +204,153 @@ def preflight_mcp(node, mcp, client, scope, cwd, env):
         raise ValueError(result.stderr.strip() or 'MCP configuration preflight failed')
 
 
-def configure(names, home, source, command, tools_root, *, scope='user', project=None, environ=None):
+MCP_REGISTER = r"""
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [cli, agent, scope, commandJson, policyJson] = process.argv.slice(1);
+const { agents, upsertServer } = await import(pathToFileURL(join(dirname(cli), 'lib.js')));
+if (agent === 'codex') {
+  const transform = agents.codex.transformConfig;
+  const policy = JSON.parse(policyJson);
+  agents.codex.transformConfig = (...args) => ({ ...transform(...args), ...policy });
+}
+const [command, ...args] = JSON.parse(commandJson);
+const result = upsertServer(agent, 'lcu', { command, args }, { local: scope === 'project', cwd: process.cwd() });
+if (!result.success) throw new Error(result.error);
+console.log(JSON.stringify(result));
+"""
+
+
+def host_policy(release_root):
+    """Use the shipped host contract, not reconstructed tool defaults."""
+    resources = installed_app_resources(release_root)
+    descriptor = resources / 'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json'
+    server = json.loads(descriptor.read_text())['mcpServers']['cua_repl']
+    # Codex replaces these launch fields at runtime. LCU supplies its own command.
+    return {key: value for key, value in server.items() if key not in ('command', 'args', 'enabled')}
+
+
+def installed_app_resources(release_root):
+    """Resolve the selected installation without depending on release payload copies."""
+    release_root = Path(release_root).resolve()
+    descriptor = release_root / 'installation.json'
+    app = release_root / 'app'
+    if not descriptor.is_file():
+        raise ValueError(f'Installed application descriptor missing: {descriptor}')
+    try:
+        installation = json.loads(descriptor.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f'Invalid installed application descriptor: {descriptor}') from exc
+    app_reference = installation.get('app') if isinstance(installation, dict) else None
+    if not isinstance(app_reference, str) or not app_reference:
+        raise ValueError(f'Installed application descriptor has no app reference: {descriptor}')
+    try:
+        described_app = (release_root / app_reference).resolve(strict=True)
+        selected_app = app.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError(f'Installed application path is incomplete: {release_root}') from exc
+    if described_app != selected_app:
+        raise ValueError(f'Installed application descriptor does not match selected app: {descriptor}')
+    resources = selected_app / 'resources'
+    if not resources.is_dir():
+        raise ValueError(f'Installed application resources missing: {resources}')
+    return resources
+
+
+def _copy_resource_tree(source, destination):
+    """Copy regular files from a selected upstream instruction tree."""
+    if not source.is_dir():
+        raise ValueError(f'Original instruction directory missing: {source}')
+    for path in source.rglob('*'):
+        if path.is_symlink():
+            raise ValueError(f'Unexpected symlink in original instructions: {path}')
+        if path.is_file():
+            relative = path.relative_to(source)
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+
+
+def _copy_resource_file(source, destination):
+    if source.is_symlink() or not source.is_file():
+        raise ValueError(f'Original instruction file missing: {source}')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+
+
+def generate_skill(source, home, release_root):
+    """Materialize applicable original Linux and Chrome references user-locally."""
+    resources = installed_app_resources(release_root)
+    modules = resources / 'cua_node/lib/node_modules'
+    selections = (
+        (modules / '@oai/cua/docs', Path('upstream/cua/docs')),
+        (modules / '@oai/cua-repl/instructions', Path('upstream/cua-repl/instructions')),
+        (modules / '@oai/browser-desktop/environment-docs/codex-app', Path('upstream/browser-desktop/codex-app')),
+        (resources / 'plugins/openai-bundled/plugins/chrome/docs', Path('upstream/chrome/docs')),
+        (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome', Path('upstream/chrome/skill')),
+    )
+    generated_root = regular_path(home / '.local/share/lcu/skills')
+    generated = generated_root / 'lcu'
+    generated_root.mkdir(parents=True, exist_ok=True)
+    stage = generated_root / ('.lcu-stage-' + uuid.uuid4().hex)
+    stage.mkdir()
+    try:
+        (stage / 'SKILL.md').write_bytes((source / 'SKILL.md').read_bytes())
+        refs = stage / 'references'
+        # The REPL directory has inactive macOS/Windows trees; expose only shared
+        # launcher docs and the Linux branch relevant to this installation.
+        repl_source, repl_target = selections[1]
+        for name in ('banner.js', 'browser-disabled.md', 'code.md', 'computer-disabled.md', 'reset.md', 'server.md'):
+            path = repl_source / name
+            if path.is_file():
+                target = refs / repl_target / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
+        _copy_resource_tree(repl_source / 'linux', refs / repl_target / 'linux')
+        for upstream, relative in (selections[0], *selections[2:]):
+            _copy_resource_tree(upstream, refs / relative)
+        _copy_resource_file(modules / '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md',
+                            refs / 'upstream/sky/linux/SKILL.md')
+        _copy_resource_file(modules / '@oai/sky/docs/sky-full-desktop-api.md',
+                            refs / 'upstream/sky/native-api.md')
+        _copy_resource_file(modules / '@oai/sky/docs/sky-window-api.md',
+                            refs / 'upstream/sky/window-api.md')
+        _copy_resource_file(modules / '@oai/sky/docs/sky-window2-api.md',
+                            refs / 'upstream/sky/window2-api.md')
+        # Replace the previous generation atomically after every required source
+        # has been read successfully; agent registration then uses --copy.
+        previous = generated_root / ('.lcu-previous-' + uuid.uuid4().hex)
+        if generated.exists():
+            os.replace(generated, previous)
+        try:
+            os.replace(stage, generated)
+        except BaseException:
+            if previous.exists():
+                os.replace(previous, generated)
+            raise
+        shutil.rmtree(previous, ignore_errors=True)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+    return generated
+
+
+def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, environ=None):
     """Delegate registration and return phase failures; no client executable needed."""
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
-    if not (source / 'SKILL.md').is_file():
-        raise ValueError(f'Complete LCU skill missing: {source}')
+    skill_source = generate_skill(source, home, release_root)
+    resources = installed_app_resources(release_root)
+    original_plugins = resources / 'plugins/openai-bundled'
     cwd = project if scope == 'project' else home
     global_args = ['--global'] if scope == 'user' else []
     failures = []
     for name in names:
         client = CLIENTS[name]
         commands = (
-            ('skill', [str(node), str(skills), 'add', str(source), '--skill', 'lcu',
+            ('skill', [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
                        '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]),
-            ('MCP', [str(node), str(mcp), command[0], '--name', 'lcu',
-                     '--agent', client.mcp_agent, '--yes', *global_args,
-                     *['--args=' + arg for arg in command[1:]]]),
+            ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
+                     client.mcp_agent, scope, json.dumps(command), json.dumps(host_policy(release_root))]),
         )
         for phase, argv in commands:
             try:
@@ -257,6 +372,10 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
                         and item.get('status') == 'installed' for item in installed
                     ):
                         raise ValueError('skill installer did not report installing LCU')
+                elif name == 'codex':
+                    from .codex_hooks import install_hooks
+                    registered = json.loads(result.stdout)
+                    install_hooks(resources / 'codex', Path(registered['path']), cwd, env, original_plugins)
                 print(f'{client.label}: {phase} registered.')
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))
@@ -264,18 +383,65 @@ def configure(names, home, source, command, tools_root, *, scope='user', project
     return failures
 
 
-def export_bundle(destination, source, command):
+def export_bundle(destination, source, command, release_root):
     destination = regular_path(destination)
     if destination.exists():
         raise ValueError('Export destination already exists; choose a new directory.')
-    files = tree_files(source)
-    if 'SKILL.md' not in files:
+    if not (source / 'SKILL.md').is_file():
         raise ValueError('Complete LCU skill missing.')
+    # Portable exports carry only LCU-authored bootstrap guidance. The original
+    # application and its instruction files are resolved on the target machine.
+    files = {'SKILL.md': (source / 'SKILL.md').read_bytes()}
     manifest = {'$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
                 'name': 'lcu', 'description': 'Computer use for AI agents on Linux.'}
-    mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': command[0], 'args': command[1:]}}}
+    # A cross-machine export cannot retain the producer's prefix or account.
+    # Resolve the destination's selected release when its MCP client starts.
+    launch = ('set -eu; prefix=${LCU_PREFIX:-/opt/lcu}; '
+              'case "$prefix" in /*) ;; *) echo "LCU_PREFIX must be absolute" >&2; exit 2;; esac; '
+              'case "${LCU_SESSION_MODE:-discover}" in '
+              'direct) exec "$prefix/current/bin/lcu" "$@";; '
+              'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
+              '"$prefix/current/bin/lcu" "$@";; '
+              '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
+    portable_command = ['/bin/sh', '-c', launch, 'lcu-export']
+    mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': portable_command[0],
+                                 'args': portable_command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
-               Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode())]
+               Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode()),
+               Change(destination / 'host-contract.json', None, (json.dumps(host_policy(release_root), indent=2) + '\n').encode())]
+    bootstrap_metadata = {
+        'requiresInstalledApplication': True,
+        'applicationResourceRoot': 'resources',
+        'instructionSources': [
+            'resources/cua_node/lib/node_modules/@oai/cua/docs',
+            'resources/cua_node/lib/node_modules/@oai/cua-repl/instructions/linux',
+            'resources/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app',
+            'resources/cua_node/lib/node_modules/@oai/sky/docs/skills/oai_sky_lib/linux',
+            'resources/cua_node/lib/node_modules/@oai/sky/docs/sky-full-desktop-api.md',
+            'resources/plugins/openai-bundled/plugins/chrome/docs',
+            'resources/plugins/openai-bundled/plugins/chrome/skills/control-chrome',
+        ],
+        'destinationSetup': 'Install the thin LCU archive and pinned application, then run lcu setup --export /new/path --yes on that Linux account. Import the newly generated export and its local full skill.',
+        'runtimePrefix': 'Set LCU_PREFIX on the destination when it is not /opt/lcu.',
+        'sessionMode': 'Set LCU_SESSION_MODE=direct when the agent already has DISPLAY and D-Bus; default is discover.',
+        'preCallRequirement': 'Generate and register the local skill before the first computer-use call.',
+    }
+    changes.append(Change(destination / 'lcu-bootstrap.json', None,
+                          (json.dumps(bootstrap_metadata, indent=2) + '\n').encode()))
+    policy = host_policy(release_root)
+    codex = {'mcpServers': {'lcu': {**policy, 'command': portable_command[0],
+                                   'args': portable_command[1:]}}}
+    changes.append(Change(destination / 'codex.mcp.json', None, (json.dumps(codex, indent=2) + '\n').encode()))
+    from .codex_hooks import export_files
+    resources = installed_app_resources(release_root)
+    original_plugins = resources / 'plugins/openai-bundled'
+    changes += [Change(destination / name, None, data)
+                for name, data in export_files(portable_command, original_plugins).items()]
+    bootstrap = ("# LCU skill bootstrap\n\n"
+                 "Install LCU and its pinned application on this Linux machine, then run "
+                 "`lcu setup --export /new/path --yes` here and import that new export. "
+                 "Use the generated local full skill before the first computer-use call.\n")
+    files['SKILL.md'] = bootstrap.encode()
     changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
     apply_changes(changes)
 
@@ -291,12 +457,15 @@ def parser():
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
     p.add_argument('--session', choices=['discover', 'direct'], default='discover', help='discover attaches through lcu-session (XFCE); direct inherits agent desktop environment')
+    p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
     return p
 
 
 def validate(args):
+    if args.browser_host:
+        raise ValueError('--browser-host was removed; use the original Chrome provider with `lcu setup --agent AGENT`. Embedded in-app browser hosting is not supported.')
     prefix = args.prefix
     if not prefix.is_absolute() or len(prefix.parts) < 3 or '..' in prefix.parts or any(ord(c) < 32 for c in str(prefix)):
         raise ValueError('Use a dedicated absolute prefix, such as /opt/lcu.')
@@ -408,6 +577,8 @@ def main(argv=None):
             else:
                 print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
                 print('Existing LCU skill and MCP entries will be updated; unrelated configuration is preserved.')
+                if 'codex' in names:
+                    print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')
@@ -415,9 +586,15 @@ def main(argv=None):
                     print('Cancelled; no agent configuration changed.')
                     return
             if args.export:
-                export_bundle(args.export, source, command)
+                local_skill = generate_skill(source, home, args.prefix / 'current')
+                export_bundle(args.export, source, command, args.prefix / 'current')
+                print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
             else:
-                failures = configure(names, home, source, command, tools_root,
+                # The original native host is a per-account browser connection.
+                # Install it after consent and before exposing agent registrations.
+                from .browser import install as install_browser_host
+                install_browser_host(args.prefix / 'current')
+                failures = configure(names, home, source, command, tools_root, args.prefix / 'current',
                                      scope=args.scope, project=args.project)
                 if failures:
                     retry = [str(runtime), 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
@@ -433,11 +610,13 @@ def main(argv=None):
             print('Import this plugin with a compatible client, or use its mcp.json and skills/lcu with your custom agent. Its command runs on this Linux machine.')
         if args.check_desktop:
             print('Checking the live desktop...')
-            subprocess.run([*command, 'doctor'], check=True, timeout=35)
+            doctor = command + ['doctor']
+            subprocess.run(doctor, check=True, timeout=35)
             print('Desktop readiness check passed. Tool and skill discovery inside the agent still needs its first connection.')
         else:
             print('Live desktop not checked (image builds need no running GUI). After starting the desktop, check with:')
-            print('  ' + shlex.join([*command, 'doctor']))
+            doctor = command + ['doctor']
+            print('  ' + shlex.join(doctor))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         p.exit(1, f'Setup failed: {exc}\n')
 
