@@ -10,7 +10,7 @@ docker run --rm --network none --platform linux/arm64 \
   -v /absolute/empty-evidence:/evidence \
   -e DIFFERENTIAL_AUDIO=1 -e DIFFERENTIAL_XFCE=1 \
   lcu-full-test:arm64 bash /src/tests/differential.sh \
-  /package.deb /bundles/lcu-0.3.0-dev-linux-arm64.tar.gz /evidence
+  /package.deb /bundles/lcu-0.3.0-linux-arm64.tar.gz /evidence
 ```
 
 Repeat with platform/image `linux/amd64`/`lcu-full-test:amd64`, the pinned AMD64 package, and the `linux-x64` archive. Build the images from `tests/Dockerfile`. The output directory must start empty. Preserve the output even when a test fails.

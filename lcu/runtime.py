@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import uuid
 
 
@@ -87,9 +88,38 @@ def environment(root):
     return env
 
 
+def reply_to_server_discover(source, destination):
+    """Return a legacy-version probe error without reading beyond its line."""
+    raw = bytearray()
+    while len(raw) <= 1024 * 1024:
+        byte = source.read(1)
+        if not byte:
+            break
+        raw.extend(byte)
+        if byte == b'\n':
+            break
+    if not raw.endswith(b'\n'):
+        raise ValueError('Expected a newline-terminated initial JSON-RPC server/discover request.')
+    if len(raw) > 1024 * 1024:
+        raise ValueError('Initial JSON-RPC server/discover request exceeds 1 MiB.')
+    try:
+        request = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError('Expected a valid initial JSON-RPC server/discover request.') from exc
+    request_id = request.get('id') if isinstance(request, dict) else None
+    if (not isinstance(request, dict) or request.get('jsonrpc') != '2.0' or
+            request.get('method') != 'server/discover' or
+            isinstance(request_id, bool) or not isinstance(request_id, (str, int, float))):
+        raise ValueError('Expected an initial JSON-RPC server/discover request in compatibility mode.')
+    response = {'jsonrpc': '2.0', 'id': request_id,
+                'error': {'code': -32601, 'message': 'Method not found'}}
+    destination.write((json.dumps(response, separators=(',', ':')) + '\n').encode())
+    destination.flush()
+
+
 def main(root, argv):
     if argv[:1] in (['--help'], ['-h']):
-        print('Usage: lcu [setup OPTIONS | browser install | doctor | --version]\n'
+        print('Usage: lcu [setup OPTIONS | browser install | doctor | --version | --mcp-discovery-compat]\n'
               'With no arguments, starts the original stdio MCP server.')
         return
     if argv[:1] == ['--version']:
@@ -111,8 +141,9 @@ def main(root, argv):
     if argv == ['--with-browser-host']:
         raise ValueError('--with-browser-host was removed with the embedded browser. '
                          'Run lcu browser install and enable the official Chrome extension.')
-    if argv and argv != ['doctor']:
-        raise ValueError('Usage: lcu [setup OPTIONS | browser install | doctor | --version]')
+    discovery_compat = argv == ['--mcp-discovery-compat']
+    if argv and argv not in (['doctor'], ['--mcp-discovery-compat']):
+        raise ValueError('Usage: lcu [setup OPTIONS | browser install | doctor | --version | --mcp-discovery-compat]')
     _, _, runtime, _ = paths(root)
     env = environment(root)
     if argv == ['doctor']:
@@ -124,4 +155,6 @@ def main(root, argv):
         return
     launcher = runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
     command = [str(runtime / 'bin/node'), str(launcher)]
+    if discovery_compat:
+        reply_to_server_discover(sys.stdin.buffer.raw, sys.stdout.buffer)
     os.execve(runtime / 'bin/node', command, env)

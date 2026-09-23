@@ -1,8 +1,10 @@
+import io
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -128,6 +130,38 @@ class UpstreamRuntimeTests(unittest.TestCase):
         self.assertEqual(execute.call_args.args[1],
             [str(self.root / 'app/resources/cua_node/bin/node'),
              str(self.root / 'app/resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')])
+
+    def test_mcp_discovery_compat_probes_then_execs_original_server(self):
+        following = b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'
+        source = io.BytesIO(b'{"jsonrpc":"2.0","id":0,"method":"server/discover"}\n' + following)
+        destination = io.BytesIO()
+        stdin = SimpleNamespace(buffer=SimpleNamespace(raw=source))
+        stdout = SimpleNamespace(buffer=destination)
+        with patch('lcu.runtime.sys.stdin', stdin), patch('lcu.runtime.sys.stdout', stdout), \
+                patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--mcp-discovery-compat'])
+
+        self.assertEqual(json.loads(destination.getvalue()), {
+            'jsonrpc': '2.0', 'id': 0,
+            'error': {'code': -32601, 'message': 'Method not found'},
+        })
+        self.assertEqual(source.read(), following)
+        node = self.root / 'app/resources/cua_node/bin/node'
+        launcher = self.root / 'app/resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
+        execute.assert_called_once()
+        self.assertEqual(execute.call_args.args[:2], (node, [str(node), str(launcher)]))
+
+    def test_mcp_discovery_compat_rejects_other_first_request_without_launching(self):
+        source = io.BytesIO(b'{"jsonrpc":"2.0","id":0,"method":"tools/list"}\n')
+        destination = io.BytesIO()
+        stdin = SimpleNamespace(buffer=SimpleNamespace(raw=source))
+        stdout = SimpleNamespace(buffer=destination)
+        with patch('lcu.runtime.sys.stdin', stdin), patch('lcu.runtime.sys.stdout', stdout), \
+                patch('lcu.runtime.os.execve') as execute:
+            with self.assertRaisesRegex(ValueError, 'initial JSON-RPC server/discover request'):
+                main(self.root, ['--mcp-discovery-compat'])
+        execute.assert_not_called()
+        self.assertEqual(destination.getvalue(), b'')
 
     def test_retargeted_app_link_is_rejected_before_launch(self):
         descriptor = self.root / 'installation.json'

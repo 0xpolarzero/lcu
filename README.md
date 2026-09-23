@@ -2,7 +2,7 @@
 
 LCU installs a fixed official ChatGPT Linux application as a private dependency and launches its original computer-use runtime for an existing Linux desktop. It exposes the original persistent MCP JavaScript tools to supported agents. LCU releases contain LCU code and installer metadata, not OpenAI application files.
 
-**Development status:** native computer use and the thin installed-app path passed the prior offline differential checks. The installed ARM64 and x86-64 builds passed no-sign-in Chrome actions in Ubuntu 24.04.5 guests with AppArmor active; the x86-64 guest ran under KVM on physical AMD hardware. LCU installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. This is still an unpublished development build; see [current status](docs/PARITY-STATUS.md) for remaining checks.
+**Status:** native computer use and the thin installed-app path passed the offline differential checks. The installed ARM64 and x86-64 builds passed no-sign-in Chrome actions in Ubuntu 24.04.5 guests with AppArmor active; the x86-64 guest ran under KVM on physical AMD hardware. LCU installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. See [current status](docs/PARITY-STATUS.md) for exact evidence and limitations.
 
 ## Requirements
 
@@ -51,5 +51,7 @@ Agent setup configures the original native host for that Linux account. To refre
 ~~~
 
 Install and enable the [official ChatGPT browser extension](https://learn.chatgpt.com/docs/chrome-extension) in the selected Chrome profile. LCU does not sign in, choose a personal profile, grant site permissions, or substitute another browser. Its local native-host relay enables the official extension's `x-browser-agent` request label, so the original browser service can act without the Codex account feature-gate lookup. The MCP client must still approve the requested site. The user and agent can view the same browser through the existing desktop viewer.
+
+Agent hosts need MCP site-approval support for Chrome. Goose 1.51.0 can use the opt-in `--mcp-discovery-compat` flag in an interactive session; see [installation](docs/INSTALLATION.md). OpenCode 1.18.32 did not provide site approval in the tested mode, so its browser action stopped before loading the page.
 
 LCU's code is [MIT licensed](LICENSE). The installed official application retains its original files, notices and terms. LCU is an independent project.

@@ -173,7 +173,7 @@ def _validate_managed(path, arch, lock, entry, account=None, execute=True):
 
 def _download(lock, entry, destination):
     url = lock['source'].format(deb_arch=entry['deb_arch'])
-    request = Request(url, headers={'User-Agent': 'lcu/0.3.0-dev'})
+    request = Request(url, headers={'User-Agent': 'lcu/0.3.0'})
     digest = hashlib.sha256()
     try:
         with urlopen(request, timeout=60) as response, destination.open('xb') as output:

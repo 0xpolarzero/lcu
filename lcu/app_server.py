@@ -47,7 +47,7 @@ class AppServer:
         self.selector.register(process.stdout, selectors.EVENT_READ)
         try:
             self.initialization = self('initialize', {
-                'clientInfo': {'name': 'lcu', 'version': '0.3.0-dev'},
+                'clientInfo': {'name': 'lcu', 'version': '0.3.0'},
                 'capabilities': {'experimentalApi': True}})
             self.send({'method': 'initialized'})
         except BaseException:
