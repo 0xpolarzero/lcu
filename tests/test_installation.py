@@ -2,8 +2,11 @@ import os
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -223,6 +226,112 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
         self.assertEqual(list((prefix / 'releases').iterdir()), [old])
         self.assertFalse(list(prefix.glob('.build-*')))
+
+    def test_simultaneous_installs_to_same_prefix_serialize_release_switches(self):
+        prefix = self.root / 'lcu'
+        old = prefix / 'releases/old'
+        old.mkdir(parents=True)
+        (old / 'data').write_text('previous version')
+        (prefix / '.lcu-install').touch()
+        (prefix / 'current').symlink_to('releases/old')
+        source = self.root / 'bundle'
+        source.mkdir()
+        (source / 'payload').write_text('new version')
+        (source / 'runtime.lock.json').write_text(json.dumps({
+            'version': '26.915.31945', 'architectures': {'arm64': {'sha256': '0' * 64}}}))
+        seal(source, 'arm64')
+        application = self.root / 'chatgpt'
+        application.mkdir()
+
+        start = threading.Barrier(2)
+        state_lock = threading.Lock()
+        active_validations = 0
+        max_active_validations = 0
+        errors = []
+
+        def validate(_release, _account=None):
+            nonlocal active_validations, max_active_validations
+            with state_lock:
+                active_validations += 1
+                max_active_validations = max(max_active_validations, active_validations)
+            time.sleep(0.05)
+            with state_lock:
+                active_validations -= 1
+
+        def run_install():
+            try:
+                start.wait(timeout=5)
+                install(prefix)
+            except BaseException as exc:
+                errors.append(exc)
+
+        with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
+             patch('install.provision_app', return_value=(application, None)), \
+             patch('install.validate_release', side_effect=validate):
+            threads = [threading.Thread(target=run_install) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads), 'installer thread did not finish')
+        self.assertEqual(errors, [])
+        self.assertEqual(max_active_validations, 1)
+        self.assertEqual((prefix / 'current/payload').read_text(), 'new version')
+        self.assertEqual(len(list((prefix / 'releases').iterdir())), 3)
+
+    def test_dependency_acquisition_failure_preserves_active_release(self):
+        prefix = self.root / 'lcu'
+        old = prefix / 'releases/old'
+        old.mkdir(parents=True)
+        (old / 'data').write_text('previous version')
+        (prefix / '.lcu-install').touch()
+        (prefix / 'current').symlink_to('releases/old')
+        failure = subprocess.CalledProcessError(100, ['apt-get', 'install'])
+
+        with patch('install.setup.validate', return_value=(None, [])), \
+             patch('install.checked_prefix', return_value=prefix), \
+             patch('install.architecture', return_value='arm64'), \
+             patch('install.verify'), patch('install.preflight_app'), \
+             patch('install.os.getuid', return_value=0), patch('install.shutil.which', return_value='/usr/bin/apt-get'), \
+             patch('install.subprocess.run', side_effect=[None, failure]) as run, \
+             patch('install.install', side_effect=AssertionError('release install reached')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                install_main(['--prefix', str(prefix), '--runtime-only'])
+
+        self.assertEqual(run.call_args_list[0].args[0], ['apt-get', 'update'])
+        self.assertEqual(run.call_args_list[1].args[0][:3], ['apt-get', 'install', '-y'])
+        self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
+        self.assertEqual(list((prefix / 'releases').iterdir()), [old])
+
+    def test_unexpected_next_symlink_preserves_active_release(self):
+        prefix = self.root / 'lcu'
+        old = prefix / 'releases/old'
+        old.mkdir(parents=True)
+        (old / 'data').write_text('previous version')
+        (prefix / '.lcu-install').touch()
+        (prefix / 'current').symlink_to('releases/old')
+        conflict = self.root / 'conflict'
+        conflict.mkdir()
+        (prefix / '.next').symlink_to(conflict, target_is_directory=True)
+        source = self.root / 'bundle'
+        source.mkdir()
+        (source / 'payload').write_text('new version')
+        (source / 'runtime.lock.json').write_text(json.dumps({
+            'version': '26.915.31945', 'architectures': {'arm64': {'sha256': '0' * 64}}}))
+        seal(source, 'arm64')
+        application = self.root / 'chatgpt'
+        application.mkdir()
+
+        with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
+             patch('install.provision_app', return_value=(application, None)), \
+             patch('install.validate_release'):
+            with self.assertRaisesRegex(ValueError, 'Unexpected .next path'):
+                install(prefix)
+
+        self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
+        self.assertTrue((prefix / '.next').is_symlink())
+        self.assertEqual(list((prefix / 'releases').iterdir()), [old])
 
     def test_caller_security_settings_survive(self):
         app = self.root / 'app'

@@ -22,7 +22,7 @@ The default managed prefix is /opt/lcu. Use --prefix /absolute/dedicated/path fo
 
 System library installation is a separate apt operation and cannot be rolled back as a single transaction with the LCU selection. Failed app validation or release selection leaves the previous current symlink in place. Existing running processes may still hold old generations; do not remove old app or LCU generations until they have exited.
 
-The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Electron UI. LCU directly launches the selected app's Node and CUA REPL, so that profile does not apply to LCU's native path and is not an LCU install requirement. The [ARM64 Ubuntu AppArmor test](verification/installed-app-2026-09-23.md) passed native computer use and a Chrome action with AppArmor active; it recorded process labels and nonblocking `bwrap` denials. Keep the browser sandbox enabled; do not alter the system AppArmor policy to make a test pass. Native x86-64 host behavior remains unverified.
+The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Electron UI. LCU directly launches the selected app's Node and CUA REPL, so that profile does not apply to LCU's native path and is not an LCU install requirement. The [ARM64 and x86-64 Ubuntu AppArmor tests](verification/installed-app-2026-09-23.md) passed native computer use and Chrome actions with AppArmor active; they recorded process labels and nonblocking `bwrap` denials. The x86-64 guest ran under KVM on physical AMD hardware. Keep the browser sandbox enabled; do not alter the system AppArmor policy to make a test pass.
 
 ## Account and agent registration
 
@@ -55,7 +55,9 @@ This invokes the original plugin's native-host installer from a user-local copy,
 
 The native-host manifest belongs to the Linux account, so other apps using this same extension and browser account also reach LCU's relay. The official extension stores the header-on decision in its Chrome profile after an agent session. Installing or removing the relay therefore does not automatically restore the original account-specific header decision in that profile.
 
-Readiness is staged: package installed, desktop ready, extension discovered, then a browser action independently observed on a page under the intended no-sign-in policy. The installed ARM64 build passed navigation, Unicode input, click, screenshot and tab close in a disposable Ubuntu Chrome profile; the local page observed `x-browser-agent` on every browser request. Site approval is still required. This local override does not reproduce a user-specific Codex feature-gate decision.
+Readiness is staged: package installed, desktop ready, extension discovered, then a browser action independently observed on a page under the intended no-sign-in policy. The installed ARM64 and x86-64 builds passed navigation, Unicode input, click, screenshot and tab close in disposable Ubuntu Chrome profiles; the local page observed `x-browser-agent` on browser requests. Site approval is still required. This local override does not reproduce a user-specific Codex feature-gate decision.
+
+The agent host must support MCP site-approval elicitation for Chrome actions. OpenCode 1.18.32 delivered LCU's tools and instructions but did not advertise elicitation, so the pinned browser provider blocked its page request. Goose 1.51.0 did not initialize the pinned MCP server because it sent `server/discover` first. Registration success alone does not establish browser-action readiness in either product; see the [verification record](verification/installed-app-2026-09-23.md).
 
 ## Upgrades and rollback
 

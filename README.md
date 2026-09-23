@@ -2,7 +2,7 @@
 
 LCU installs a fixed official ChatGPT Linux application as a private dependency and launches its original computer-use runtime for an existing Linux desktop. It exposes the original persistent MCP JavaScript tools to supported agents. LCU releases contain LCU code and installer metadata, not OpenAI application files.
 
-**Development status:** native computer use and the thin installed-app path passed the prior offline differential checks. The installed ARM64 build passed a no-sign-in Chrome action in Ubuntu 24.04.5 with AppArmor active. LCU now installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. This is still an unpublished development build; see [current status](docs/PARITY-STATUS.md) for remaining checks.
+**Development status:** native computer use and the thin installed-app path passed the prior offline differential checks. The installed ARM64 and x86-64 builds passed no-sign-in Chrome actions in Ubuntu 24.04.5 guests with AppArmor active; the x86-64 guest ran under KVM on physical AMD hardware. LCU installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. This is still an unpublished development build; see [current status](docs/PARITY-STATUS.md) for remaining checks.
 
 ## Requirements
 
