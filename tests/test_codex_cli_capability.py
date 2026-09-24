@@ -32,6 +32,22 @@ class CodexCliCapabilityTests(unittest.TestCase):
                 require_cli_hook_support({'PATH': '/fixture/bin', 'OPENAI_API_KEY': 'never-forward'})
         self.assertEqual(len(calls), 2)
 
+    def test_windows_systemroot_survives_isolated_probe(self):
+        environments = []
+
+        def run(argv, **kwargs):
+            environments.append(kwargs['env'])
+            return subprocess.CompletedProcess(argv, 0, 'codex-cli fixture\n', '')
+
+        with patch('lcu.codex_hooks.shutil.which', return_value=r'C:\fixture\codex.exe'), \
+             patch('lcu.codex_hooks.subprocess.run', side_effect=run):
+            require_cli_hook_support({'PATH': r'C:\fixture', 'SYSTEMROOT': r'C:\Windows',
+                                      'OPENAI_API_KEY': 'never-forward'})
+        self.assertEqual(len(environments), 2)
+        for child in environments:
+            self.assertEqual(child['SYSTEMROOT'], r'C:\Windows')
+            self.assertNotIn('OPENAI_API_KEY', child)
+
 
 if __name__ == '__main__':
     unittest.main()

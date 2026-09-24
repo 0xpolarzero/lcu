@@ -66,7 +66,7 @@ def require_cli_hook_support(env):
             '[hooks]\n'
             'Stop = [{ hooks = [{ type = "mcp_tool", server = "lcu", '
             'tool = "turn_ended", input = { session_id = "s", turn_id = "t" } }] }]\n')
-        safe_env = {key: env[key] for key in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SystemRoot', 'PATHEXT')
+        safe_env = {key: env[key] for key in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SystemRoot', 'SYSTEMROOT', 'PATHEXT')
                     if key in env}
         safe_env.update(HOME=temporary, CODEX_HOME=temporary)
         try:
