@@ -7,6 +7,13 @@ import subprocess
 import sys
 import uuid
 
+USAGE = ('Usage: lcu [--chrome] [--mcp-discovery-compat]\n'
+         '       lcu setup OPTIONS\n'
+         '       lcu browser install\n'
+         '       lcu browser status\n'
+         '       lcu doctor\n'
+         '       lcu --version')
+
 
 def paths(root):
     """Resolve one selected, intact application generation."""
@@ -180,9 +187,8 @@ def main(root, argv):
     if argv[:1] == ['--chrome'] and argv[1:] in (['--help'], ['-h'], ['--version']):
         argv = argv[1:]
     if argv[:1] in (['--help'], ['-h']):
-        print('Usage: lcu [--chrome] [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]\n'
-              'With no arguments, starts the original computer-use stdio MCP server. '
-              '--chrome also enables its browser surface.')
+        print(USAGE + '\nWith no arguments, starts the original computer-use stdio MCP server. '
+              '`lcu --chrome` also enables its browser surface; `lcu setup --chrome` registers that command.')
         return
     if argv[:1] == ['--version']:
         release_path = root / 'bundle.json'
@@ -219,7 +225,7 @@ def main(root, argv):
     direct_args = [arg for arg in argv if arg != '--chrome']
     discovery_compat = direct_args == ['--mcp-discovery-compat']
     if argv.count('--chrome') > 1 or direct_args not in ([], ['doctor'], ['--mcp-discovery-compat']):
-        raise ValueError('Usage: lcu [--chrome] [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]')
+        raise ValueError(USAGE)
     resolved = paths(root)
     _, resources, runtime, _ = resolved
     env = environment(root, resolved, chrome=chrome)
