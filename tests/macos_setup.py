@@ -18,7 +18,7 @@ from lcu.codex_hooks import original_hooks
 from lcu.setup import configure, export_bundle, host_policy
 
 
-def exercise(release: Path, app: Path) -> None:
+def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
     resources = app / 'Contents/Resources'
     modules = resources / 'cua_node/lib/node_modules'
     source = release / 'skills/lcu'
@@ -37,13 +37,14 @@ def exercise(release: Path, app: Path) -> None:
             'TMPDIR': str(home), 'LANG': 'C.UTF-8',
         }
         failures = configure(['codex'], home, source, [str(runtime)], tools_root,
-                             release, environ=env)
+                             release, environ=env, chrome=chrome)
         assert not failures, failures
         config = tomllib.loads(codex.read_text())
         assert config['model'] == 'fixture-model'
         assert config['mcp_servers']['unrelated']['command'] == 'fixture-command'
         registered = config['mcp_servers']['lcu']
         assert registered['command'] == str(runtime)
+        assert registered.get('args', []) == (['--chrome'] if chrome else [])
         for key, value in host_policy(release).items():
             assert registered[key] == value, key
 
@@ -62,11 +63,22 @@ def exercise(release: Path, app: Path) -> None:
              'references/upstream/cua-repl/instructions/macos/description.md'),
             (modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md',
              'references/upstream/sky/macos/SKILL.md'),
-            (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md',
-             'references/upstream/chrome/skill/SKILL.md'),
         )
         for original, relative in pairs:
             assert (generated / relative).read_bytes() == original.read_bytes(), relative
+        chrome_sources = (
+            (modules / '@oai/browser-desktop/environment-docs/codex-app/api.json',
+             'references/upstream/browser-desktop/codex-app/api.json'),
+            (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md',
+             'references/upstream/chrome/skill/SKILL.md'),
+        )
+        for original, relative in chrome_sources:
+            if chrome:
+                assert (generated / relative).read_bytes() == original.read_bytes(), relative
+            else:
+                assert not (generated / relative).exists(), relative
+        assert chrome == (generated / 'references/upstream/chrome').exists()
+        assert chrome == (generated / 'references/upstream/browser-desktop').exists()
         assert not (generated / 'references/upstream/cua-repl/instructions/linux').exists()
         assert not (generated / 'references/upstream/sky/linux').exists()
         installed_skills = [path for path in home.rglob('SKILL.md')
@@ -82,10 +94,16 @@ def exercise(release: Path, app: Path) -> None:
         assert (modules / '@oai/cua/docs/tinysky-alt-core-cua-repl.md').read_bytes() not in exported
         assert str(home).encode() not in exported
         assert str(runtime).encode() not in exported
+
+
+def exercise(release: Path, app: Path) -> None:
+    check_mode(release, app, chrome=False)
+    check_mode(release, app, chrome=True)
     print(json.dumps({'result': 'passed', 'checks': [
-        'disposable Codex registration', 'unrelated settings preserved',
+        'disposable native and Chrome-opt-in Codex registration', 'unrelated settings preserved',
         'original MCP policy', 'original trusted lifecycle hooks',
-        'byte-identical macOS references', 'copied agent skill',
+        'native default omits Chrome references', 'opt-in Chrome references byte-identical',
+        'copied agent skill',
         'bootstrap-only portable export'], 'provider_actions': 0}, indent=2))
 
 
