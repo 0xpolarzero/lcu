@@ -1,11 +1,16 @@
 """Small stdio adapter to the bundled original Codex app-server."""
 from contextlib import contextmanager
 import json
+import os
+import queue
 import selectors
 import subprocess
 import tempfile
 import threading
 import time
+
+
+_WINDOWS_PIPES = os.name == 'nt'
 
 
 class AppServerRequestError(ValueError):
@@ -43,16 +48,33 @@ class AppServer:
         self._reader_lock = threading.Lock()
         self._sequence_lock = threading.Lock()
         self._write_lock = threading.Lock()
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(process.stdout, selectors.EVENT_READ)
+        self.selector = None
+        self._chunks = None
+        if _WINDOWS_PIPES:
+            # Windows select() accepts sockets, not anonymous subprocess pipes.
+            # A single background reader retains the same bounded RPC waits.
+            self._chunks = queue.Queue()
+            threading.Thread(target=self._pipe_reader, daemon=True).start()
+        else:
+            self.selector = selectors.DefaultSelector()
+            self.selector.register(process.stdout, selectors.EVENT_READ)
         try:
             self.initialization = self('initialize', {
                 'clientInfo': {'name': 'lcu', 'version': '0.3.0'},
                 'capabilities': {'experimentalApi': True}})
             self.send({'method': 'initialized'})
         except BaseException:
-            self.selector.close()
+            if self.selector is not None:
+                self.selector.close()
             raise
+
+    def _pipe_reader(self):
+        try:
+            while part := self.process.stdout.read1(65536):
+                self._chunks.put(part)
+            self._chunks.put(None)
+        except BaseException as exc:
+            self._chunks.put(exc)
 
     def send(self, message):
         with self._write_lock:
@@ -66,7 +88,20 @@ class AppServer:
         with self._reader_lock:
             while b'\n' not in self.buffer:
                 remaining = deadline - time.monotonic()
-                if remaining <= 0 or not self.selector.select(min(remaining, 0.05)):
+                if remaining <= 0:
+                    return None
+                if self._chunks is not None:
+                    try:
+                        part = self._chunks.get(timeout=min(remaining, 0.05))
+                    except queue.Empty:
+                        continue
+                    if isinstance(part, BaseException):
+                        raise part
+                    if part is None:
+                        raise ValueError('Bundled Codex app-server exited unexpectedly.')
+                    self.buffer += part
+                    continue
+                if not self.selector.select(min(remaining, 0.05)):
                     if time.monotonic() >= deadline:
                         return None
                     continue
@@ -189,5 +224,6 @@ def app_server(cli, cwd, env):
                 process.kill()
                 process.wait(timeout=10)
             if client:
-                client.selector.close()
+                if client.selector is not None:
+                    client.selector.close()
             process.stdout.close()
