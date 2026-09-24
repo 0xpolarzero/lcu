@@ -160,6 +160,15 @@ class WindowsBuildTests(unittest.TestCase):
                     'installation.json').read_text())['app']), app)
                 launcher_before = (prefix / 'windows_launcher.py').read_bytes()
                 command_before = (prefix / 'lcu.cmd').read_bytes()
+                releases_before = {path.name for path in (prefix / 'releases').iterdir()}
+                with mock.patch.object(install_windows, '_atomic_bytes',
+                                       side_effect=OSError('launcher locked')) as atomic:
+                    with self.assertRaisesRegex(OSError, 'launcher locked'):
+                        install_windows.install(prefix)
+                atomic.assert_called_once()
+                self.assertEqual({path.name for path in (prefix / 'releases').iterdir()},
+                                 releases_before)
+                self.assertEqual(json.loads((prefix / 'current.json').read_text()), descriptor)
                 (source / 'scripts/windows_launcher.py').write_text('new launcher')
                 original_replace = install_windows.os.replace
                 def fail_pointer(source_path, destination_path):

@@ -124,7 +124,7 @@ def install(prefix):
             _validated_copy(stage / 'app', lock, entry)
             os.replace(stage, generation)
         except BaseException:
-            shutil.rmtree(stage, ignore_errors=True)
+            shutil.rmtree(_copy_path(stage), ignore_errors=True)
             raise
     releases = prefix / 'releases'
     if _redirected(releases):
@@ -132,6 +132,7 @@ def install(prefix):
     releases.mkdir(exist_ok=True)
     release = releases / (VERSION + '-' + uuid.uuid4().hex[:12])
     previous_launchers = {}
+    replaced_launchers = []
     temporary = None
     try:
         shutil.copytree(SOURCE, release)
@@ -152,21 +153,24 @@ def install(prefix):
         previous_launchers = {path: path.read_bytes() if path.exists() else None
                               for path in (stable, command_file)}
         _atomic_bytes(stable, (release / 'scripts/windows_launcher.py').read_bytes())
+        replaced_launchers.append(stable)
         _atomic_bytes(command_file, (
             f'@echo off\r\n"{sys.executable}" -B "%~dp0windows_launcher.py" %*\r\n'
             'exit /b %ERRORLEVEL%\r\n').encode())
+        replaced_launchers.append(command_file)
         temporary = prefix / ('.current-' + uuid.uuid4().hex + '.json')
         temporary.write_text(json.dumps({'release': release.name}) + '\n')
         os.replace(temporary, prefix / 'current.json')
     except BaseException:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-        for path, content in previous_launchers.items():
+        for path in reversed(replaced_launchers):
+            content = previous_launchers[path]
             if content is None:
                 path.unlink(missing_ok=True)
             else:
                 _atomic_bytes(path, content)
-        shutil.rmtree(release, ignore_errors=True)
+        shutil.rmtree(_copy_path(release), ignore_errors=True)
         raise
     return release
 
