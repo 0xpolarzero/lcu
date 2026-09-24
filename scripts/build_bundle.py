@@ -67,6 +67,8 @@ def build(output, package=None, *, target='linux', app=None):
             shutil.copy2(SOURCE / 'lcu/windows.py', release / 'lcu/windows.py')
             shutil.copy2(SOURCE / 'lcu/windows_host.py', release / 'lcu/windows_host.py')
             shutil.copy2(SOURCE / 'lcu/windows_host_entry.cjs', release / 'lcu/windows_host_entry.cjs')
+            shutil.copy2(SOURCE / 'lcu/windows_lifetime_host.cjs', release / 'lcu/windows_lifetime_host.cjs')
+            shutil.copy2(SOURCE / 'lcu/windows_sky_service.mjs', release / 'lcu/windows_sky_service.mjs')
         (release / 'docs').mkdir()
         for filename in ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
                          'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',

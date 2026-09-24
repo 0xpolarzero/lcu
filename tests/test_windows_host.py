@@ -2,8 +2,12 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import shutil
+import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -54,6 +58,8 @@ class WindowsHostTests(unittest.TestCase):
         self.assertNotIn(windows_host.MARKER, entry.read_bytes())
         for name in windows_host.ORIGINAL_FILES:
             self.assertEqual((entry.parent / name).read_bytes(), self.members[name])
+        self.assertTrue((entry.parent / 'windows-lifetime-host.cjs').is_file())
+        self.assertTrue((entry.parent / 'windows-sky-service.mjs').is_file())
 
     def test_rejects_changed_asar_before_writing_host(self):
         expected = _asar(self.archive, self.members)
@@ -72,15 +78,17 @@ class WindowsHostTests(unittest.TestCase):
     def test_host_ready_handshake_and_owned_child_disposal(self):
         entry = self.base / 'host.py'
         entry.write_text("import json, sys\nprint(json.dumps({'ready': True, "
-                         "'pipePath': r'\\\\.\\pipe\\lcu-wre-fixture'}), flush=True)\n"
+                         "'pipePath': r'\\\\.\\pipe\\lcu-wre-fixture', "
+                         "'lifetimePath': r'\\\\.\\pipe\\lcu-lifetime-fixture'}), flush=True)\n"
                          "sys.stdin.buffer.read()\n")
         helper = self.base / 'helper.exe'
         transport = self.base / 'transport.js'
         helper.touch()
         transport.touch()
-        process, pipe = windows_host.start_original_host(
+        process, pipe, lifetime = windows_host.start_original_host(
             node=Path(sys.executable), entry=entry, helper=helper, transport=transport, env={})
         self.assertEqual(pipe, r'\\.\pipe\lcu-wre-fixture')
+        self.assertEqual(lifetime, r'\\.\pipe\lcu-lifetime-fixture')
         windows_host.stop_original_host(process)
         self.assertEqual(process.returncode, 0)
 
@@ -94,6 +102,51 @@ class WindowsHostTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'failed to become ready'):
             windows_host.start_original_host(
                 node=Path(sys.executable), entry=entry, helper=helper, transport=transport, env={})
+
+    @unittest.skipUnless(shutil.which('node') and sys.platform != 'win32',
+                         'Unix socket test needs Node on a non-Windows test host')
+    def test_private_lifetime_signal_matches_only_active_turn(self):
+        address = self.base / 'lifetime.sock'
+        module = Path(windows_host.__file__).with_name('windows_lifetime_host.cjs')
+        script = ("const {startLifetimeSignal}=require(process.argv[1]); "
+                  "let active='new'; "
+                  "startLifetimeSignal(({sessionId,turnId})=>{ "
+                  "const matched=sessionId==='session'&&turnId===active; "
+                  "if(matched)active=null; return matched; }, process.argv[2]) "
+                  ".then(signal=>{console.log('ready'); process.stdin.resume(); "
+                  "process.stdin.once('end',()=>signal.dispose().then(()=>process.exit(0)));});")
+        child = subprocess.Popen([shutil.which('node'), '-e', script, str(module), str(address)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env={'PATH': os.environ.get('PATH', '')})
+        def cleanup():
+            if child.poll() is None:
+                child.terminate()
+                child.wait(timeout=5)
+            for pipe in (child.stdin, child.stdout, child.stderr):
+                if pipe and not pipe.closed:
+                    pipe.close()
+        self.addCleanup(cleanup)
+        ready = child.stdout.readline()
+        if not ready:
+            error = child.stderr.read()
+            if b'listen EPERM' in error:
+                self.skipTest('Local sandbox denies Unix socket listening')
+            self.fail(f'Private lifetime host did not start: {error.decode(errors="replace")[:300]}')
+        self.assertEqual(ready, b'ready\n')
+
+        def call(turn):
+            with socket.socket(socket.AF_UNIX) as client:
+                client.connect(str(address))
+                client.sendall(json.dumps({'session_id': 'session', 'turn_id': turn}).encode() + b'\n')
+                with client.makefile('rb') as stream:
+                    return json.loads(stream.readline())
+
+        self.assertEqual(call('old'), {'closed': False})
+        self.assertEqual(call('new'), {'closed': True})
+        self.assertEqual(call('new'), {'closed': False})
+        child.stdin.close()
+        self.assertEqual(child.wait(timeout=5), 0)
+        child.stdout.close()
 
 
 if __name__ == '__main__':

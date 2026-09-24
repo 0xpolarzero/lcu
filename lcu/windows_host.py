@@ -94,6 +94,11 @@ def materialize_original_host(app: Path, destination: Path, *, expected_asar_sha
         target.write_bytes(content)
     launcher = destination / 'windows-pipe-host.cjs'
     launcher.write_bytes(entry)
+    for source, target in (
+        ('windows_lifetime_host.cjs', 'windows-lifetime-host.cjs'),
+        ('windows_sky_service.mjs', 'windows-sky-service.mjs'),
+    ):
+        (destination / target).write_bytes(Path(__file__).with_name(source).read_bytes())
     return launcher
 
 
@@ -113,11 +118,14 @@ def start_original_host(*, node: Path, entry: Path, helper: Path, transport: Pat
         line = ready.get(timeout=15)
         state = json.loads(line)
         pipe = state.get('pipePath') if isinstance(state, dict) else None
+        lifetime = state.get('lifetimePath') if isinstance(state, dict) else None
         if (not isinstance(state, dict) or state.get('ready') is not True or
                 not isinstance(pipe, str) or
-                not pipe.startswith('\\\\.\\pipe\\lcu-wre-') or len(pipe) > 256):
-            raise ValueError('Original Windows native host did not report its private pipe.')
-        return process, pipe
+                not pipe.startswith('\\\\.\\pipe\\lcu-wre-') or len(pipe) > 256 or
+                not isinstance(lifetime, str) or
+                not lifetime.startswith('\\\\.\\pipe\\lcu-lifetime-') or len(lifetime) > 256):
+            raise ValueError('Original Windows native host did not report its private pipes.')
+        return process, pipe, lifetime
     except (Empty, ValueError, json.JSONDecodeError) as exc:
         stop_original_host(process, require_success=False)
         raise ValueError('Original Windows native host failed to become ready.') from exc

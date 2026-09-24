@@ -8,6 +8,7 @@ const p = require('node:os');
 const v = require('node:fs');
 const _ = require('node:crypto');
 const R = require('node:perf_hooks');
+const {startLifetimeSignal} = require('./windows-lifetime-host.cjs');
 // ORIGINAL_WINDOWS_PIPE_HOST
 
 async function start() {
@@ -22,12 +23,16 @@ async function start() {
     windowsHelperPath: helper,
     windowsHelperTransportModulePath: transport,
   });
-  process.stdout.write(JSON.stringify({ready: true, pipePath: host.pipePath}) + '\n');
+  let lifetime;
+  try { lifetime = await startLifetimeSignal(ids => host.closeActiveTurn(ids)); }
+  catch (error) { await host.dispose(); throw error; }
+  process.stdout.write(JSON.stringify({ready: true, pipePath: host.pipePath,
+    lifetimePath: lifetime.address}) + '\n');
   let closing = false;
   async function close() {
     if (closing) return;
     closing = true;
-    await host.dispose();
+    try { await lifetime.dispose(); } finally { await host.dispose(); }
     process.stdin.pause();
   }
   process.stdin.resume();

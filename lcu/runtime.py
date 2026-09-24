@@ -251,12 +251,26 @@ def main(root, argv):
             'app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/codex-computer-use.exe')
         transport = _component(app,
             'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/windows/internal/helper_transport.js')
-        host, pipe = start_original_host(
+        host, pipe, lifetime = start_original_host(
             node=Path(env['NODE_REPL_NODE_PATH']), entry=root / 'lcu-host/windows-pipe-host.cjs',
             helper=helper, transport=transport, env=env)
         env['SKY_CUA_NATIVE_PIPE'] = '1'
         env['SKY_CUA_NATIVE_PIPE_DIRECTORY'] = pipe
+        env['LCU_WRE_LIFETIME_PIPE'] = lifetime
+        env['LCU_WRE_SKY_SERVICE_PATH'] = str(_component(app,
+            'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js'))
+        wrapper = root / 'lcu-host/windows-sky-service.mjs'
         try:
+            supplied = json.loads(env.get('NODE_REPL_TRUSTED_SERVICES', '{}'))
+            if not isinstance(supplied, dict) or any(not isinstance(k, str) or not isinstance(v, str)
+                                                     for k, v in supplied.items()):
+                raise ValueError('NODE_REPL_TRUSTED_SERVICES must be a JSON string map.')
+            if supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
+                raise ValueError('A custom Sky trusted-service override conflicts with Windows native cleanup.')
+            supplied['sky'] = str(wrapper)
+            env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(supplied)
+            env['NODE_REPL_TRUSTED_CODE_PATHS'] = ';'.join(dict.fromkeys(
+                [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(';'))]))
             status = subprocess.run(command, env=env, check=False).returncode
         finally:
             stop_original_host(host)
