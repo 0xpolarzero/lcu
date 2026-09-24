@@ -304,9 +304,19 @@ def chrome(release, original):
     approved_urls = []
     restart_approvals = []
     server = fixture_server(requests_seen)
+    default = Client([str(release / 'bin/lcu')], env=base)
+    try:
+        methods = last_value(default.js('nodeRepl.write(JSON.stringify({'
+            'browser: typeof cua.createBrowserTab, native: typeof cua.getApp}));'))
+        assert methods == {'browser': 'undefined', 'native': 'function'}, methods
+    finally:
+        default.close()
     candidate = Client([str(release / 'bin/lcu'), '--chrome'], env=base,
                        request_handler=local_fixture_approval(approved_urls), capabilities={'elicitation': {}})
     try:
+        enabled = last_value(candidate.js('nodeRepl.write(JSON.stringify({'
+            'browser: typeof cua.createBrowserTab, native: typeof cua.getApp}));'))
+        assert enabled == {'browser': 'function', 'native': 'function'}, enabled
         lcu_browsers = discovery(candidate)
         fallback = last_value(candidate.js('nodeRepl.write(JSON.stringify(nodeRepl.requestMeta));'))
         identity = fallback['x-codex-turn-metadata']
@@ -362,6 +372,7 @@ def chrome(release, original):
         server.shutdown()
 
     print(json.dumps({'discovery': 'PASS: real original extension and native host',
+        'runtime_mode': 'PASS: default native API only; explicit --chrome adds browser API',
         'generic_mcp_connection_identity': 'PASS', 'caller_metadata_override': 'PASS',
         'original_discovery': 'MATCH',
         'lcu_browser_actions': 'PASS: navigation, Unicode, click, save, screenshot, fixture login, close, and agent header',
