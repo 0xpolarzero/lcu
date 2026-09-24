@@ -20,7 +20,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         prefix = base / 'prefix'
         self.root = prefix / 'releases/release'
         self.root.mkdir(parents=True)
-        self.app = prefix / 'apps/26.917.9434.0-x64-msix-fixture/app'
+        self.app = prefix / 'apps/msix-fixture/app'
         self.resources = self.app / 'app/resources'
         self.runtime = self.resources / 'cua_node'
         self.launcher = self.runtime / 'bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs'

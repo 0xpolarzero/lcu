@@ -48,7 +48,7 @@ def paths(root):
             raise ValueError('Selected application descriptor does not match the Windows lock.')
         prefix = root.parent.parent
         apps = prefix / 'apps'
-        generation = apps / f"{policy['version']}-x64-{entry['sha256'][:16]}"
+        generation = apps / entry['sha256'][:16]
         expected = generation / 'app'
         if (selected != expected or any(path.is_symlink() or path.is_junction()
                                         for path in (apps, generation, selected))):
