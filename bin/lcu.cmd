@@ -1,3 +1,3 @@
 @echo off
-python "%~dp0lcu" %*
+py -3.12 "%~dp0lcu" %*
 exit /b %ERRORLEVEL%

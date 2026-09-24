@@ -33,7 +33,7 @@ def download(url, destination, expected):
 def provision(release, source, *, target='linux', mac_node=None, adapters_source=None):
     architecture = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
     expected_system = {'linux': 'Linux', 'darwin': 'Darwin'}.get(target)
-    if expected_system is None or platform.system() != expected_system or architecture is None:
+    if (target != 'windows' and (expected_system is None or platform.system() != expected_system or architecture is None)):
         raise ValueError(f'Agent installer runtime requires {target} arm64 or x64.')
     destination = release / 'agent-tools'
     destination.mkdir()
@@ -51,18 +51,20 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
                 node = destination / 'node/bin/node'
                 npm = destination / 'node/lib/node_modules/npm/bin/npm-cli.js'
             else:
-                node = Path(mac_node) if mac_node is not None else None
+                node_command = shutil.which('node') if target == 'windows' else None
+                node = Path(node_command).resolve() if node_command else (
+                    Path(mac_node) if mac_node is not None else None)
                 npm_command = shutil.which('npm')
                 npm = Path(npm_command).resolve() if npm_command else None
                 if node is None or not node.is_file() or not os.access(node, os.X_OK):
-                    raise ValueError('A verified installed macOS CUA Node executable is required.')
+                    raise ValueError('A local Node executable is required to build these locked JavaScript tools.')
                 if npm is None or not npm.is_file():
-                    raise ValueError('A local npm CLI is required to build the macOS agent tools.')
+                    raise ValueError('A local npm CLI is required to build the agent tools.')
             for filename in ('package.json', 'package-lock.json'):
                 shutil.copyfile(source / filename, destination / filename)
             # Do not read caller npmrc, use their cache, or install globally.
             environment = {
-                'PATH': str(node.parent) + ':/usr/bin:/bin',
+                'PATH': str(node.parent) + os.pathsep + os.environ.get('PATH', ''),
                 'HOME': str(scratch), 'LANG': 'C.UTF-8',
                 'NPM_CONFIG_USERCONFIG': str(scratch / 'empty.npmrc'),
                 'NPM_CONFIG_GLOBALCONFIG': str(scratch / 'global.npmrc'),
@@ -70,6 +72,7 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
             }
             subprocess.run([str(node), str(npm), 'ci',
                             '--cache', str(scratch / 'npm-cache'), '--ignore-scripts',
+                            *(['--no-bin-links'] if target == 'windows' else []),
                             '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'],
                            cwd=destination, env=environment, check=True, timeout=180)
             expected = json.loads((destination / 'package.json').read_text())['dependencies']
@@ -88,6 +91,7 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
                 shutil.copy2(adapters_source / 'pi/index.ts', adapters / 'pi/index.ts')
                 subprocess.run([str(node), str(npm), 'ci',
                                 '--cache', str(scratch / 'npm-cache'), '--omit=dev', '--omit=peer',
+                                *(['--no-bin-links'] if target == 'windows' else []),
                                 '--ignore-scripts', '--no-audit', '--no-fund',
                                 '--registry=https://registry.npmjs.org'],
                                cwd=adapters, env=environment, check=True, timeout=180)
@@ -99,10 +103,15 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
             # npm is only a build dependency; keep no second Node distribution.
             if target == 'linux':
                 shutil.rmtree(destination / 'node')
-            (destination / 'node/bin').mkdir(parents=True)
-            selected_node = ('../../../app/resources/cua_node/bin/node' if target == 'linux'
-                             else '../../../app/Contents/Resources/cua_node/bin/node')
-            (destination / 'node/bin/node').symlink_to(selected_node)
+            if target != 'windows':
+                (destination / 'node/bin').mkdir(parents=True)
+                selected_node = ('../../../app/resources/cua_node/bin/node' if target == 'linux'
+                                 else '../../../app/Contents/Resources/cua_node/bin/node')
+                (destination / 'node/bin/node').symlink_to(selected_node)
+            else:
+                for path in release.rglob('*'):
+                    if path.is_symlink() or (path.is_file() and path.suffix.lower() == '.node'):
+                        raise ValueError(f'Windows tool bundle must be portable JavaScript: {path}')
     except BaseException:
         shutil.rmtree(destination)
         if adapters_source is not None:
@@ -114,7 +123,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release', type=Path, required=True)
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parent / 'agent-tools')
-    parser.add_argument('--target', choices=('linux', 'darwin'), default='linux')
+    parser.add_argument('--target', choices=('linux', 'darwin', 'windows'), default='linux')
     parser.add_argument('--mac-node', type=Path)
     parser.add_argument('--adapters-source', type=Path)
     arguments = parser.parse_args()

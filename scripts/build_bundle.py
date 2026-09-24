@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 
 sys.dont_write_bytecode = True
 from bundle import VERSION, architecture, seal, verify
@@ -21,7 +22,10 @@ SOURCE = Path(__file__).resolve().parents[1]
 def build(output, package=None, *, target='linux', app=None):
     if package is not None:
         raise ValueError('The official app is acquired during installation. Pass --app-package to scripts/install.sh instead.')
-    arch = architecture(target)
+    # The Windows archive contains only platform-neutral LCU source and locked
+    # JavaScript dependencies. Build it on a trusted development host; the
+    # Windows installer validates the registered official MSIX in place.
+    arch = 'x64' if target == 'windows' else architecture(target)
     selected_node = None
     if target == 'darwin':
         sys.path.insert(0, str(SOURCE))
@@ -35,18 +39,19 @@ def build(output, package=None, *, target='linux', app=None):
             expected_version=policy['version'], expected_runtime=policy['runtime'],
             expected_hashes=entry['components'], arch=arch)
         selected_node = selected.runtime / 'bin/node'
-    elif target != 'linux' or app is not None:
+    elif target not in ('linux', 'windows') or app is not None:
         raise ValueError('An installed application path is supported only for a macOS build.')
     output.mkdir(parents=True, exist_ok=True)
     name = f'lcu-{VERSION}-{target}-{arch}'
-    destination = output / (name + '.tar.gz')
+    destination = output / (name + ('.zip' if target == 'windows' else '.tar.gz'))
     if destination.exists() or destination.with_suffix(destination.suffix + '.sha256').exists():
         raise ValueError(f'Release already exists: {destination}; use a new output directory.')
     with tempfile.TemporaryDirectory(prefix='lcu-build-') as temporary:
         scratch = Path(temporary)
         release = scratch / name
         release.mkdir()
-        shutil.copytree(SOURCE / 'bin', release / 'bin', ignore=shutil.ignore_patterns('*.cmd'))
+        shutil.copytree(SOURCE / 'bin', release / 'bin',
+                        ignore=None if target == 'windows' else shutil.ignore_patterns('*.cmd'))
         (release / 'lcu').mkdir()
         for filename in ('__init__.py', 'runtime.py', 'session.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
@@ -54,6 +59,8 @@ def build(output, package=None, *, target='linux', app=None):
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'lcu/platforms.py', release / 'lcu/platforms.py')
+        elif target == 'windows':
+            shutil.copy2(SOURCE / 'lcu/windows.py', release / 'lcu/windows.py')
         (release / 'docs').mkdir()
         for filename in ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
                          'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
@@ -68,6 +75,9 @@ def build(output, package=None, *, target='linux', app=None):
             shutil.copy2(SOURCE / 'scripts' / filename, release / 'scripts' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'scripts/install_macos.py', release / 'scripts/install_macos.py')
+        elif target == 'windows':
+            shutil.copy2(SOURCE / 'scripts/install_windows.py', release / 'scripts/install_windows.py')
+            shutil.copy2(SOURCE / 'scripts/windows_launcher.py', release / 'scripts/windows_launcher.py')
         provision_agents(release, SOURCE / 'scripts/agent-tools', target=target,
                          mac_node=selected_node, adapters_source=SOURCE / 'adapters')
         # The installer selects and validates the matching app before registration.
@@ -76,11 +86,20 @@ def build(output, package=None, *, target='linux', app=None):
                        cwd=release, check=True, timeout=20)
         seal(release, arch, target)
         verify(release, arch, target)
-        fd, temporary_archive = tempfile.mkstemp(prefix='.lcu-', suffix='.tar.gz', dir=output)
+        fd, temporary_archive = tempfile.mkstemp(prefix='.lcu-', suffix=destination.suffix, dir=output)
         os.close(fd)
         try:
-            with tarfile.open(temporary_archive, 'w:gz', compresslevel=6) as archive:
-                archive.add(release, arcname=name)
+            if target == 'windows':
+                with zipfile.ZipFile(temporary_archive, 'w', compression=zipfile.ZIP_DEFLATED,
+                                     compresslevel=6) as archive:
+                    for path in sorted(release.rglob('*')):
+                        if path.is_symlink():
+                            raise ValueError(f'Windows bundle cannot contain a symlink: {path}')
+                        if path.is_file():
+                            archive.write(path, arcname=(Path(name) / path.relative_to(release)).as_posix())
+            else:
+                with tarfile.open(temporary_archive, 'w:gz', compresslevel=6) as archive:
+                    archive.add(release, arcname=name)
             os.chmod(temporary_archive, 0o644)
             os.replace(temporary_archive, destination)
         finally:
@@ -96,7 +115,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=SOURCE / 'dist')
     parser.add_argument('--package', type=Path, help='Deprecated; use scripts/install.sh --app-package PATH')
-    parser.add_argument('--platform', choices=('linux', 'darwin'), default='linux')
+    parser.add_argument('--platform', choices=('linux', 'darwin', 'windows'), default='linux')
     parser.add_argument('--app', type=Path, help='Pinned locally installed ChatGPT.app for a macOS build')
     args = parser.parse_args()
     try:
