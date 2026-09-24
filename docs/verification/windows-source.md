@@ -1,9 +1,9 @@
 # Windows x64 source and live guest verification (2026-09-25)
 
 The pinned official package, private app copy, thin LCU install, native
-computer use, helper lifecycle, native agent registration, and opt-in Chrome
-connector setup passed in a disposable Windows 11 guest. The official
-extension action and Windows real-model use remain unverified. The first failed candidates below are retained as diagnostic
+computer use, helper lifecycle, native agent registration, and an opt-in
+Chrome extension action passed in a disposable Windows 11 guest. Windows
+real-model use remains unverified. The first failed candidates below are retained as diagnostic
 history; later installed candidates passed the specific gates stated at the
 end of this record.
 
@@ -221,8 +221,17 @@ Claude Code, and Pi 0.73 without the prior Unicode reader exception. The
 generated Windows skill, Pi extension wrapper and Pi commands were present;
 the guest log is `Desktop\lcu-candidate-f-native-setup.log`. No real model
 session was run in those Windows agents. The official Chrome MSI was installed
-after a valid guest Authenticode check. The opt-in connector was configured;
-the extension action is pending. Candidate f is a verification artifact, not
+after a valid guest Authenticode check. Candidate f's opt-in Chrome action
+passed through the official extension in the default guest Chrome profile,
+without sign-in. LCU elicited approval for `http://127.0.0.1:8080`, created a
+tab, typed a Unicode marker, clicked Save, received the extension's saved
+accessibility state and screenshot, and closed the original tab. An independent
+local server confirmed the exact saved marker and `x-browser-agent` on all
+three requests; MCP exited 0. This was a scripted original-MCP run, not a model
+session, and does not verify automatic Windows browser per-turn cleanup. The
+original URL-confidence policy blocked native `getApp` on the Chrome Web Store;
+the setup click used ordinary guest UI and did not change policy. The guest log
+is `Desktop\lcu-chrome-live.log`. Candidate f is a verification artifact, not
 a published release.
 
 Candidate f also passed a local scripted-provider Pi 0.73 fixture using normal
