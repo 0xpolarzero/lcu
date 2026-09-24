@@ -219,7 +219,7 @@ def main(root, argv):
     if argv.count('--chrome') > 1 or direct_args not in ([], ['doctor'], ['--mcp-discovery-compat']):
         raise ValueError(USAGE)
     resolved = paths(root)
-    _, resources, runtime, _ = resolved
+    app, resources, runtime, _ = resolved
     env = environment(root, resolved, chrome=chrome)
     windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
     if direct_args == ['doctor']:
@@ -239,5 +239,19 @@ def main(root, argv):
     if discovery_compat:
         reply_to_server_discover(sys.stdin.buffer.raw, sys.stdout.buffer)
     if windows:
-        raise SystemExit(subprocess.run(command, env=env, check=False).returncode)
+        from .windows_host import start_original_host, stop_original_host
+        helper = _component(app,
+            'app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/codex-computer-use.exe')
+        transport = _component(app,
+            'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/windows/internal/helper_transport.js')
+        host, pipe = start_original_host(
+            node=Path(env['NODE_REPL_NODE_PATH']), entry=root / 'lcu-host/windows-pipe-host.cjs',
+            helper=helper, transport=transport, env=env)
+        env['SKY_CUA_NATIVE_PIPE'] = '1'
+        env['SKY_CUA_NATIVE_PIPE_DIRECTORY'] = pipe
+        try:
+            status = subprocess.run(command, env=env, check=False).returncode
+        finally:
+            stop_original_host(host)
+        raise SystemExit(status)
     os.execve(runtime / 'bin/node', command, env)

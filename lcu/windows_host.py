@@ -9,7 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from queue import Empty, Queue
 import struct
+import subprocess
+from threading import Thread
 
 
 MAIN = '.vite/build/main-BR_2NHW6.js'
@@ -92,3 +95,42 @@ def materialize_original_host(app: Path, destination: Path, *, expected_asar_sha
     launcher = destination / 'windows-pipe-host.cjs'
     launcher.write_bytes(entry)
     return launcher
+
+
+def start_original_host(*, node: Path, entry: Path, helper: Path, transport: Path,
+                        env: dict[str, str]) -> tuple[subprocess.Popen, str]:
+    """Start the extracted original host and wait for its actual pipe readiness."""
+    if not all(path.is_file() for path in (node, entry, helper, transport)):
+        raise ValueError('The selected original Windows native host is incomplete.')
+    child_env = dict(env)
+    child_env['LCU_WRE_HELPER_PATH'] = str(helper)
+    child_env['LCU_WRE_TRANSPORT_PATH'] = str(transport)
+    process = subprocess.Popen([str(node), str(entry)], cwd=entry.parent, env=child_env,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    ready = Queue(maxsize=1)
+    Thread(target=lambda: ready.put(process.stdout.readline()), daemon=True).start()
+    try:
+        line = ready.get(timeout=15)
+        state = json.loads(line)
+        pipe = state.get('pipePath') if isinstance(state, dict) else None
+        if (not isinstance(state, dict) or state.get('ready') is not True or
+                not isinstance(pipe, str) or
+                not pipe.startswith('\\\\.\\pipe\\lcu-wre-') or len(pipe) > 256):
+            raise ValueError('Original Windows native host did not report its private pipe.')
+        return process, pipe
+    except (Empty, ValueError, json.JSONDecodeError) as exc:
+        stop_original_host(process, require_success=False)
+        raise ValueError('Original Windows native host failed to become ready.') from exc
+
+
+def stop_original_host(process: subprocess.Popen, *, require_success=True) -> None:
+    """Dispose only the host process owned by this LCU MCP connection."""
+    if process.stdin and not process.stdin.closed:
+        process.stdin.close()
+    try:
+        status = process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        status = process.wait(timeout=5)
+    if require_success and status != 0:
+        raise ValueError(f'Original Windows native host exited with status {status}.')

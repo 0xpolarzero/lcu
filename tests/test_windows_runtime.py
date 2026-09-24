@@ -55,6 +55,8 @@ class WindowsRuntimeTests(unittest.TestCase):
     def test_runs_original_cua_launcher_with_inherited_stdio(self):
         result = subprocess.CompletedProcess([], 0)
         with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
+             patch('lcu.windows_host.start_original_host', return_value=('host', '\\\\.\\pipe\\lcu-wre-fixture')) as start, \
+             patch('lcu.windows_host.stop_original_host') as stop, \
              patch('lcu.runtime.subprocess.run', return_value=result) as run, \
              patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture'}, clear=True):
             with self.assertRaises(SystemExit) as exit_status:
@@ -63,7 +65,11 @@ class WindowsRuntimeTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0],
             [str(self.runtime / 'bin/node.exe'), str(self.launcher)])
         self.assertEqual(run.call_args.kwargs['env']['CUA_REPL_ENABLED_SURFACES'], 'computer')
+        self.assertEqual(run.call_args.kwargs['env']['SKY_CUA_NATIVE_PIPE'], '1')
+        self.assertEqual(run.call_args.kwargs['env']['SKY_CUA_NATIVE_PIPE_DIRECTORY'], '\\\\.\\pipe\\lcu-wre-fixture')
         self.assertNotIn('capture_output', run.call_args.kwargs)
+        self.assertEqual(start.call_args.kwargs['entry'], self.root / 'lcu-host/windows-pipe-host.cjs')
+        stop.assert_called_once_with('host')
 
     def test_doctor_uses_windows_sky_without_x11(self):
         with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
@@ -72,6 +78,16 @@ class WindowsRuntimeTests(unittest.TestCase):
             main(self.root, ['doctor'])
         self.assertEqual(run.call_args.args[0][0], str(self.runtime / 'bin/node.exe'))
         self.assertEqual(run.call_args.kwargs['cwd'], self.runtime / 'bin')
+
+    def test_disposes_owned_host_when_original_mcp_fails(self):
+        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
+             patch('lcu.windows_host.start_original_host', return_value=('owned-host', '\\\\.\\pipe\\lcu-wre-fixture')), \
+             patch('lcu.windows_host.stop_original_host') as stop, \
+             patch('lcu.runtime.subprocess.run', side_effect=OSError('MCP failed')), \
+             patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture'}, clear=True):
+            with self.assertRaisesRegex(OSError, 'MCP failed'):
+                main(self.root, [])
+        stop.assert_called_once_with('owned-host')
 
     def test_refuses_descriptor_for_different_installed_package(self):
         with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected):
