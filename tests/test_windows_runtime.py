@@ -82,9 +82,10 @@ class WindowsRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'does not match the registered Windows app'):
                 paths(self.root)
 
-    def test_unported_setup_routes_fail_explicitly(self):
-        with self.assertRaisesRegex(ValueError, 'Windows agent setup is not implemented'):
+    def test_setup_dispatches_and_unported_browser_route_fails_explicitly(self):
+        with patch('lcu.setup.main') as setup:
             main(self.root, ['setup', '--list-agents'])
+        setup.assert_called_once_with(['--list-agents', '--prefix', str(self.root.parent.parent)])
         with self.assertRaisesRegex(ValueError, 'Windows browser host setup is not implemented'):
             main(self.root, ['browser', 'install'])
 

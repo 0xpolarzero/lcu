@@ -201,10 +201,6 @@ def main(root, argv):
         print(f"lcu {version} (ChatGPT {target} {policy['version']}; CUA {policy['runtime']})")
         return
     if argv[:1] == ['setup']:
-        descriptor_path = root / 'installation.json'
-        if (descriptor_path.is_file() and
-                json.loads(descriptor_path.read_text()).get('platform') == 'windows'):
-            raise ValueError('Windows agent setup is not implemented; the installed app runtime is available through the direct launcher only.')
         from .setup import main as setup
         if '--prefix' not in argv:
             argv += ['--prefix', str(root.parent.parent)]

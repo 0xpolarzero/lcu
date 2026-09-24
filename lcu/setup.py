@@ -4,17 +4,25 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows uses msvcrt.locking.
+    fcntl = None
+import getpass
 import json
 import os
 from pathlib import Path
-import pwd
+try:
+    import pwd
+except ImportError:
+    pwd = None
 import shutil
 import shlex
 import subprocess
 import sys
 import tempfile
 import uuid
+from types import SimpleNamespace
 
 from .setup_clients import CLIENTS, ALIASES
 
@@ -99,13 +107,23 @@ def apply_changes(changes):
 
 @contextmanager
 def setup_lock(home):
-    path = regular_path(home / '.local/state/lcu/setup.lock')
+    path = regular_path((home / 'AppData/Local/LCU/setup.lock') if sys.platform == 'win32'
+                        else (home / '.local/state/lcu/setup.lock'))
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if sys.platform == 'win32':
+            import msvcrt
+            os.write(fd, b'0')
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
+        if sys.platform == 'win32':
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
         os.close(fd)
 
 
@@ -140,7 +158,12 @@ def installer_environment(home, names, environ=None):
 
 
 def installer_paths(tools_root):
-    paths = (tools_root / 'node/bin/node',
+    if sys.platform == 'win32':
+        from .runtime import paths as selected_paths
+        node = selected_paths(tools_root.parent)[2] / 'bin/node.exe'
+    else:
+        node = tools_root / 'node/bin/node'
+    paths = (node,
              tools_root / 'node_modules/skills/bin/cli.mjs',
              tools_root / 'node_modules/add-mcp/dist/index.js')
     for path in paths:
@@ -243,6 +266,9 @@ def host_policy(release_root):
 def installed_app_resources(release_root):
     """Resolve the selected installation without depending on release payload copies."""
     release_root = Path(release_root).resolve()
+    if sys.platform == 'win32':
+        from .runtime import paths
+        return paths(release_root)[1]
     descriptor = release_root / 'installation.json'
     app = release_root / 'app'
     if not descriptor.is_file():
@@ -296,16 +322,21 @@ def generate_skill(source, home, release_root, *, chrome=False):
     resources = installed_app_resources(release_root)
     installation = json.loads((Path(release_root) / 'installation.json').read_text())
     target = installation.get('platform', 'linux')
-    instruction_platform = {'linux': 'linux', 'darwin': 'macos'}[target]
-    modules = resources / 'cua_node/lib/node_modules'
+    instruction_platform = {'linux': 'linux', 'darwin': 'macos', 'windows': 'windows'}[target]
+    modules = resources / ('cua_node/bin/node_modules' if target == 'windows' else 'cua_node/lib/node_modules')
+    def original(path):
+        if target == 'windows' and not path.exists():
+            return Path(str(path).replace('@oai', '%40oai'))
+        return path
     selections = (
-        (modules / '@oai/cua/docs', Path('upstream/cua/docs')),
-        (modules / '@oai/cua-repl/instructions', Path('upstream/cua-repl/instructions')),
-        (modules / '@oai/browser-desktop/environment-docs/codex-app', Path('upstream/browser-desktop/codex-app')),
+        (original(modules / '@oai/cua/docs'), Path('upstream/cua/docs')),
+        (original(modules / '@oai/cua-repl/instructions'), Path('upstream/cua-repl/instructions')),
+        (original(modules / '@oai/browser-desktop/environment-docs/codex-app'), Path('upstream/browser-desktop/codex-app')),
         (resources / 'plugins/openai-bundled/plugins/chrome/docs', Path('upstream/chrome/docs')),
         (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome', Path('upstream/chrome/skill')),
     )
-    generated_root = regular_path(home / '.local/share/lcu/skills')
+    generated_root = regular_path((home / 'AppData/Local/LCU/skills') if target == 'windows'
+                                  else (home / '.local/share/lcu/skills'))
     generated = generated_root / 'lcu'
     generated_root.mkdir(parents=True, exist_ok=True)
     stage = generated_root / ('.lcu-stage-' + uuid.uuid4().hex)
@@ -317,8 +348,10 @@ def generate_skill(source, home, release_root, *, chrome=False):
             # below are copied without altering their prose or APIs.
             wrapper = wrapper.replace('Linux', 'macOS').replace('/linux/', '/macos/')
             wrapper = wrapper.replace('For native macOS windows, target an exact observed window ID. ', '')
+        elif target == 'windows':
+            wrapper = wrapper.replace('Linux', 'Windows').replace('/linux/', '/windows/')
         if chrome:
-            platform_name = 'macOS' if target == 'darwin' else 'Linux'
+            platform_name = {'darwin': 'macOS', 'linux': 'Linux', 'windows': 'Windows'}[target]
             wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
                                       f'description: Control {platform_name} desktop windows and opted-in Chrome tabs through the original Codex computer-use runtime.')
             wrapper += CHROME_SKILL_ADDENDUM
@@ -336,13 +369,13 @@ def generate_skill(source, home, release_root, *, chrome=False):
         _copy_resource_tree(repl_source / instruction_platform, refs / repl_target / instruction_platform)
         for upstream, relative in (selections[0], *(selections[2:] if chrome else ())):
             _copy_resource_tree(upstream, refs / relative)
-        _copy_resource_file(modules / f'@oai/sky/docs/skills/oai_sky_lib/{instruction_platform}/SKILL.md',
+        _copy_resource_file(original(modules / f'@oai/sky/docs/skills/oai_sky_lib/{instruction_platform}/SKILL.md'),
                             refs / f'upstream/sky/{instruction_platform}/SKILL.md')
-        _copy_resource_file(modules / '@oai/sky/docs/sky-full-desktop-api.md',
+        _copy_resource_file(original(modules / '@oai/sky/docs/sky-full-desktop-api.md'),
                             refs / 'upstream/sky/native-api.md')
-        _copy_resource_file(modules / '@oai/sky/docs/sky-window-api.md',
+        _copy_resource_file(original(modules / '@oai/sky/docs/sky-window-api.md'),
                             refs / 'upstream/sky/window-api.md')
-        _copy_resource_file(modules / '@oai/sky/docs/sky-window2-api.md',
+        _copy_resource_file(original(modules / '@oai/sky/docs/sky-window2-api.md'),
                             refs / 'upstream/sky/window2-api.md')
         # Replace the previous generation atomically after every required source
         # has been read successfully; agent registration then uses --copy.
@@ -377,8 +410,9 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                          '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
         if name == 'pi':
             pi = shutil.which('pi', path=env.get('PATH'))
-            extension = home / '.local/share/lcu/pi/extension.mjs'
-            selected_command = home / '.local/share/lcu/pi/commands.json'
+            pi_root = (home / 'AppData/Local/LCU/pi') if sys.platform == 'win32' else (home / '.local/share/lcu/pi')
+            extension = pi_root / 'extension.mjs'
+            selected_command = pi_root / 'commands.json'
             commands = (('skill', skill_command),
                         ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']), str(extension)]))
         else:
@@ -515,8 +549,9 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
 def parser():
     p = argparse.ArgumentParser(description=__doc__, epilog='Run on the machine hosting the agent backend. For Codex SSH remote projects, that is the VM. This command never installs or authenticates the agent itself.')
     p.add_argument('--prefix', type=Path,
-                   default=Path.home() / '.local/share/lcu' if sys.platform == 'darwin' else Path('/opt/lcu'),
-                   help='Runtime prefix (Linux: /opt/lcu; macOS: ~/.local/share/lcu)')
+                   default=(Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))) / 'LCU')
+                   if sys.platform == 'win32' else (Path.home() / '.local/share/lcu' if sys.platform == 'darwin' else Path('/opt/lcu')),
+                   help='Runtime prefix (Linux: /opt/lcu; macOS: ~/.local/share/lcu; Windows: %%LOCALAPPDATA%%\\LCU)')
     p.add_argument('--user', help='Target account; root must select one explicitly')
     p.add_argument('--agent', action='append', default=[], help='Agent ID; repeat for several, all for every supported client, or auto for detected clients. Use --list-agents.')
     p.add_argument('--scope', choices=['user', 'project'], default='user')
@@ -525,7 +560,7 @@ def parser():
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
     p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
-    p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform == 'darwin' else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
+    p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
@@ -538,14 +573,25 @@ def validate(args):
     prefix = args.prefix
     if not prefix.is_absolute() or len(prefix.parts) < 3 or '..' in prefix.parts or any(ord(c) < 32 for c in str(prefix)):
         raise ValueError('Use a dedicated absolute prefix, such as /opt/lcu.')
-    if os.getuid() == 0 and args.user is None:
-        raise ValueError('Root must specify --user ACCOUNT.')
-    try:
-        account = pwd.getpwnam(args.user) if args.user else pwd.getpwuid(os.getuid())
-    except KeyError:
-        raise ValueError('The selected account does not exist. Create it before setup.') from None
-    if os.getuid() not in (0, account.pw_uid):
-        raise ValueError('Run as the selected account or root.')
+    if sys.platform == 'win32':
+        username = getpass.getuser()
+        if args.user and args.user.casefold() != username.casefold():
+            raise ValueError('Windows setup only configures the current signed-in account.')
+        account = SimpleNamespace(pw_name=username, pw_uid=None,
+                                  pw_dir=os.environ.get('USERPROFILE', str(Path.home())))
+        if args.session != 'direct':
+            raise ValueError('Windows requires --session direct.')
+        if args.export:
+            raise ValueError('Windows portable export is not implemented; select --agent instead.')
+    else:
+        if os.getuid() == 0 and args.user is None:
+            raise ValueError('Root must specify --user ACCOUNT.')
+        try:
+            account = pwd.getpwnam(args.user) if args.user else pwd.getpwuid(os.getuid())
+        except KeyError:
+            raise ValueError('The selected account does not exist. Create it before setup.') from None
+        if os.getuid() not in (0, account.pw_uid):
+            raise ValueError('Run as the selected account or root.')
     if not Path(account.pw_dir).is_absolute() or not Path(account.pw_dir).is_dir():
         raise ValueError('Selected account must have an existing absolute home directory.')
     if args.scope == 'project':
@@ -607,11 +653,12 @@ def main(argv=None):
         if args.validate_only:
             if not args.export:
                 # Another account must never inherit the caller's profile overrides.
-                environment = {} if os.getuid() == 0 and account.pw_uid != 0 else os.environ
+                environment = ({} if sys.platform != 'win32' and os.getuid() == 0 and account.pw_uid != 0
+                               else os.environ)
                 installer_environment(Path(account.pw_dir), names, environment)
             return
         # Account files are always written as their owner, including image builds.
-        if os.getuid() == 0 and account.pw_uid != 0:
+        if sys.platform != 'win32' and os.getuid() == 0 and account.pw_uid != 0:
             os.initgroups(account.pw_name, account.pw_gid)
             os.setgid(account.pw_gid)
             os.setuid(account.pw_uid)
@@ -620,14 +667,22 @@ def main(argv=None):
                               PATH=f'{account.pw_dir}/.local/bin:/usr/local/bin:/usr/bin:/bin', LANG='C.UTF-8')
             os.chdir(account.pw_dir)
         home = Path(account.pw_dir)
-        runtime = args.prefix / 'current/bin/lcu'
-        launcher = args.prefix / 'current/bin/lcu-session'
-        source = (args.prefix / 'current/skills/lcu').resolve()
+        if sys.platform == 'win32':
+            release_root = Path(__file__).resolve().parents[1]
+            runtime = args.prefix / 'lcu.cmd'
+            launcher = args.prefix / 'windows_launcher.py'
+            source = release_root / 'skills/lcu'
+            desktop_command = [sys.executable, '-B', str(launcher)]
+        else:
+            release_root = args.prefix / 'current'
+            runtime = release_root / 'bin/lcu'
+            launcher = release_root / 'bin/lcu-session'
+            source = (release_root / 'skills/lcu').resolve()
+            desktop_command = ([str(runtime)] if args.session == 'direct' else
+                               [str(launcher), '--user', account.pw_name, '--', str(runtime)])
         for path in (runtime, launcher):
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise ValueError(f'Managed runtime missing or inaccessible: {path}. Run scripts/install.sh first, or select its --prefix.')
-        desktop_command = ([str(runtime)] if args.session == 'direct' else
-                           [str(launcher), '--user', account.pw_name, '--', str(runtime)])
         if names == ['auto']:
             names = detect(home)
             if not names:
@@ -636,8 +691,8 @@ def main(argv=None):
             if not sys.stdin.isatty():
                 raise ValueError('Noninteractive setup requires --agent ID (repeatable), --agent all, --agent auto, or --export PATH.')
             names = choose_agents(home)
-        subprocess.run([str(runtime), '--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
-        tools_root = args.prefix / 'current/agent-tools'
+        subprocess.run(desktop_command + ['--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
+        tools_root = release_root / 'agent-tools'
         if not args.export:
             installer_environment(home, names)
             installer_paths(tools_root)
@@ -665,16 +720,16 @@ def main(argv=None):
             if args.chrome:
                 # The original native host is a per-account browser connection.
                 from .browser import install as install_browser_host
-                install_browser_host(args.prefix / 'current')
+                install_browser_host(release_root)
             if args.export:
-                local_skill = generate_skill(source, home, args.prefix / 'current', chrome=args.chrome)
-                export_bundle(args.export, source, command, args.prefix / 'current', chrome=args.chrome)
+                local_skill = generate_skill(source, home, release_root, chrome=args.chrome)
+                export_bundle(args.export, source, command, release_root, chrome=args.chrome)
                 print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
             else:
-                failures = configure(names, home, source, command, tools_root, args.prefix / 'current',
+                failures = configure(names, home, source, command, tools_root, release_root,
                                      scope=args.scope, project=args.project, chrome=args.chrome)
                 if failures:
-                    retry = [str(runtime), 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
+                    retry = [*desktop_command, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
                     if args.project:
                         retry += ['--project', str(args.project)]
@@ -687,7 +742,7 @@ def main(argv=None):
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.chrome:
             try:
-                browser_status = subprocess.run([str(runtime), 'browser', 'status'],
+                browser_status = subprocess.run(desktop_command + ['browser', 'status'],
                                                 capture_output=True, text=True, timeout=20)
                 if browser_status.stdout.strip():
                     print(browser_status.stdout.strip())
