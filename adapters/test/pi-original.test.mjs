@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { isolatedEnv } from './isolated-env.mjs';
 
 const extension = new URL('../pi/index.ts', import.meta.url).pathname;
@@ -19,6 +20,9 @@ test('installed Pi uses original CUA descriptions and persistent pure JS',
     const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-original-'));
     const agentDir = join(directory, 'agent');
     mkdirSync(agentDir);
+    const installedExtension = join(directory, 'lcu-extension.mjs');
+    writeFileSync(installedExtension, `import lcu from ${JSON.stringify(pathToFileURL(extension).href)};\n` +
+      `export default pi => lcu(pi, {command: ${process.env.LCU_REAL_COMMAND}});\n`);
     const requests = [];
     const server = createServer(async (request, response) => {
       if (request.url !== '/v1/chat/completions') { response.writeHead(404).end(); return; }
@@ -48,11 +52,10 @@ test('installed Pi uses original CUA descriptions and persistent pure JS',
     } } }));
     try {
       const child = spawn(process.env.PI_BIN, ['-p', '--mode', 'json', '--no-session',
-        '--no-builtin-tools', '--no-extensions', '-e', extension,
+        '--no-builtin-tools', '--no-extensions', '-e', installedExtension,
         '--no-skills', '--no-context-files', '--provider', 'fixture', '--model', 'scripted',
         'Call original js twice with the supplied pure JavaScript arithmetic, then finish.'],
       { cwd: directory, env: isolatedEnv(directory, { PI_CODING_AGENT_DIR: agentDir,
-        LCU_MCP_COMMAND: process.env.LCU_REAL_COMMAND,
         NODE_REPL_DISABLE_ANALYTICS: '1' }), stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '', stderr = '';
       child.stdout.on('data', part => { stdout += part; });

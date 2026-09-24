@@ -52,8 +52,17 @@ assert 'mcp_servers.lcu' in codex.read_text()
 pi_settings = home / '.pi/agent/settings.json'
 assert pi_settings.is_file(), 'Pi local extension must be registered by its own package manager'
 pi_packages = json.loads(pi_settings.read_text())['packages']
-assert any((pi_settings.parent / item).resolve() == (prefix / 'current/adapters').resolve()
+user_extension = home / '.local/share/lcu/pi/user.mjs'
+project_extension = project / '.pi/lcu-extension.mjs'
+assert any((pi_settings.parent / item).resolve() == user_extension.resolve()
            for item in pi_packages if isinstance(item, str)), pi_packages
+assert f'"{command}"' in user_extension.read_text()
+assert f'"{command}"' in project_extension.read_text()
+project_pi_settings = project / '.pi/settings.json'
+assert project_pi_settings.is_file(), 'Pi project extension must be registered independently'
+project_pi_packages = json.loads(project_pi_settings.read_text())['packages']
+assert any((project_pi_settings.parent / item).resolve() == project_extension.resolve()
+           for item in project_pi_packages if isinstance(item, str)), project_pi_packages
 browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
 assert len(browser_hosts) == 1, 'Setup must install one original native host for this account'
 assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()

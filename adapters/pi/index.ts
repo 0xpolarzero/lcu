@@ -21,9 +21,10 @@ function piContent(result: { content: OriginalContent[]; isError?: boolean }) {
   return { content, details: { originalResult: result } };
 }
 
-function commandFromEnvironment() {
+function commandFromEnvironment(selected?: string[]) {
   const raw = process.env.LCU_MCP_COMMAND;
   if (raw) return JSON.parse(raw);
+  if (selected) return selected;
   const runtime = fileURLToPath(new URL('../../bin/lcu', import.meta.url));
   if (process.platform === 'darwin') return [runtime];
   if (process.platform === 'linux') {
@@ -38,7 +39,7 @@ function originsFromEnvironment() {
   return raw ? JSON.parse(raw) : [];
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, options: { command?: string[] } = {}) {
   let bridge: ReturnType<typeof createCuaClient> | undefined;
   let pending: Promise<ReturnType<typeof createCuaClient>> | undefined;
   let active: { sessionId: string; turnId: string } | undefined;
@@ -71,7 +72,7 @@ export default function (pi: ExtensionAPI) {
     if (!pending) {
       pending = (async () => {
         const candidate = createCuaClient({
-          command: commandFromEnvironment(),
+          command: commandFromEnvironment(options.command),
           cwd: process.cwd(),
           allowedOrigins: originsFromEnvironment(),
           onElicitation: async params => {

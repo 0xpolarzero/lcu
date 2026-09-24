@@ -361,10 +361,11 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
         skill_command = [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
                          '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
         if name == 'pi':
-            pi = shutil.which('pi', path=env.get('PATH')) or 'pi'
+            pi = shutil.which('pi', path=env.get('PATH'))
+            extension = (home / '.local/share/lcu/pi/user.mjs' if scope == 'user'
+                         else project / '.pi/lcu-extension.mjs')
             commands = (('skill', skill_command),
-                        ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']),
-                                       str(release_root / 'adapters')]))
+                        ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']), str(extension)]))
         else:
             commands = (('skill', skill_command),
                         ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
@@ -373,6 +374,15 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
             try:
                 if phase == 'MCP':
                     preflight_mcp(node, mcp, client, scope, cwd, env)
+                if phase == 'extension':
+                    if not pi:
+                        raise ValueError('Pi is not on the target account PATH. Install Pi, then run `lcu setup --agent pi --yes` from that account shell.')
+                    adapter = release_root / 'adapters/pi/index.ts'
+                    if not adapter.is_file():
+                        raise ValueError(f'LCU Pi adapter missing: {adapter}')
+                    wrapper = ('import lcu from ' + json.dumps(adapter.as_uri()) + ';\n'
+                               'export default pi => lcu(pi, {command: ' + json.dumps(command) + '});\n').encode()
+                    apply_changes([Change(extension, read_file(extension), wrapper)])
                 phase_env = {**env, 'PI_OFFLINE': '1'} if phase == 'extension' else env
                 result = subprocess.run(argv, cwd=cwd, env=phase_env, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, timeout=120)
