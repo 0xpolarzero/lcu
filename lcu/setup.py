@@ -724,6 +724,8 @@ def main(argv=None):
                     print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
             if args.chrome:
                 print('Chrome control selected: register the original extension connector for this desktop account and include Chrome guidance.')
+                if 'claude-code' in names:
+                    print('Claude Code: Chrome control is experimental. Browser turn metadata is unverified, and original turn_ended cleanup is not wired on completion or interruption; temporary tabs may remain open.')
             else:
                 print('Native desktop control selected; Chrome connector and guidance are excluded.')
             if not args.yes:
