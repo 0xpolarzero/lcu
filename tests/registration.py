@@ -65,8 +65,8 @@ project_pi_packages = json.loads(project_pi_settings.read_text())['packages']
 assert any((project_pi_settings.parent / item).resolve() == user_extension.resolve()
            for item in project_pi_packages if isinstance(item, str)), project_pi_packages
 browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
-assert len(browser_hosts) == 1, 'Setup must install one original native host for this account'
-assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()
+assert not browser_hosts, 'Default desktop setup must not install a Chrome native host'
+assert not (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').exists()
 resources = prefix / 'current/app/resources'
 policy = json.loads((resources / 'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json').read_text())['mcpServers']['cua_repl']
 for path in (codex, project / '.codex/config.toml'):
@@ -83,13 +83,15 @@ subprocess.run([command, 'setup', '--user', account, '--export', str(export), '-
 config = json.loads((export / 'mcp.json').read_text())
 assert config['mcpServers']['lcu']['command'] == '/bin/sh'
 assert 'LCU_PREFIX' in config['mcpServers']['lcu']['args'][1]
+assert '--chrome' not in config['mcpServers']['lcu']['args']
 assert command not in config['mcpServers']['lcu']['args'][1]
-assert (home / '.local/share/lcu/skills/lcu/references/upstream/chrome/skill/SKILL.md').is_file()
+assert not (home / '.local/share/lcu/skills/lcu/references/upstream/browser-desktop').exists()
+assert not (home / '.local/share/lcu/skills/lcu/references/upstream/chrome').exists()
 contract = json.loads((export / 'host-contract.json').read_text())
 for key in ('enabled_tools', 'omit_tools_from', 'startup_timeout_sec', 'tools'):
     assert contract[key] == policy[key]
 assert (export / 'skills/lcu/SKILL.md').is_file()
-# Generated agent skill exposes original Linux and Chrome references before a tool call.
+# Generated agent skill exposes original Linux references before a tool call.
 registered_skills = [p.parent for p in home.rglob('SKILL.md')
                      if p.parent.name == 'lcu' and export not in p.parents]
 assert registered_skills
@@ -99,13 +101,13 @@ reference_pairs = (
     (module_root / '@oai/cua-repl/instructions/linux/description.md', 'references/upstream/cua-repl/instructions/linux/description.md'),
     (module_root / '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md', 'references/upstream/sky/linux/SKILL.md'),
     (module_root / '@oai/sky/docs/sky-full-desktop-api.md', 'references/upstream/sky/native-api.md'),
-    (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md', 'references/upstream/chrome/skill/SKILL.md'),
-    (resources / 'plugins/openai-bundled/plugins/chrome/docs/documents.json', 'references/upstream/chrome/docs/documents.json'),
 )
 for skill in registered_skills:
     for original, relative in reference_pairs:
         assert (skill / relative).read_bytes() == original.read_bytes(), (skill, relative)
     assert not (skill / 'references/upstream/cua-repl/instructions/macos').exists(), skill
+    assert not (skill / 'references/upstream/browser-desktop').exists(), skill
+    assert not (skill / 'references/upstream/chrome').exists(), skill
 # Portable exports carry bootstrap metadata, never upstream instruction files.
 assert (export / 'lcu-bootstrap.json').is_file()
 assert not (export / 'skills/lcu/references').exists()
@@ -113,6 +115,23 @@ upstream_sample = (module_root / '@oai/cua/docs/tinysky-alt-core-cua-repl.md').r
 assert upstream_sample not in b'\n'.join(p.read_bytes() for p in export.rglob('*') if p.is_file())
 subprocess.run(['runuser', '-u', account, '--', 'python3',
                 '/src/tests/portable_consumer.py', str(export)], check=True)
+# Explicit browser setup installs the original connector and unified browser guide.
+subprocess.run([command, 'setup', '--user', account, '--agent', 'codex', '--session', 'direct',
+                '--chrome', '--yes'], check=True)
+browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
+assert len(browser_hosts) == 1, 'Chrome opt-in must install one original native host'
+assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()
+browser_guide = home / '.local/share/lcu/skills/lcu/references/upstream/browser-desktop/codex-app/api.json'
+assert browser_guide.read_bytes() == (module_root / '@oai/browser-desktop/environment-docs/codex-app/api.json').read_bytes()
+chrome_refs = home / '.local/share/lcu/skills/lcu/references/upstream/chrome'
+original_chrome = resources / 'plugins/openai-bundled/plugins/chrome'
+assert (chrome_refs / 'docs/documents.json').read_bytes() == (original_chrome / 'docs/documents.json').read_bytes()
+assert (chrome_refs / 'skill/SKILL.md').read_bytes() == (original_chrome / 'skills/control-chrome/SKILL.md').read_bytes()
+assert '--chrome' in tomllib.loads(codex.read_text())['mcp_servers']['lcu']['args']
+browser_export = home / 'portable-chrome'
+subprocess.run([command, 'setup', '--user', account, '--export', str(browser_export),
+                '--session', 'direct', '--chrome', '--yes'], check=True)
+assert json.loads((browser_export / 'mcp.json').read_text())['mcpServers']['lcu']['args'][-1] == '--chrome'
 # A malformed existing supported-agent config must be left byte-for-byte intact.
 claude = home / '.claude.json'
 before = claude.read_bytes()
@@ -123,4 +142,4 @@ try:
     assert claude.read_bytes() == b'{ not valid JSONC'
 finally:
     claude.write_bytes(before)
-print('PASS: Codex, Claude Code, and Pi, browser native host, user and project scope, account ownership, config preservation, idempotency, portable export')
+print('PASS: default desktop-only setup, explicit Chrome connector, Codex/Claude Code/Pi, scopes, ownership, idempotency, portable exports')

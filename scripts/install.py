@@ -149,7 +149,7 @@ def main(argv=None):
     account, names = setup.validate(args)
     prefix = checked_prefix(args.prefix)
     if args.runtime_only:
-        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.session != 'discover' or args.browser_host:
+        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.session != 'discover' or args.browser_host or args.chrome:
             raise ValueError('--runtime-only cannot include agent setup options')
     elif not names and not args.export and (args.yes or not sys.stdin.isatty()):
         raise ValueError('Select --agent NAME, --agent all, --agent auto, --export PATH, or --runtime-only')
@@ -174,7 +174,7 @@ def main(argv=None):
         for flag in ('project', 'export'):
             if getattr(args, flag):
                 forwarded += ['--' + flag, str(getattr(args, flag))]
-        for flag in ('yes', 'check_desktop'):
+        for flag in ('yes', 'check_desktop', 'chrome'):
             if getattr(args, flag):
                 forwarded += ['--' + flag.replace('_', '-')]
         # Run setup from the selected release, and drop privileges before account writes.

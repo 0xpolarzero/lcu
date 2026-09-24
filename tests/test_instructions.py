@@ -70,21 +70,35 @@ class InstalledInstructionTests(unittest.TestCase):
         mapping = {
             '@oai/cua/docs/tinysky-alt-core-cua-repl.md': 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md',
             '@oai/cua-repl/instructions/linux/description.md': 'references/upstream/cua-repl/instructions/linux/description.md',
-            '@oai/browser-desktop/environment-docs/codex-app/api.json': 'references/upstream/browser-desktop/codex-app/api.json',
-            '@oai/browser-desktop/environment-docs/codex-app/documents.json': 'references/upstream/browser-desktop/codex-app/documents.json',
             '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md': 'references/upstream/sky/linux/SKILL.md',
             '@oai/sky/docs/sky-full-desktop-api.md': 'references/upstream/sky/native-api.md',
             '@oai/sky/docs/sky-window-api.md': 'references/upstream/sky/window-api.md',
             '@oai/sky/docs/sky-window2-api.md': 'references/upstream/sky/window2-api.md',
-            'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md': 'references/upstream/chrome/skill/SKILL.md',
-            'plugins/openai-bundled/plugins/chrome/docs/capabilities/tab/cdp.md': 'references/upstream/chrome/docs/capabilities/tab/cdp.md',
         }
         for upstream, local in mapping.items():
             source = (self.resources / 'cua_node/lib/node_modules' / upstream
                       if upstream.startswith('@oai/') else self.resources / upstream)
             self.assertEqual((generated / local).read_bytes(), source.read_bytes())
         self.assertFalse((generated / 'references/upstream/cua-repl/instructions/macos').exists())
-        self.assertIn('references/upstream/chrome/skill/SKILL.md', (generated / 'SKILL.md').read_text())
+        self.assertFalse((generated / 'references/upstream/browser-desktop').exists())
+        self.assertFalse((generated / 'references/upstream/chrome').exists())
+        self.assertNotIn('Chrome', (generated / 'SKILL.md').read_text())
+
+    def test_chrome_opt_in_retains_original_browser_and_plugin_guides(self):
+        generated = generate_skill(self.skill_source, self.home, self.release, chrome=True)
+        self.assertEqual((generated / 'references/upstream/browser-desktop/codex-app/api.json').read_bytes(),
+                         (self.modules / '@oai/browser-desktop/environment-docs/codex-app/api.json').read_bytes())
+        self.assertEqual((generated / 'references/upstream/browser-desktop/codex-app/documents.json').read_bytes(),
+                         (self.modules / '@oai/browser-desktop/environment-docs/codex-app/documents.json').read_bytes())
+        self.assertEqual((generated / 'references/upstream/chrome/docs/documents.json').read_bytes(),
+                         (self.resources / 'plugins/openai-bundled/plugins/chrome/docs/documents.json').read_bytes())
+        self.assertEqual((generated / 'references/upstream/chrome/skill/SKILL.md').read_bytes(),
+                         (self.resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md').read_bytes())
+        self.assertIn('references/upstream/browser-desktop/codex-app/api.json',
+                      (generated / 'SKILL.md').read_text())
+        self.assertIn('description: Control Linux desktop windows and opted-in Chrome tabs',
+                      (generated / 'SKILL.md').read_text())
+        self.assertIn('entrypoints do not apply to LCU', (generated / 'SKILL.md').read_text())
 
     def test_missing_instruction_source_does_not_replace_last_generated_skill(self):
         generated = generate_skill(self.skill_source, self.home, self.release)
@@ -118,6 +132,9 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('references/upstream/sky/macos/SKILL.md', wrapper)
         self.assertNotIn('Linux', wrapper)
         self.assertNotIn('instructions/linux', wrapper)
+        chrome_skill = generate_skill(self.skill_source, self.home, self.release, chrome=True)
+        self.assertIn('description: Control macOS desktop windows and opted-in Chrome tabs',
+                      (chrome_skill / 'SKILL.md').read_text())
 
     def test_export_contains_only_lcu_authored_bootstrap_not_upstream_payload(self):
         destination = self.root / 'export'
@@ -133,6 +150,16 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(command['command'], '/bin/sh')
         self.assertIn('LCU_PREFIX', command['args'][1])
         self.assertIn('LCU_SESSION_MODE', command['args'][1])
+
+    def test_chrome_export_marks_original_reference_sources_without_copying_them(self):
+        destination = self.root / 'export-chrome'
+        with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
+            export_bundle(destination, self.skill_source, ['/usr/bin/lcu'], self.release, chrome=True)
+        command = json.loads((destination / 'mcp.json').read_text())['mcpServers']['lcu']
+        self.assertEqual(command['args'][-1], '--chrome')
+        metadata = json.loads((destination / 'lcu-bootstrap.json').read_text())
+        self.assertTrue(any('/plugins/chrome/skills/control-chrome' in item for item in metadata['instructionSources']))
+        self.assertFalse((destination / 'skills/lcu/references').exists())
 
     def test_exported_command_resolves_destination_prefix_and_session(self):
         destination = self.root / 'export'
@@ -166,7 +193,8 @@ class InstalledInstructionTests(unittest.TestCase):
             if argv[1:3] == [str(skill_cli), 'add']:
                 source = Path(argv[3])
                 self.assertTrue((source / 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').is_file())
-                self.assertTrue((source / 'references/upstream/chrome/skill/SKILL.md').is_file())
+                self.assertFalse((source / 'references/upstream/browser-desktop').exists())
+                self.assertFalse((source / 'references/upstream/chrome').exists())
                 self.assertIn('--copy', argv)
                 return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
             return SimpleNamespace(returncode=0, stdout='{}')
@@ -223,5 +251,17 @@ class InstalledInstructionTests(unittest.TestCase):
 
     def test_legacy_browser_host_flag_fails_with_chrome_migration(self):
         args = parser().parse_args(['--browser-host'])
-        with self.assertRaisesRegex(ValueError, 'use the original Chrome provider'):
+        with self.assertRaisesRegex(ValueError, 'setup --agent AGENT --chrome'):
             validate(args)
+
+    def test_chrome_export_only_adds_runtime_flag_when_selected(self):
+        with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
+            export_bundle(self.root / 'native-export', self.skill_source, ['/usr/bin/lcu'], self.release)
+            export_bundle(self.root / 'chrome-export', self.skill_source, ['/usr/bin/lcu', '--chrome'],
+                          self.release, chrome=True)
+        native = json.loads((self.root / 'native-export/mcp.json').read_text())['mcpServers']['lcu']
+        browser = json.loads((self.root / 'chrome-export/mcp.json').read_text())['mcpServers']['lcu']
+        self.assertNotIn('--chrome', native['args'])
+        self.assertEqual(browser['args'][-1], '--chrome')
+        metadata = json.loads((self.root / 'chrome-export/lcu-bootstrap.json').read_text())
+        self.assertIn('--chrome', metadata['destinationSetup'])

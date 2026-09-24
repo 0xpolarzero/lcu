@@ -19,6 +19,16 @@ import uuid
 from .setup_clients import CLIENTS, ALIASES
 
 
+CHROME_SKILL_ADDENDUM = """
+
+## Chrome browser control
+
+This LCU installation opted into the original unified `cua` Chrome surface. Before the first browser call, read the original [browser API](references/upstream/browser-desktop/codex-app/api.json) and [document-selection graph](references/upstream/browser-desktop/codex-app/documents.json). Use browser and tab entrypoints shown by the connected provider and its returned capability instructions. The original [Chrome plugin guide](references/upstream/chrome/skill/SKILL.md) and [Chrome plugin documents](references/upstream/chrome/docs/documents.json) are retained as references. Their separate `setupBrowserRuntime()` and `agent.browsers` entrypoints do not apply to LCU's unified `cua` tool.
+
+For connection problems, run `lcu browser status` and, if the native host is missing, `lcu browser install` as the desktop account. Enable the official ChatGPT extension in the selected Chrome profile. Site approvals remain with the original provider and the agent host.
+"""
+
+
 @dataclass
 class Change:
     path: Path
@@ -281,7 +291,7 @@ def _copy_resource_file(source, destination):
     shutil.copyfile(source, destination)
 
 
-def generate_skill(source, home, release_root):
+def generate_skill(source, home, release_root, *, chrome=False):
     """Materialize the selected platform's original references byte for byte."""
     resources = installed_app_resources(release_root)
     installation = json.loads((Path(release_root) / 'installation.json').read_text())
@@ -307,6 +317,11 @@ def generate_skill(source, home, release_root):
             # below are copied without altering their prose or APIs.
             wrapper = wrapper.replace('Linux', 'macOS').replace('/linux/', '/macos/')
             wrapper = wrapper.replace('For native macOS windows, target an exact observed window ID. ', '')
+        if chrome:
+            platform_name = 'macOS' if target == 'darwin' else 'Linux'
+            wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
+                                      f'description: Control {platform_name} desktop windows and opted-in Chrome tabs through the original Codex computer-use runtime.')
+            wrapper += CHROME_SKILL_ADDENDUM
         (stage / 'SKILL.md').write_text(wrapper)
         refs = stage / 'references'
         # Match upstream load_instructions(process.platform): expose shared
@@ -319,7 +334,7 @@ def generate_skill(source, home, release_root):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, target)
         _copy_resource_tree(repl_source / instruction_platform, refs / repl_target / instruction_platform)
-        for upstream, relative in (selections[0], *selections[2:]):
+        for upstream, relative in (selections[0], *(selections[2:] if chrome else ())):
             _copy_resource_tree(upstream, refs / relative)
         _copy_resource_file(modules / f'@oai/sky/docs/skills/oai_sky_lib/{instruction_platform}/SKILL.md',
                             refs / f'upstream/sky/{instruction_platform}/SKILL.md')
@@ -346,11 +361,11 @@ def generate_skill(source, home, release_root):
     return generated
 
 
-def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, environ=None):
+def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, chrome=False, environ=None):
     """Delegate registration and return phase failures."""
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
-    skill_source = generate_skill(source, home, release_root)
+    skill_source = generate_skill(source, home, release_root, chrome=chrome)
     resources = installed_app_resources(release_root)
     original_plugins = resources / 'plugins/openai-bundled'
     cwd = project if scope == 'project' else home
@@ -424,7 +439,7 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     return failures
 
 
-def export_bundle(destination, source, command, release_root):
+def export_bundle(destination, source, command, release_root, *, chrome=False):
     destination = regular_path(destination)
     if destination.exists():
         raise ValueError('Export destination already exists; choose a new directory.')
@@ -452,7 +467,7 @@ def export_bundle(destination, source, command, release_root):
               'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
               '"$prefix/current/bin/lcu" "$@";; '
               '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
-    portable_command = ['/bin/sh', '-c', launch, 'lcu-export']
+    portable_command = ['/bin/sh', '-c', launch, 'lcu-export', *(['--chrome'] if chrome else [])]
     mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': portable_command[0],
                                  'args': portable_command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
@@ -464,13 +479,15 @@ def export_bundle(destination, source, command, release_root):
         'instructionSources': [
             f'{resource_root}/cua_node/lib/node_modules/@oai/cua/docs',
             f'{resource_root}/cua_node/lib/node_modules/@oai/cua-repl/instructions/{native_docs}',
-            f'{resource_root}/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app',
             f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/skills/oai_sky_lib/{native_docs}',
             f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/sky-full-desktop-api.md',
-            f'{resource_root}/plugins/openai-bundled/plugins/chrome/docs',
-            f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome',
+            *([f'{resource_root}/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app'] if chrome else []),
+            *([f'{resource_root}/plugins/openai-bundled/plugins/chrome/docs',
+               f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome'] if chrome else []),
         ],
-        'destinationSetup': 'Install the matching thin LCU archive and selected application, then run lcu setup --export /new/path --yes on the destination account. Import the newly generated export and its local full skill.',
+        'destinationSetup': ('Install the matching thin LCU archive and selected application, then run '
+                             'lcu setup --export /new/path ' + ('--chrome ' if chrome else '')
+                             + '--yes on the destination account. Import the newly generated export and its local full skill.'),
         'runtimePrefix': 'Set LCU_PREFIX for a nondefault destination prefix: /opt/lcu on Linux, $HOME/.local/share/lcu on macOS.',
         'sessionMode': 'Linux defaults to XFCE discovery; set LCU_SESSION_MODE=direct inside its desktop session. macOS defaults to direct.',
         'preCallRequirement': 'Generate and register the local skill before the first computer-use call.',
@@ -488,7 +505,7 @@ def export_bundle(destination, source, command, release_root):
                 for name, data in export_files(portable_command, original_plugins).items()]
     bootstrap = ("# LCU skill bootstrap\n\n"
                  "Install LCU and its selected application on this machine, then run "
-                 "`lcu setup --export /new/path --yes` here and import that new export. "
+                 "`lcu setup --export /new/path " + ("--chrome " if chrome else "") + "--yes` here and import that new export. "
                  "Use the generated local full skill before the first computer-use call.\n")
     files['SKILL.md'] = bootstrap.encode()
     changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
@@ -507,6 +524,7 @@ def parser():
     p.add_argument('--yes', action='store_true', help='Apply explicit choices without a confirmation prompt')
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
+    p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform == 'darwin' else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
@@ -516,7 +534,7 @@ def parser():
 
 def validate(args):
     if args.browser_host:
-        raise ValueError('--browser-host was removed; use the original Chrome provider with `lcu setup --agent AGENT`. Embedded in-app browser hosting is not supported.')
+        raise ValueError('--browser-host was removed; use `lcu setup --agent AGENT --chrome` for external Chrome. Embedded in-app browser hosting is not supported.')
     prefix = args.prefix
     if not prefix.is_absolute() or len(prefix.parts) < 3 or '..' in prefix.parts or any(ord(c) < 32 for c in str(prefix)):
         raise ValueError('Use a dedicated absolute prefix, such as /opt/lcu.')
@@ -608,7 +626,8 @@ def main(argv=None):
         for path in (runtime, launcher):
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise ValueError(f'Managed runtime missing or inaccessible: {path}. Run scripts/install.sh first, or select its --prefix.')
-        command = [str(runtime)] if args.session == 'direct' else [str(launcher), '--user', account.pw_name, '--', str(runtime)]
+        desktop_command = ([str(runtime)] if args.session == 'direct' else
+                           [str(launcher), '--user', account.pw_name, '--', str(runtime)])
         if names == ['auto']:
             names = detect(home)
             if not names:
@@ -623,6 +642,9 @@ def main(argv=None):
             installer_environment(home, names)
             installer_paths(tools_root)
         with setup_lock(home):
+            if not args.yes and not args.chrome and sys.stdin.isatty():
+                args.chrome = input('Enable Chrome browser control and its extension connector? [y/N] ').strip().lower() in ('y', 'yes')
+            command = [*desktop_command, *(['--chrome'] if args.chrome else [])]
             if args.export:
                 print(f'Export tools and skill to {args.export}')
             else:
@@ -630,34 +652,40 @@ def main(argv=None):
                 print('Existing LCU skill and MCP entries will be updated; unrelated configuration is preserved.')
                 if 'codex' in names:
                     print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
+            if args.chrome:
+                print('Chrome control selected: register the original extension connector for this desktop account and include Chrome guidance.')
+            else:
+                print('Native desktop control selected; Chrome connector and guidance are excluded.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')
                 if input('Apply this setup? [y/N] ').strip().lower() not in ('y', 'yes'):
                     print('Cancelled; no agent configuration changed.')
                     return
-            if args.export:
-                local_skill = generate_skill(source, home, args.prefix / 'current')
-                export_bundle(args.export, source, command, args.prefix / 'current')
-                print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
-            else:
+            if args.chrome:
                 # The original native host is a per-account browser connection.
-                # Install it after consent and before exposing agent registrations.
                 from .browser import install as install_browser_host
                 install_browser_host(args.prefix / 'current')
+            if args.export:
+                local_skill = generate_skill(source, home, args.prefix / 'current', chrome=args.chrome)
+                export_bundle(args.export, source, command, args.prefix / 'current', chrome=args.chrome)
+                print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
+            else:
                 failures = configure(names, home, source, command, tools_root, args.prefix / 'current',
-                                     scope=args.scope, project=args.project)
+                                     scope=args.scope, project=args.project, chrome=args.chrome)
                 if failures:
                     retry = [str(runtime), 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
                     if args.project:
                         retry += ['--project', str(args.project)]
+                    if args.chrome:
+                        retry += ['--chrome']
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
-        if not args.export:
+        if args.chrome:
             try:
                 browser_status = subprocess.run([str(runtime), 'browser', 'status'],
                                                 capture_output=True, text=True, timeout=20)
@@ -668,17 +696,17 @@ def main(argv=None):
             except (OSError, subprocess.SubprocessError):
                 print('Browser status unavailable; run `lcu browser status` after setup.')
         else:
-            print('Check Chrome setup on the destination with `lcu browser status`; a status check does not prove a live connection.')
+            print('Chrome browser control not enabled; add it later with `lcu setup --agent AGENT --chrome`.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         if args.check_desktop:
             print('Checking the live desktop...')
-            doctor = command + ['doctor']
+            doctor = desktop_command + ['doctor']
             subprocess.run(doctor, check=True, timeout=35)
             print('Desktop readiness check passed. Tool and skill discovery inside the agent still needs its first connection.')
         else:
             print('Live desktop not checked (image builds need no running GUI). After starting the desktop, check with:')
-            doctor = command + ['doctor']
+            doctor = desktop_command + ['doctor']
             print('  ' + shlex.join(doctor))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         p.exit(1, f'Setup failed: {exc}\n')

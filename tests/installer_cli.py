@@ -12,6 +12,7 @@ with tempfile.TemporaryDirectory() as directory:
     prefix = scratch / 'uncreated'
     for args in (['--runtime-only'], ['--user', 'root', '--yes'],
                  ['--user', 'root', '--runtime-only', '--agent', 'codex'],
+                 ['--user', 'root', '--runtime-only', '--chrome'],
                  ['--user', 'root', '--agent', 'nonexistent', '--yes']):
         result = subprocess.run([installer, '--prefix', str(prefix), '--skip-system', *args], capture_output=True)
         assert result.returncode != 0, args

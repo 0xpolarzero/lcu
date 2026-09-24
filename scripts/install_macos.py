@@ -53,7 +53,7 @@ def main(argv=None):
     if args.session != 'direct':
         raise ValueError('macOS uses --session direct; XFCE session discovery is Linux-only')
     if args.runtime_only:
-        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop:
+        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.chrome:
             raise ValueError('--runtime-only cannot include agent setup options')
     elif not names and not args.export and (args.yes or not sys.stdin.isatty()):
         raise ValueError('Select --agent NAME, --export PATH, or --runtime-only')
@@ -69,7 +69,7 @@ def main(argv=None):
         for option in ('project', 'export'):
             if getattr(args, option):
                 forwarded += ['--' + option, str(getattr(args, option))]
-        for option in ('yes', 'check_desktop'):
+        for option in ('yes', 'check_desktop', 'chrome'):
             if getattr(args, option):
                 forwarded += ['--' + option.replace('_', '-')]
         subprocess.run([str(runtime), 'setup', *forwarded], check=True)
