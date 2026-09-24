@@ -71,7 +71,7 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
           maxTokens: 512 }],
       } } }));
       const args = [process.env.PI_CLI_JS, '-p', '--mode', 'json', '--no-session',
-        '--no-extensions', '-e', extension, '--skill', skill, '--no-context-files',
+        '--skill', skill, '--no-context-files',
         '--provider', 'fixture', '--model', 'scripted',
         'Use the supplied original CUA tools in the generated Windows desktop fixture.'];
       const child = spawn(process.execPath, args, { cwd: project, env: childEnv(agentDir),
@@ -109,7 +109,7 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
       const finalMessages = JSON.stringify(requests[4].messages);
       assert.match(finalMessages, new RegExp(`LCU_WINDOW_ID=\\d+;TITLE=${expectedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
         `Original native result omitted the task-owned window ${expectedTitle}`);
-      console.log('Pi registered Windows extension: original guide, skill, four CUA calls, native window ID/title verified.');
+      console.log('Pi project-registered Windows extension: original guide, skill, four CUA calls, native window ID/title verified.');
       console.log('Print-mode output does not independently establish host-only turn_ended dispatch; adapter regression covers that separately.');
     } finally {
       await new Promise(resolve => server.close(resolve));
