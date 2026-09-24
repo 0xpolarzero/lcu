@@ -14,7 +14,7 @@ The original provider requested MCP app approvals for TextEdit operations. The t
 
 A subsequent `pressKey("super+w")` did not close the test document. The returned tree showed the same window with its text empty and modified. A later built-in Codex observation confirmed that state. The marker was restored and saved using the built-in original tool, and its visible close button closed the test document. The surviving TextEdit Open panel contained no open test document. The final file content was checked again.
 
-The original JavaScript forwards the exact key string to the compiled native helper. The visible source does not establish the keyboard-layout cause; an AZERTY/Undo explanation is unconfirmed. No keyboard workaround or engine change was added. This result supports the exercised click/type/screenshot/save flow, not blanket keyboard parity.
+The original JavaScript forwards the exact key string to the compiled native helper. A later direct-original comparison confirmed this acted as Undo in both original CUA and LCU on this French-keyboard machine. The visible source does not establish the native keyboard-layout cause. No keyboard workaround or engine change was added. See [macos-cold-and-keyboard-2026-09-24.md](macos-cold-and-keyboard-2026-09-24.md).
 
 Ghostty was not used: the built-in Computer Use tool explicitly refused it for safety reasons, and that restriction was respected.
 
@@ -25,4 +25,3 @@ The original CUAService socket already existed before this run. Success establis
 Chrome 153.0.8010.53 had no connected official extension. Original native-host setup succeeded under a disposable HOME, without writing a personal native-host registration. A separate temporary Chrome process was stopped after verifying its executable and test-only profile path because the native app binding selected the regular Chrome instance. Through Chrome's normal UI, a signed-out profile named `LCU disposable test` was then created. The official ChatGPT 1.26.901.11451 Web Store listing was reached, and the extension installation permission dialog is pending user approval. No extension was installed and no Chrome action through LCU is claimed.
 
 Private raw responses and the screenshot remain only in `/private/tmp/lcu-macos-live-no7mz5ya`; they are not repository or release payload. The test document is `/private/tmp/lcu-macos-live-no7mz5ya/LCU native saved.rtf`. Browser fixtures and generated host files also stay under that temporary directory. Windows remains unimplemented.
-
