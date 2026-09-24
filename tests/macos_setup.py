@@ -57,6 +57,9 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
         assert config['hooks']['state'], 'Original hooks were not trusted'
 
         generated = home / '.local/share/lcu/skills/lcu'
+        wrapper = (generated / 'SKILL.md').read_text()
+        assert ('references/upstream/chrome/' in wrapper) == chrome
+        assert ('references/upstream/browser-desktop/' in wrapper) == chrome
         pairs = (
             (modules / '@oai/cua/docs/tinysky-alt-core-cua-repl.md',
              'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md'),
