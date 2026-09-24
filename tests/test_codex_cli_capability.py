@@ -1,6 +1,8 @@
 """The optional CLI probe must fail before installing unreadable hook config."""
 import subprocess
 from pathlib import Path
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -47,6 +49,17 @@ class CodexCliCapabilityTests(unittest.TestCase):
         for child in environments:
             self.assertEqual(child['SYSTEMROOT'], r'C:\Windows')
             self.assertNotIn('OPENAI_API_KEY', child)
+
+    def test_utf8_cli_output_is_read_under_a_legacy_windows_locale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cli = Path(directory) / 'codex-fixture'
+            cli.write_text('#!' + sys.executable + '\n'
+                           'import sys\n'
+                           'sys.stdout.buffer.write(b"codex-cli \\xe2\\x80\\x8f fixture\\n")\n')
+            cli.chmod(0o755)
+            with patch('lcu.codex_hooks.shutil.which', return_value=str(cli)), \
+                 patch('subprocess._text_encoding', return_value='cp1252'):
+                require_cli_hook_support({'PATH': str(Path(sys.executable).parent)})
 
 
 if __name__ == '__main__':

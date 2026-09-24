@@ -72,9 +72,11 @@ def require_cli_hook_support(env):
         try:
             version = subprocess.run([executable, '--version'], cwd=temporary, env=safe_env,
                                      stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                     encoding='utf-8', errors='replace',
                                      timeout=10).stdout.strip()
             result = subprocess.run([executable, 'mcp', 'list'], cwd=temporary, env=safe_env,
-                                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+                                    stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace', timeout=20)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ValueError(f'Cannot check installed Codex CLI hook support: {exc}') from exc
         if result.returncode:
