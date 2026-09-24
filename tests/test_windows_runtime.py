@@ -118,6 +118,16 @@ class WindowsRuntimeTests(unittest.TestCase):
                 main(self.root, [])
         run.assert_not_called()
         stop.assert_called_once_with('owned-host')
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
+             patch('lcu.windows_host.start_original_host', return_value=ready), \
+             patch('lcu.windows_host.stop_original_host') as stop, \
+             patch('lcu.runtime.subprocess.run') as run, \
+             patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture',
+                                     'NODE_REPL_TRUSTED_SERVICES': 'null'}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'JSON string map'):
+                main(self.root, [])
+        run.assert_not_called()
+        stop.assert_called_once_with('owned-host')
 
     def test_chrome_keeps_original_browser_trusted_service(self):
         ready = ('owned-host', '\\\\.\\pipe\\lcu-wre-fixture',

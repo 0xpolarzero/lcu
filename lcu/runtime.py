@@ -264,7 +264,7 @@ def main(root, argv):
             raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
             supplied = json.loads(raw_services) if raw_services is not None else None
             surfaces = {surface.strip() for surface in env['CUA_REPL_ENABLED_SURFACES'].split(',')}
-            if supplied is None:
+            if raw_services is None:
                 supplied = {}
                 if 'browser' in surfaces:
                     supplied['browser'] = '@oai/browser-desktop/service'

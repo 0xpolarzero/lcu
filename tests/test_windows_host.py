@@ -157,6 +157,24 @@ class WindowsHostTests(unittest.TestCase):
         self.assertEqual(child.wait(timeout=5), 0)
         child.stdout.close()
 
+    @unittest.skipUnless(shutil.which('node'), 'Node is needed for trusted-service forwarding test')
+    def test_sky_wrapper_registers_once_and_forwards_original_service(self):
+        original = self.base / 'original-sky.mjs'
+        original.write_text('export function handleRpc(request) { return request.type; }\n')
+        wrapper = Path(windows_host.__file__).with_name('windows_sky_service.mjs')
+        script = ("import {pathToFileURL} from 'node:url'; "
+                  "let handlers=0; globalThis.nodeRepl={env:{LCU_WRE_SKY_SERVICE_PATH:process.argv[2]}, "
+                  "addTurnEndedHandler:()=>{handlers++}}; "
+                  "const service=await import(pathToFileURL(process.argv[1]).href); "
+                  "const first=await service.handleRpc({type:'setup'}); "
+                  "const second=await service.handleRpc({type:'execute'}); "
+                  "console.log(JSON.stringify({first,second,handlers}));")
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script,
+                                 str(wrapper), str(original)], check=True, capture_output=True,
+                                env={'PATH': os.environ.get('PATH', '')})
+        self.assertEqual(json.loads(result.stdout),
+                         {'first': 'setup', 'second': 'execute', 'handlers': 1})
+
 
 if __name__ == '__main__':
     unittest.main()
