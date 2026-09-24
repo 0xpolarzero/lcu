@@ -51,7 +51,10 @@ def prepare(release, output):
         if event in ('PreToolUse', 'PostToolUse', 'PostToolUseFailure'):
             group['matcher'] = 'mcp__lcu__js|mcp__lcu__js_reset'
         hooks[event] = [group]
-    (claude / 'settings.json').write_text(json.dumps({'hooks': hooks}, indent=2) + '\n')
+    (claude / 'settings.json').write_text(json.dumps({
+        'hooks': hooks,
+        'permissions': {'deny': ['mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir']},
+    }, indent=2) + '\n')
     (project / '.mcp.json').write_text(json.dumps({'mcpServers': {'lcu': {
         'type': 'stdio', 'command': str(runtime), 'args': []}}}, indent=2) + '\n')
     print(f'Disposable Claude project: {project}')
