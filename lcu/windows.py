@@ -1,8 +1,4 @@
-"""Select an intact, installed official Windows ChatGPT package in place.
-
-Windows owns MSIX deployment and its protected package directory. LCU reads the
-current user's registered package; it never extracts or changes app files.
-"""
+"""Validate the pinned official Windows package and an intact private copy."""
 
 from __future__ import annotations
 
@@ -26,6 +22,9 @@ WINDOWS_REQUIRED_FILES = (
     'app/resources/cua_node/bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
     'app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/codex-computer-use.exe',
     'app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/swift/x64/codex-computer-use-swift.exe',
+    'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js',
+    'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/windows/internal/helper_transport.js',
+    'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/windows/internal/computer_use_client.js',
     'app/resources/codex.exe',
     'app/resources/codex-code-mode-host.exe',
     'app/resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
@@ -62,6 +61,7 @@ def _registered_package():
         "$packages | Select-Object Name,Publisher,"
         "@{Name='Version';Expression={$_.Version.ToString()}},"
         "@{Name='Architecture';Expression={$_.Architecture.ToString()}},"
+        "@{Name='SignatureKind';Expression={$_.SignatureKind.ToString()}},"
         'InstallLocation '
         '| ConvertTo-Json -Compress'
     )
@@ -76,8 +76,9 @@ def _registered_package():
     if len(packages) != 1 or not isinstance(packages[0], dict):
         raise ValueError('Expected exactly one registered OpenAI.Codex package for this account.')
     if (not isinstance(packages[0].get('Version'), str) or
-            not isinstance(packages[0].get('Architecture'), str)):
-        raise ValueError('Windows package query did not return string version and architecture.')
+            not isinstance(packages[0].get('Architecture'), str) or
+            not isinstance(packages[0].get('SignatureKind'), str)):
+        raise ValueError('Windows package query did not return string version, architecture and signature kind.')
     return packages[0]
 
 
@@ -94,6 +95,22 @@ def _component(app: Path, relative: str) -> Path:
 def resolve_installed_windows_app(*, expected_version: str, expected_runtime: str,
                                   expected_hashes: Mapping[str, str]) -> InstalledWindowsApplication:
     """Validate the current user's pinned, registered Windows x64 package."""
+    _validate_host_and_pins(expected_version, expected_runtime, expected_hashes)
+    package = _registered_package()
+    if (package.get('Name') != PACKAGE_NAME or package.get('Publisher') != PACKAGE_PUBLISHER or
+            str(package.get('Version')) != expected_version or
+            str(package.get('Architecture')).lower() not in ('x64', 'amd64') or
+            package.get('SignatureKind') != 'Store'):
+        raise ValueError('Registered ChatGPT package does not match the Windows x64 pin.')
+    selected = package.get('InstallLocation')
+    if not isinstance(selected, str) or not selected:
+        raise ValueError('Registered ChatGPT package has no install location.')
+    return validate_windows_app_tree(Path(selected), expected_version=expected_version,
+        expected_runtime=expected_runtime, expected_hashes=expected_hashes)
+
+
+def _validate_host_and_pins(expected_version: str, expected_runtime: str,
+                            expected_hashes: Mapping[str, str]) -> None:
     if platform.system() != 'Windows' or platform.machine().lower() not in ('amd64', 'x86_64'):
         raise ValueError('The Windows application can only be validated on Windows x64.')
     if not expected_version or not expected_runtime:
@@ -103,28 +120,30 @@ def resolve_installed_windows_app(*, expected_version: str, expected_runtime: st
     if any(len(value) != 64 or any(char not in '0123456789abcdef' for char in value)
            for value in expected_hashes.values()):
         raise ValueError('Windows application pins must contain SHA-256 hex digests.')
-    package = _registered_package()
-    if (package.get('Name') != PACKAGE_NAME or package.get('Publisher') != PACKAGE_PUBLISHER or
-            str(package.get('Version')) != expected_version or
-            str(package.get('Architecture')).lower() not in ('x64', 'amd64')):
-        raise ValueError('Registered ChatGPT package does not match the Windows x64 pin.')
-    selected = package.get('InstallLocation')
-    if not isinstance(selected, str) or not selected:
-        raise ValueError('Registered ChatGPT package has no install location.')
-    app = Path(selected)
-    if app.is_symlink() or not app.is_dir():
-        raise ValueError('Registered ChatGPT package directory is missing or redirected.')
+
+
+def validate_windows_app_tree(app: Path, *, expected_version: str, expected_runtime: str,
+                              expected_hashes: Mapping[str, str]) -> InstalledWindowsApplication:
+    """Validate either the registered package or its unchanged managed copy."""
+    _validate_host_and_pins(expected_version, expected_runtime, expected_hashes)
+    app = Path(app)
+    if app.is_symlink() or app.is_junction() or not app.is_dir():
+        raise ValueError('Windows application directory is missing or redirected.')
     app = app.resolve(strict=True)
     resources = app / 'app/resources'
     runtime = resources / 'cua_node'
     for relative in WINDOWS_REQUIRED_FILES:
         file = _component(app, relative)
-        if not file.is_file() or file.is_symlink() or _sha256(file) != expected_hashes[relative]:
-            raise ValueError(f'Installed Windows application file does not match pin: {relative}')
+        if (not file.is_file() or file.is_symlink() or file.is_junction() or
+                any(parent.is_symlink() or parent.is_junction()
+                    for parent in file.parents if parent != app and parent.is_relative_to(app)) or
+                not file.resolve(strict=True).is_relative_to(app) or
+                _sha256(file) != expected_hashes[relative]):
+            raise ValueError(f'Windows application file does not match pin: {relative}')
     manifest = json.loads((runtime / 'manifest.json').read_text())
     if (manifest.get('platform'), manifest.get('arch'), manifest.get('runtime_archive_version')) != (
             'windows', 'x64', expected_runtime):
-        raise ValueError('Installed Windows CUA runtime does not match pin.')
+        raise ValueError('Windows CUA runtime does not match pin.')
     launcher = _component(app, 'app/resources/cua_node/bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
     return InstalledWindowsApplication(app, resources, runtime, launcher, 'windows',
                                        expected_version, 'x64')

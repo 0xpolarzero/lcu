@@ -16,7 +16,36 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 
 from bundle import VERSION, architecture, verify
-from lcu.windows import resolve_installed_windows_app
+from lcu.windows import resolve_installed_windows_app, validate_windows_app_tree
+from lcu.windows_host import materialize_original_host
+
+
+def _redirected(path):
+    path = Path(path)
+    return path.is_symlink() or path.is_junction()
+
+
+def _regular_tree(root):
+    """Refuse reparse redirects before copying a registered package tree."""
+    if _redirected(root) or not root.is_dir():
+        raise ValueError(f'Windows application directory is missing or redirected: {root}')
+    def unreadable(error):
+        raise error
+    for parent, directories, files in os.walk(root, followlinks=False, onerror=unreadable):
+        for name in directories + files:
+            item = Path(parent) / name
+            if _redirected(item):
+                raise ValueError(f'Windows application contains a redirected path: {item}')
+
+
+def _generation(prefix, lock, entry):
+    return prefix / 'apps' / f"{lock['version']}-x64-{entry['sha256'][:16]}"
+
+
+def _validated_copy(app, lock, entry):
+    _regular_tree(app)
+    return validate_windows_app_tree(app, expected_version=lock['version'],
+        expected_runtime=lock['runtime'], expected_hashes=entry['components'])
 
 
 def checked_prefix(prefix):
@@ -24,13 +53,15 @@ def checked_prefix(prefix):
     if not prefix.is_absolute() or '..' in prefix.parts or len(prefix.parts) < 3:
         raise ValueError('Choose a dedicated absolute Windows installation directory.')
     for item in (prefix, *prefix.parents):
-        if item.is_symlink():
+        if _redirected(item):
             raise ValueError(f'Refusing a linked Windows installation path: {item}')
     prefix = prefix.resolve()
     if prefix == SOURCE.resolve() or SOURCE.resolve().is_relative_to(prefix):
         raise ValueError('Install outside the extracted release archive.')
     if prefix.exists() and any(prefix.iterdir()) and not (prefix / '.lcu-install').is_file():
         raise ValueError('Installation directory is occupied by another application.')
+    if _redirected(prefix / '.lcu-install'):
+        raise ValueError('Refusing a redirected Windows installation marker.')
     return prefix
 
 
@@ -46,17 +77,42 @@ def install(prefix):
     entry = lock['architectures']['x64']
     selected = resolve_installed_windows_app(expected_version=lock['version'],
         expected_runtime=lock['runtime'], expected_hashes=entry['components'])
-    # The app stays under Windows MSIX management. No source app file is copied.
+    # Keep the registered MSIX intact. Its protected WindowsApps directory does
+    # not permit direct execution, so run an unchanged private copy instead.
     prefix.mkdir(parents=True, exist_ok=True)
     (prefix / '.lcu-install').touch(exist_ok=True)
+    apps = prefix / 'apps'
+    if _redirected(apps):
+        raise ValueError(f'Refusing a redirected Windows app generation directory: {apps}')
+    apps.mkdir(exist_ok=True)
+    generation = _generation(prefix, lock, entry)
+    if _redirected(generation):
+        raise ValueError(f'Refusing a redirected Windows app generation: {generation}')
+    if generation.exists():
+        _validated_copy(generation / 'app', lock, entry)
+    else:
+        stage = apps / ('.' + generation.name + '-' + uuid.uuid4().hex + '.stage')
+        try:
+            stage.mkdir()
+            _regular_tree(selected.app)
+            shutil.copytree(selected.app, stage / 'app', symlinks=True)
+            _validated_copy(stage / 'app', lock, entry)
+            os.replace(stage, generation)
+        except BaseException:
+            shutil.rmtree(stage, ignore_errors=True)
+            raise
     releases = prefix / 'releases'
+    if _redirected(releases):
+        raise ValueError(f'Refusing a redirected Windows release directory: {releases}')
     releases.mkdir(exist_ok=True)
     release = releases / (VERSION + '-' + uuid.uuid4().hex[:12])
     try:
         shutil.copytree(SOURCE, release)
         verify(release, arch, 'windows')
+        materialize_original_host(generation / 'app', release / 'lcu-host',
+            expected_asar_sha256=entry['components']['app/resources/app.asar'])
         (release / 'installation.json').write_text(json.dumps({
-            'platform': 'windows', 'architecture': 'x64', 'app': str(selected.app),
+            'platform': 'windows', 'architecture': 'x64', 'app': str(generation / 'app'),
             'package_version': lock['version'], 'runtime': lock['runtime'],
             'sha256': entry['sha256'],
         }, indent=2) + '\n')
