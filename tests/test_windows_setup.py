@@ -33,6 +33,7 @@ class WindowsSetupTests(unittest.TestCase):
                      mock.patch.object(setup, 'installed_app_resources', return_value=resources), \
                      mock.patch.object(setup, 'host_policy', return_value={}), \
                      mock.patch.object(setup.subprocess, 'run', side_effect=registered), \
+                     mock.patch('lcu.codex_hooks.require_cli_hook_support'), \
                      mock.patch('lcu.codex_hooks.install_hooks') as hooks:
                     self.assertEqual(setup.configure(['codex'], config.parent, base / 'skill',
                         ['lcu'], base / 'tools', base / 'release'), [])
