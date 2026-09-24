@@ -131,15 +131,84 @@ def install(root, directory=None):
     return destination
 
 
+def status(root, family='chrome'):
+    """Report setup from upstream diagnostics; this is not a connection test."""
+    from .runtime import environment, paths
+
+    selected = paths(root)
+    env = environment(root, selected)
+    plugin = selected[1] / 'plugins/openai-bundled/plugins/chrome'
+    config = json.loads((plugin / 'scripts/extension-ids.json').read_text())
+    browser = next(item for item in config['browserDiagnostics']
+                   if item['browserFamily'] == family)
+
+    def check(script):
+        result = subprocess.run(
+            [env['NODE_REPL_NODE_PATH'], str(plugin / 'scripts' / script),
+             '--browser', family, '--json'],
+            env=env, capture_output=True, text=True, timeout=20)
+        try:
+            return json.loads(result.stdout)
+        except ValueError:
+            return {'problem': result.stderr.strip() or 'The original diagnostic returned no result.'}
+
+    extension = check('check-extension-installed.js')
+    manifest = check('check-native-host-manifest.js')
+    label = browser['shortDisplayName']
+    profile = extension.get('selectedProfileDirectory')
+    suffix = f' in {profile}' if profile else ''
+    enabled = extension.get('enabled') is True
+    if enabled:
+        print(f'{label} extension: enabled{suffix}.')
+    elif extension.get('installed'):
+        print(f'{label} extension: disabled{suffix}. Enable it at {browser["extensionManagementUrl"]}.')
+    elif extension.get('problem'):
+        print(f'{label} extension: could not check. {extension["problem"]}')
+        print(f'  Open {label} once and install or enable the official extension: {browser["storeUrl"]}')
+    else:
+        print(f'{label} extension: not found{suffix}.')
+        print(f'  Install the official extension in the profile you want to use: {browser["storeUrl"]}')
+
+    connected_host = False
+    if manifest.get('correct') and manifest.get('manifestPath'):
+        try:
+            data = json.loads(Path(manifest['manifestPath']).read_text())
+            relay = Path(data['path'])
+            directory = relay.parent
+            arch = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}[platform.machine()]
+            system, name = ('macos', 'ChatGPT for Chrome') if platform.system() == 'Darwin' else ('linux', 'extension-host')
+            host = directory / 'chrome/extension-host' / system / arch / name
+            connected_host = (
+                relay.name == 'lcu-native-host' and relay.is_file() and os.access(relay, os.X_OK)
+                and relay.read_bytes() == (root / 'lcu/native_host.py').read_bytes()
+                and (directory / '.lcu-browser-host').read_text() == str((root / 'app').resolve()) + '\n'
+                and host.is_file() and os.access(host, os.X_OK))
+        except (KeyError, OSError, ValueError):
+            pass
+    if connected_host:
+        print(f'{label} connector: configured for this LCU installation.')
+    else:
+        print(f'{label} connector: missing or outdated. Run `lcu browser install`.')
+    print(f'Live browser connection: not checked. After setup, ask your agent to use LCU to list {label} tabs.')
+    return enabled and connected_host
+
+
 def main(root, argv):
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest='action', required=True)
     setup = subparsers.add_parser('install', help='Install the original native host for the current desktop account')
     setup.add_argument('--directory', type=Path, help='Private writable host directory')
+    check = subparsers.add_parser('status', help='Check extension and connector setup without changing the browser')
+    check.add_argument('--browser', choices=('chrome', 'edge'), default='chrome')
     if argv[:1] in (['serve'], ['protocol']):
         parser.error('the in-app browser host and codex:// protocol commands were removed; use the installed app browser. For external Chrome, run `lcu browser install` and enable the official ChatGPT extension.')
     args = parser.parse_args(argv)
+    if args.action == 'status':
+        if not status(root, args.browser):
+            raise SystemExit(1)
+        return
     destination = install(root, args.directory)
     print(f'LCU browser native host configured: {destination}')
     print('Install or enable the official ChatGPT browser extension in the browser you want to use.')
     print('The extension and browser must run under this same desktop account. See docs/INSTALLATION.md.')
+    print('Check extension and connector setup with: lcu browser status')

@@ -139,7 +139,7 @@ def reply_to_server_discover(source, destination):
 
 def main(root, argv):
     if argv[:1] in (['--help'], ['-h']):
-        print('Usage: lcu [setup OPTIONS | browser install | doctor | --version | --mcp-discovery-compat]\n'
+        print('Usage: lcu [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]\n'
               'With no arguments, starts the original stdio MCP server.')
         return
     if argv[:1] == ['--version']:
@@ -167,7 +167,7 @@ def main(root, argv):
                          'Run lcu browser install and enable the official Chrome extension.')
     discovery_compat = argv == ['--mcp-discovery-compat']
     if argv and argv not in (['doctor'], ['--mcp-discovery-compat']):
-        raise ValueError('Usage: lcu [setup OPTIONS | browser install | doctor | --version | --mcp-discovery-compat]')
+        raise ValueError('Usage: lcu [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]')
     resolved = paths(root)
     _, resources, runtime, _ = resolved
     env = environment(root, resolved)
