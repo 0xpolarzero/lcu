@@ -46,12 +46,19 @@ def paths(root):
                 descriptor.get('runtime') != policy.get('runtime') or
                 descriptor.get('sha256') != entry.get('sha256')):
             raise ValueError('Selected application descriptor does not match the Windows lock.')
-        from .windows import resolve_installed_windows_app
-        resolved = resolve_installed_windows_app(
+        prefix = root.parent.parent
+        apps = prefix / 'apps'
+        generation = apps / f"{policy['version']}-x64-{entry['sha256'][:16]}"
+        expected = generation / 'app'
+        if (selected != expected or any(path.is_symlink() or path.is_junction()
+                                        for path in (apps, generation, selected))):
+            raise ValueError('Selected Windows application is not the managed private generation.')
+        from .windows import validate_windows_app_tree
+        resolved = validate_windows_app_tree(selected,
             expected_version=policy['version'], expected_runtime=policy['runtime'],
             expected_hashes=entry['components'])
-        if selected.resolve() != resolved.app:
-            raise ValueError('Selected application descriptor does not match the registered Windows app.')
+        if resolved.app != expected.resolve(strict=True):
+            raise ValueError('Selected Windows application does not match the managed generation.')
         return resolved.app, resolved.resources, resolved.runtime, policy
     if target != 'linux':
         raise ValueError(f'Unsupported installed application platform: {target}')

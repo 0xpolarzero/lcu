@@ -1,4 +1,4 @@
-"""The selected Windows MSIX starts its own CUA server (fixture paths only)."""
+"""The managed private Windows app starts its original CUA server."""
 
 import json
 import os
@@ -17,9 +17,10 @@ class WindowsRuntimeTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         base = Path(temporary.name).resolve()
-        self.root = base / 'release'
-        self.root.mkdir()
-        self.app = base / 'OpenAI.Codex_26.917.9434.0_x64'
+        prefix = base / 'prefix'
+        self.root = prefix / 'releases/release'
+        self.root.mkdir(parents=True)
+        self.app = prefix / 'apps/26.917.9434.0-x64-msix-fixture/app'
         self.resources = self.app / 'app/resources'
         self.runtime = self.resources / 'cua_node'
         self.launcher = self.runtime / 'bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
@@ -36,11 +37,11 @@ class WindowsRuntimeTests(unittest.TestCase):
             'package_version': '26.917.9434.0', 'runtime': 'runtime-fixture',
             'sha256': 'msix-fixture'}))
 
-    def test_uses_registered_app_and_original_windows_paths(self):
-        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected) as resolve:
+    def test_uses_managed_app_and_original_windows_paths(self):
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected) as resolve:
             selected = paths(self.root)
         self.assertEqual(selected[:3], (self.app, self.resources, self.runtime))
-        resolve.assert_called_once_with(expected_version='26.917.9434.0',
+        resolve.assert_called_once_with(self.app, expected_version='26.917.9434.0',
             expected_runtime='runtime-fixture', expected_hashes={'fixture': 'digest'})
         with patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture', 'Path': 'C:\\Windows'}, clear=True):
             env = environment(self.root, selected)
@@ -54,7 +55,7 @@ class WindowsRuntimeTests(unittest.TestCase):
 
     def test_runs_original_cua_launcher_with_inherited_stdio(self):
         result = subprocess.CompletedProcess([], 0)
-        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
              patch('lcu.windows_host.start_original_host', return_value=('host', '\\\\.\\pipe\\lcu-wre-fixture')) as start, \
              patch('lcu.windows_host.stop_original_host') as stop, \
              patch('lcu.runtime.subprocess.run', return_value=result) as run, \
@@ -72,7 +73,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         stop.assert_called_once_with('host')
 
     def test_doctor_uses_windows_sky_without_x11(self):
-        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
              patch('lcu.runtime.subprocess.run') as run, \
              patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture'}, clear=True):
             main(self.root, ['doctor'])
@@ -80,7 +81,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs['cwd'], self.runtime / 'bin')
 
     def test_disposes_owned_host_when_original_mcp_fails(self):
-        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected), \
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
              patch('lcu.windows_host.start_original_host', return_value=('owned-host', '\\\\.\\pipe\\lcu-wre-fixture')), \
              patch('lcu.windows_host.stop_original_host') as stop, \
              patch('lcu.runtime.subprocess.run', side_effect=OSError('MCP failed')), \
@@ -90,12 +91,12 @@ class WindowsRuntimeTests(unittest.TestCase):
         stop.assert_called_once_with('owned-host')
 
     def test_refuses_descriptor_for_different_installed_package(self):
-        with patch('lcu.windows.resolve_installed_windows_app', return_value=self.selected):
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected):
             descriptor = self.root / 'installation.json'
             value = json.loads(descriptor.read_text())
             value['app'] = str(self.root / 'other')
             descriptor.write_text(json.dumps(value))
-            with self.assertRaisesRegex(ValueError, 'does not match the registered Windows app'):
+            with self.assertRaisesRegex(ValueError, 'not the managed private generation'):
                 paths(self.root)
 
     def test_setup_and_browser_dispatch(self):
