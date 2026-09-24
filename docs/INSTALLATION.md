@@ -25,14 +25,14 @@ Explicit setup options with `--yes` suppress LCU's setup confirmation. They cann
 
 ## Windows 11 x64 candidate
 
-Install the pinned official `OpenAI.Codex` 26.917.9434.0 Store MSIX for the current Windows account, and install Python 3.12 or newer. Extract the matching thin Windows ZIP, then run from its extracted release directory in PowerShell:
+Install the [pinned official `OpenAI.Codex` 26.917.9434.0 Store MSIX](https://persistent.oaistatic.com/codex-app-prod/releases/26.917.9434.0/ChatGPT-x64.msix) for the current Windows account, and install Python 3.12 or newer. Extract the matching thin Windows ZIP, then run from its extracted release directory in PowerShell:
 
 ~~~powershell
 python .\scripts\install_windows.py --runtime-only
 & "$env:LOCALAPPDATA\LCU\lcu.cmd" --version
 ~~~
 
-To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
+To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
 
 The installer verifies the Store registration and pinned files, then copies the complete original package unchanged into `%LOCALAPPDATA%\LCU\apps\<package-hash>\app`. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
 
