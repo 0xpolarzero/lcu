@@ -239,6 +239,7 @@ def cli_setup_contract(release):
 
         with patch.dict(os.environ, {'HOME': str(work), 'XDG_DATA_HOME': str(data),
                                       'XDG_CONFIG_HOME': str(work / 'config')}, clear=False), \
+                patch('lcu.runtime.paths', return_value=(app, app / 'resources', None, {})), \
                 patch('lcu.runtime.environment', return_value=runtime_env), \
                 patch('lcu.browser.subprocess.run', side_effect=original_install) as run:
             destination = install(root)
