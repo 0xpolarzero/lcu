@@ -119,6 +119,31 @@ class WindowsRuntimeTests(unittest.TestCase):
         run.assert_not_called()
         stop.assert_called_once_with('owned-host')
 
+    def test_chrome_keeps_original_browser_trusted_service(self):
+        ready = ('owned-host', '\\\\.\\pipe\\lcu-wre-fixture',
+                 '\\\\.\\pipe\\lcu-lifetime-fixture')
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
+             patch('lcu.windows_host.start_original_host', return_value=ready), \
+             patch('lcu.windows_host.stop_original_host'), \
+             patch('lcu.runtime.subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run, \
+             patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture'}, clear=True):
+            with self.assertRaises(SystemExit):
+                main(self.root, ['--chrome'])
+        services = json.loads(run.call_args.kwargs['env']['NODE_REPL_TRUSTED_SERVICES'])
+        self.assertEqual(services['browser'], '@oai/browser-desktop/service')
+        self.assertEqual(services['sky'], str(self.root / 'lcu-host/windows-sky-service.mjs'))
+        with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
+             patch('lcu.windows_host.start_original_host', return_value=ready), \
+             patch('lcu.windows_host.stop_original_host'), \
+             patch('lcu.runtime.subprocess.run', return_value=subprocess.CompletedProcess([], 0)) as run, \
+             patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture',
+                                     'NODE_REPL_TRUSTED_SERVICES': '{"fixture":"service"}'}, clear=True):
+            with self.assertRaises(SystemExit):
+                main(self.root, ['--chrome'])
+        services = json.loads(run.call_args.kwargs['env']['NODE_REPL_TRUSTED_SERVICES'])
+        self.assertNotIn('browser', services)
+        self.assertEqual(services['fixture'], 'service')
+
     def test_refuses_descriptor_for_different_installed_package(self):
         with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected):
             descriptor = self.root / 'installation.json'

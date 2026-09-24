@@ -728,6 +728,8 @@ def main(argv=None):
                     print('Claude Code: Chrome control is experimental. Browser turn metadata is unverified, and original turn_ended cleanup is not wired on completion or interruption; temporary tabs may remain open.')
             else:
                 print('Native desktop control selected; Chrome connector and guidance are excluded.')
+            if sys.platform == 'win32' and 'claude-code' in names:
+                print('Claude Code: original Windows native turn cleanup is not wired on completion or interruption; the helper may remain active until the session exits.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')

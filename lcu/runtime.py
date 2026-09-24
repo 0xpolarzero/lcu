@@ -261,14 +261,24 @@ def main(root, argv):
             'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js'))
         wrapper = root / 'lcu-host/windows-sky-service.mjs'
         try:
-            supplied = json.loads(env.get('NODE_REPL_TRUSTED_SERVICES', '{}'))
+            raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
+            supplied = json.loads(raw_services) if raw_services is not None else None
+            surfaces = {surface.strip() for surface in env['CUA_REPL_ENABLED_SURFACES'].split(',')}
+            if supplied is None:
+                supplied = {}
+                if 'browser' in surfaces:
+                    supplied['browser'] = '@oai/browser-desktop/service'
+                if 'computer' in surfaces:
+                    supplied['sky'] = '@oai/sky/service'
             if not isinstance(supplied, dict) or any(not isinstance(k, str) or not isinstance(v, str)
                                                      for k, v in supplied.items()):
                 raise ValueError('NODE_REPL_TRUSTED_SERVICES must be a JSON string map.')
-            if supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
+            if 'computer' in surfaces and supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
                 raise ValueError('A custom Sky trusted-service override conflicts with Windows native cleanup.')
-            supplied['sky'] = str(wrapper)
-            env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(supplied)
+            services = dict(supplied)
+            if 'computer' in surfaces:
+                services['sky'] = str(wrapper)
+            env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(services)
             env['NODE_REPL_TRUSTED_CODE_PATHS'] = ';'.join(dict.fromkeys(
                 [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(';'))]))
             status = subprocess.run(command, env=env, check=False).returncode
