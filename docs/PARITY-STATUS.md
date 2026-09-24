@@ -1,5 +1,11 @@
 # Installed-app and adapter status
 
+## Current delivery, 2026-09-24
+
+The maintained harness scope is Pi, Codex CLI and Claude Code. Final Linux ARM64 and x86-64 archives passed fresh offline installation, 97 Python checks each, all three registrations in both scopes, native desktop actions and the original no-sign-in Chrome-extension action suite. The final macOS archive passed installation, original MCP/API/instruction comparison and a generated Pi-wrapper check. [Exact artifacts, test conditions and remaining gates](verification/focused-delivery-2026-09-24.md) distinguish these results from earlier physical-host runs.
+
+This is not a completed three-platform product. macOS cold startup/first-time permissions and Chrome remain unverified. Windows has no supported installer or live result. Claude Code has registration evidence and a known interruption-cleanup limit, not full lifecycle parity. A real Codex CLI model completed a Linux native task through LCU; [the harness record](ADAPTERS.md#model-driven-fixture-evidence) states the configuration and browser-test boundaries.
+
 ## macOS and Pi extension, 2026-09-24
 
 The added Apple Silicon macOS installer reuses signed local ChatGPT.app 26.917.62051 in place. A real thin archive build and temporary-prefix install passed. Separate original and LCU processes matched complete MCP initialization, tools, macOS guidance, persistent JavaScript and reset in disposable homes. The original Chrome native-host installer produced all eight macOS registrations in a disposable home. These checks performed no GUI or browser actions. See [runtime comparison](verification/macos-runtime.md), [platform source evidence](verification/platform-selection.md) and [browser host checks](verification/macos-browser-host.md).
