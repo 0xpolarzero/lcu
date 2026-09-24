@@ -2,13 +2,21 @@
 
 Native computer use is the default mode. Chrome is an explicit opt-in for both agent setup and direct runtime launch; a default installation does not register LCU's Chrome native host or enable the browser surface. The Linux Chrome results below are evidence for the opt-in path and its original extension, not a claim that Chrome is active by default. The original `control-chrome` plugin skill is kept byte-identical as a reference to a separate plugin mode; LCU uses the original unified CUA browser API when Chrome is enabled.
 
+| Maintained host | Native computer use | Optional Chrome | Lifecycle and remaining limit |
+| --- | --- | --- | --- |
+| Pi 0.73 | Installed original MCP and scripted-provider checks; a real model saved the isolated Linux GTK fixture with the generated Linux skill. | Original extension passes generic-client tests; no Pi real-model Chrome run. | Agent completion and interruption are wired through the extension; Pi cannot represent every original result or approval form. |
+| Codex CLI | A compatible interactive CLI model read the generated Linux skill and saved the isolated GTK fixture. | The same CLI model used the original extension to save a localhost fixture after an exact origin approval. | A transparent transport probe observed real Stop and Interrupt cleanup calls; an unmarked temporary tab closed on Stop. Tested CLI is bundled `0.155.0-alpha.16.3`; ordinary `0.145.0` lacks required `mcp_tool` hooks. |
+| Claude Code | MCP, skill and host-only tool deny rules have registration/fixture evidence. | Generic original extension tests do not establish Claude model behavior. | No live Claude model test under the local manual launcher guard. Ordinary CLI setup has no correct per-turn Stop/Interrupt cleanup bridge, including opt-in Chrome tabs. |
+
+[Pi model evidence](verification/pi-generated-gtk-real-model-2026-09-24.md), [interactive Codex evidence](verification/codex-interactive-2026-09-24.md), and [Claude's exact boundary](verification/claude-lifecycle-2026-09-24.md) distinguish model behavior from configuration and generic MCP tests.
+
 ## Current delivery, 2026-09-24
 
 The latest [Chrome opt-in verification](verification/chrome-opt-in-2026-09-24.md) passed 104 Python checks plus native and Chrome actions on both Linux architectures. It also passed byte-identical instruction selection and live Chrome navigation/type/save/screenshot on macOS through LCU. The following earlier delivery record covers its own archives.
 
 The maintained harness scope is Pi, Codex CLI and Claude Code. Final Linux ARM64 and x86-64 archives passed fresh offline installation, 97 Python checks each, all three registrations in both scopes, native desktop actions and the original no-sign-in Chrome-extension action suite. The final macOS archive passed installation, original MCP/API/instruction comparison and a generated Pi-wrapper check. [Exact artifacts, test conditions and remaining gates](verification/focused-delivery-2026-09-24.md) distinguish these results from earlier physical-host runs.
 
-This is not a completed three-platform product. macOS cold startup and first-time permissions remain unverified. Windows has no supported installer or live result. Claude Code has registration evidence, but no per-turn cleanup wiring for completion or interruption. A real Codex CLI model completed a Linux native task through LCU; [the harness record](ADAPTERS.md#model-driven-fixture-evidence) states the configuration and browser-test boundaries.
+This is not a completed three-platform product. macOS cold startup and first-time permissions remain unverified. Windows installation and live desktop/browser results are tracked separately as the final Windows gate completes. Claude Code has registration evidence, but no per-turn cleanup wiring for completion or interruption. Real Codex CLI model tasks completed Linux native and optional extension-browser work; [the harness record](verification/codex-interactive-2026-09-24.md) states the tested CLI, generated skill, approval and cleanup boundaries.
 
 ## macOS and Pi extension, 2026-09-24
 
@@ -18,7 +26,7 @@ The shared SDK client and Pi 0.73 extension keep the original API and MCP server
 
 **Live follow-up:** the standalone macOS client completed a TextEdit click/type/screenshot/save flow, with independently verified file output and original MCP app approvals. One close shortcut behaved unexpectedly; cleanup used the original visible control. See [live native evidence](verification/macos-live-2026-09-24.md).
 
-**Open gates:** cold macOS helper startup and first-time OS approval delivery. Live macOS Chrome actions passed in the later [opt-in verification](verification/chrome-opt-in-2026-09-24.md). The close shortcut was [reproduced in the original runtime](verification/macos-cold-and-keyboard-2026-09-24.md); LCU does not alter it. Windows now has an inspected official MSIX, pinned installed-package resolver and experimental direct launcher, with fixture tests only. Windows setup and browser integration are not implemented and no Windows GUI test passed. See [Windows evidence](verification/windows-source.md). Do not call this complete cross-platform parity.
+**Open gates:** cold macOS helper startup and first-time OS approval delivery. Live macOS Chrome actions passed in the later [opt-in verification](verification/chrome-opt-in-2026-09-24.md). The close shortcut was [reproduced in the original runtime](verification/macos-cold-and-keyboard-2026-09-24.md); LCU does not alter it. Windows has an inspected official MSIX and ongoing installer/runtime verification; [Windows evidence](verification/windows-source.md) must be updated with the final live result before claiming parity. Claude Code's lifecycle and live-model gate also remain open. Do not call this complete cross-platform parity.
 
 The shared installer changes also passed fresh Linux offline gates on both architectures; see [platform regressions](verification/platform-regression.md) for artifact boundaries.
 
