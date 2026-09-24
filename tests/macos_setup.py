@@ -36,7 +36,8 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
                                     str(resources / 'cua_node/bin'), '/usr/bin', '/bin')),
             'TMPDIR': str(home), 'LANG': 'C.UTF-8',
         }
-        failures = configure(['codex'], home, source, [str(runtime)], tools_root,
+        command = [str(runtime), *(['--chrome'] if chrome else [])]
+        failures = configure(['codex'], home, source, command, tools_root,
                              release, environ=env, chrome=chrome)
         assert not failures, failures
         config = tomllib.loads(codex.read_text())
@@ -87,7 +88,7 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
         assert any((path.parent / pairs[1][1]).is_file() for path in installed_skills)
 
         export = home / 'portable'
-        export_bundle(export, source, [str(runtime)], release)
+        export_bundle(export, source, command, release, chrome=chrome)
         assert json.loads((export / 'host-contract.json').read_text()) == host_policy(release)
         assert not (export / 'skills/lcu/references').exists()
         exported = b'\n'.join(path.read_bytes() for path in export.rglob('*') if path.is_file())
