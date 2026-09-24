@@ -4,13 +4,13 @@ LCU launches the original computer-use runtime from a pinned official ChatGPT ap
 
 **Status:** native computer use and the thin installed-app path passed the offline differential checks. Chrome is opt-in; the installed ARM64 and x86-64 builds passed no-sign-in Chrome actions in Ubuntu 24.04.5 guests with AppArmor active, and the x86-64 guest ran under KVM on physical AMD hardware. Chrome setup installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. See [current status](docs/PARITY-STATUS.md) for exact evidence and limitations.
 
-The [Pi adapter](docs/ADAPTERS.md) passes installed-harness tests for original instructions, tools, persistent calls and cleanup, and a model-driven native GTK task. A compatible interactive Codex CLI completed model-driven Linux native and opt-in Chrome-extension tasks, including site approval and temporary-tab cleanup. Claude Code has registration and fixture evidence only; its per-turn cleanup is not wired. These are different levels of verification, not a claim of equal harness support.
+The [Pi adapter](docs/ADAPTERS.md) passed model-driven Linux native GTK and opt-in Chrome-extension tasks, including automatic temporary-tab cleanup. A compatible interactive Codex CLI also completed native and Chrome tasks, including site approval and temporary-tab cleanup. Claude Code has registration and fixture evidence only; its per-turn cleanup is not wired. These are different levels of verification, not a claim of equal harness support.
 
 On Apple Silicon macOS, a [live TextEdit flow](docs/verification/macos-live-2026-09-24.md) passed for native typing, screenshots and saving, and a [separate opt-in Chrome action](docs/verification/chrome-opt-in-2026-09-24.md) passed through the official extension. Cold helper startup and first-time OS permissions remain unverified; the close-shortcut defect was also reproduced in the original runtime. Windows status is tracked in the [parity record](docs/PARITY-STATUS.md). MCP remains the original runtime's internal transport; Pi uses its native extension API through the small shared MCP client.
 
 ## Requirements
 
-Linux requires Ubuntu 24.04-compatible glibc on ARM64 or x86-64, Python 3.12 or newer, and an existing X11 desktop and D-Bus session owned by the target account. macOS requires Apple Silicon, Python 3.12 or newer, and the pinned signed `/Applications/ChatGPT.app` 26.917.62051. Each platform uses its own application binaries. An app update requires reviewed pins before LCU will launch it.
+Linux requires Ubuntu 24.04-compatible glibc on ARM64 or x86-64, Python 3.12 or newer, and an existing X11 desktop and D-Bus session owned by the target account. macOS requires Apple Silicon, Python 3.12 or newer, and the pinned signed `/Applications/ChatGPT.app` 26.917.62051. Each platform uses its own application binaries. An app update requires reviewed pins before LCU will launch it. A Windows x64 thin archive has been built, but live installed-app verification is still pending.
 
 The fixed dependency is ChatGPT Linux 26.915.31945 with CUA runtime 0.0.16/20260915001755-492f19756c31. [runtime.lock.json](runtime.lock.json) pins the official package URLs, hashes and critical files. Setup verifies the package before extraction. A hash checks integrity; it is not a package signature.
 
@@ -33,6 +33,8 @@ Use --skip-system only when the required Ubuntu libraries are already installed.
 ## Use
 
 For macOS installation and Pi launch commands, see [installation](docs/INSTALLATION.md#macos-and-pi). Setup can run without prompts using explicit choices and `--yes`. macOS Screen Recording/Accessibility and unresolved browser site approvals remain the original provider's permission boundaries; `--yes` does not grant them.
+
+Codex CLI must accept the original `mcp_tool` lifecycle hooks. Setup checks an installed CLI before changing its configuration. The tested bundled binaries are `/Applications/ChatGPT.app/Contents/Resources/codex` (`0.155.0-alpha.16.3`) on macOS and `/opt/lcu/current/app/resources/codex` (`0.155.0-alpha.9.2`) on both pinned Linux packages. The ordinary `0.145.0` CLI failed this check; no minimum public stable version has been established. Use the tested executable explicitly on `PATH` when registering and launching Codex; setup does not change your `PATH` or switch executables. See [adapter details](docs/ADAPTERS.md#codex-cli).
 
 After setup, reconnect the agent and ask it to inspect the existing desktop. The default runtime enables native computer use and does not install or connect the Chrome extension. The generated user-local LCU skill links byte-identical original platform guidance; Chrome references are selected only for Chrome mode. The original provider supplies dynamic instructions and capability checks during use.
 

@@ -50,11 +50,27 @@ Primary source checked: installed `@mariozechner/pi-coding-agent` 0.73.0 `docs/e
 
 The adapter suite includes an installed Pi 0.73 test using an isolated home, local scripted OpenAI-compatible endpoint, and SDK-backed MCP fixture. It verifies that Pi's model request includes the original tool descriptions and initialization guide, discovers the supplied skill, calls `js` twice across model rounds with one session/turn ID, and invokes `turn_ended` once at prompt completion. No paid model or personal desktop is involved. With `LCU_REAL_COMMAND='["/absolute/lcu"]'`, two additional tests connect to the selected installed original MCP server: one checks instructions, schemas, persistent pure JavaScript, cleanup and reset; the other installs the same local extension source in Pi user and project scopes, provides an invalid account command, a valid registered project command, and a malicious unregistered repository command file, then verifies Pi loads one original tool/guide and completes two persistent arithmetic calls through the registered project command. These tests use isolated child homes and make no desktop or browser call. They passed against the selected macOS 26.917.62051 application and selected Linux ARM64 original runtime on 2026-09-24; these pure JavaScript results do not prove desktop or Chrome action behavior.
 
-A separate [natural-language Pi run](verification/pi-generated-gtk-real-model-2026-09-24.md) used the generated Linux skill, release adapter and existing `zai/glm-4.5-air` provider to set and save `pi-lcu-fixture-924` in an isolated GTK Target window. The independent file oracle matched, and the Other window stayed untouched. It did not exercise Pi's Chrome approval path or a personal desktop.
+A separate [natural-language Pi run](verification/pi-generated-gtk-real-model-2026-09-24.md) used the generated Linux skill, release adapter and existing `zai/glm-4.5-air` provider to set and save a draft in an isolated GTK Target window. The independent file oracle matched, and the Other window stayed untouched. With the platform-correct Linux skill, a later native turn also saved its exact marker. An opt-in Chrome turn used the original extension to save an exact loopback fixture value with its agent request header; a second turn left a temporary tab open and Pi's automatic `turn_ended` cleanup closed it. The bounded origin was explicitly preauthorized through `LCU_APPROVED_ORIGINS`, so this does not prove Pi's interactive approval dialog or a personal desktop.
 
 ## Codex CLI
 
-LCU setup registers the original MCP tools, full local skill and the pinned plugin's `Stop`, `Interrupt` and `SubagentStop` `mcp_tool` hooks. The hidden `turn_ended` tool is omitted from model tool discovery; the host invokes it with real session and turn metadata. The target Codex CLI must parse this original hook type. Setup checks an installed `codex` executable in an empty temporary home before changing the target configuration and reports its path/version if it lacks hook support. The tested ordinary CLI `0.145.0` fails that check; the locally bundled `0.155.0-alpha.16.3` passed. This does not establish a minimum public stable version. If Codex CLI is not yet installed, setup can register LCU, but the eventual host must support these hooks before use.
+LCU setup registers the original MCP tools, full local skill and the pinned plugin's `Stop`, `Interrupt` and `SubagentStop` `mcp_tool` hooks. The hidden `turn_ended` tool is omitted from model tool discovery; the host invokes it with real session and turn metadata. The target Codex CLI must parse this original hook type. Setup checks an installed `codex` executable in an empty temporary home before changing the target configuration and reports its path/version if it lacks hook support. The tested ordinary CLI `0.145.0` fails that check. The pinned macOS app's `/Applications/ChatGPT.app/Contents/Resources/codex` (`0.155.0-alpha.16.3`) and both pinned Linux apps' `/opt/lcu/current/app/resources/codex` (`0.155.0-alpha.9.2`) pass the no-auth parser check; only the macOS bundled CLI was used for the interactive model task. These results do not establish a minimum public stable version. If Codex CLI is not yet installed, setup can register LCU, but the eventual host must support these hooks before use.
+
+For the verified app-bundled CLI, put its resource directory on `PATH` for both setup and launch, then use the same `codex` executable. For example, with the default Linux prefix:
+
+```sh
+PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
+PATH="/opt/lcu/current/app/resources:$PATH" codex
+```
+
+On Apple Silicon macOS, use the tested bundled executable from the signed app:
+
+```sh
+PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" /absolute/path/to/lcu/bin/lcu setup --agent codex --yes
+PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" codex
+```
+
+LCU does not change `PATH` or silently substitute a CLI executable. The [current Linux archive gate](verification/final-linux-gates-2026-09-24.md) records both installed parser probes.
 
 [Interactive model evidence](verification/codex-interactive-2026-09-24.md) covers generated Linux skill delivery, a saved native GTK Target draft with an independent file oracle, an opt-in original Chrome-extension Save with exact site approval and the extension request header, real Stop/Interrupt hook dispatch, and an unmarked temporary tab closed on Stop. The tests used a disposable Linux ARM64 desktop and a local container relay for the project MCP command; they did not use a personal desktop or broader host MCP configuration. Both CLI and app runtime were pinned as recorded there.
 
