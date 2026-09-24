@@ -20,5 +20,5 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 COPY --from=pi-verification /usr/local/bin/node /usr/local/bin/node
 COPY --from=pi-verification /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN printf '#!/bin/sh\nexec /usr/local/bin/node /usr/local/lib/node_modules/@mariozechner/pi-coding-agent/dist/main.js "$@"\n' > /usr/local/bin/pi && \
+RUN printf '#!/bin/sh\nexec /usr/local/bin/node /usr/local/lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js "$@"\n' > /usr/local/bin/pi && \
     chmod +x /usr/local/bin/pi

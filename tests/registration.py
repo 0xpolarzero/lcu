@@ -53,7 +53,7 @@ pi_settings = home / '.pi/agent/settings.json'
 assert pi_settings.is_file(), 'Pi local extension must be registered by its own package manager'
 pi_packages = json.loads(pi_settings.read_text())['packages']
 assert any((pi_settings.parent / item).resolve() == (prefix / 'current/adapters').resolve()
-           for item in pi_packages if isinstance(item, str), pi_packages
+           for item in pi_packages if isinstance(item, str)), pi_packages
 browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
 assert len(browser_hosts) == 1, 'Setup must install one original native host for this account'
 assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()
