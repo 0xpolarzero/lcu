@@ -1,5 +1,7 @@
 # Installed-app and adapter status
 
+Native computer use is the default mode. Chrome is an explicit opt-in for both agent setup and direct runtime launch; a default installation does not register LCU's Chrome native host or enable the browser surface. The Linux Chrome results below are evidence for the opt-in path and its original extension, not a claim that Chrome is active by default. The original `control-chrome` plugin skill is kept byte-identical as a reference to a separate plugin mode; LCU uses the original unified CUA browser API when Chrome is enabled.
+
 ## Current delivery, 2026-09-24
 
 The maintained harness scope is Pi, Codex CLI and Claude Code. Final Linux ARM64 and x86-64 archives passed fresh offline installation, 97 Python checks each, all three registrations in both scopes, native desktop actions and the original no-sign-in Chrome-extension action suite. The final macOS archive passed installation, original MCP/API/instruction comparison and a generated Pi-wrapper check. [Exact artifacts, test conditions and remaining gates](verification/focused-delivery-2026-09-24.md) distinguish these results from earlier physical-host runs.
