@@ -4,6 +4,16 @@ Read-only source audit on 2026-09-24 of LCU `80ef029` and the pinned local `/App
 
 ## Distinct components
 
+### Names that must not be conflated
+
+The installed application has separate `computer-use`, `unified-computer-use`, `browser`, and `chrome` plugin directories. The `computer-use` skill explicitly imports `@oai/sky` and even demonstrates native access to the Google Chrome application through `sky.get_app_state`. That route observes and operates an OS application window; it does not require a Chrome extension.
+
+LCU targets the different, unified `@oai/cua-repl` runtime behind `cua`. Its original `create_tinysky_alt.js` separately loads Sky for the computer surface and a bundled browser client for the browser surface. `cua.getApp(...)` binds the native path; Chrome `cua.getBrowser(...)` / `cua.createBrowserTab(...)` bind the browser path. Browser use is therefore a capability included in this unified tool, not a synonym for native desktop control. The Chrome extension is needed for that external-Chrome browser path, not merely because the target desktop app is Chrome.
+
+The `browser` plugin is the separate skill-based entrypoint for the in-app browser. The `chrome` plugin is another skill-based entrypoint for external browsers and packages the original native-host assets. Neither plugin's skill activation is a prerequisite for the unified runtime's own browser API. The in-app browser and external Chrome are different browser backends; the former does not use Chrome's extension and is not supplied by LCU.
+
+LCU's default `browser,computer` surfaces preserve an existing original unified-runtime capability. LCU's decision to run the original Chrome native-host installer unconditionally during agent registration is its own setup policy. The latter must not be presented as proof that native Computer Use requires Chrome integration.
+
 OpenAI's [plugin architecture documentation](https://developers.openai.com/plugins/concepts/plugins) distinguishes a plugin package from the skills, tools, and hooks it can contain. Its [browser extension setup guide](https://learn.chatgpt.com/docs/chrome-extension) separately instructs users to enable the relevant desktop plugin and install the browser extension in their chosen browser profile. The browser extension and the desktop plugin are different installations.
 
 The installed app's `Contents/Resources/plugins/openai-bundled/plugins/chrome` contains:
