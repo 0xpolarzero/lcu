@@ -1,0 +1,112 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const required = ['PI_CLI_JS', 'LCU_TEST_PROJECT', 'LCU_TEST_EXTENSION', 'LCU_TEST_SKILL'];
+const configured = required.every(name => process.env[name]);
+
+function chunk(model, delta, finishReason = null) {
+  return { id: 'lcu-local-script', object: 'chat.completion.chunk', created: 1, model,
+    choices: [{ index: 0, delta, finish_reason: finishReason }] };
+}
+
+function childEnv(agentDir) {
+  // Do not pass personal model keys, auth paths, or an LCU_MCP_COMMAND override.
+  const allowed = ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'windir', 'WINDIR',
+    'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'];
+  const env = {};
+  for (const key of allowed) if (process.env[key] !== undefined) env[key] = process.env[key];
+  return { ...env, PI_CODING_AGENT_DIR: agentDir, NODE_REPL_DISABLE_ANALYTICS: '1' };
+}
+
+test('registered Windows Pi extension uses original CUA in a real local model turn',
+  { skip: !configured, timeout: 90_000 }, async () => {
+    const project = process.env.LCU_TEST_PROJECT;
+    const extension = process.env.LCU_TEST_EXTENSION;
+    const skill = process.env.LCU_TEST_SKILL;
+    for (const path of [process.env.PI_CLI_JS, extension, skill]) {
+      assert.ok(existsSync(path), `Missing installed test input: ${path}`);
+    }
+    const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-windows-'));
+    const agentDir = join(directory, 'agent');
+    mkdirSync(agentDir);
+    const requests = [];
+    const code = [
+      'var lcuPiSmoke = 6 * 7; nodeRepl.write(lcuPiSmoke);',
+      'nodeRepl.write(lcuPiSmoke + 1);',
+      'await cua.getState();',
+      'var lcuPiWindows = await cua.listWindows({emit:false}); nodeRepl.write(Array.isArray(lcuPiWindows));',
+    ];
+    const server = createServer(async (request, response) => {
+      if (request.url !== '/v1/chat/completions') { response.writeHead(404).end(); return; }
+      const parts = [];
+      for await (const part of request) parts.push(part);
+      const body = JSON.parse(Buffer.concat(parts).toString());
+      requests.push(body);
+      const index = requests.length - 1;
+      const delta = index < code.length
+        ? { role: 'assistant', tool_calls: [{ index: 0, id: `call-${index}`, type: 'function',
+          function: { name: 'js', arguments: JSON.stringify({ code: code[index] }) } }] }
+        : { role: 'assistant', content: 'Done.' };
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      response.write(`data: ${JSON.stringify(chunk(body.model, delta))}\n\n`);
+      response.write(`data: ${JSON.stringify(chunk(body.model, {}, index < code.length ? 'tool_calls' : 'stop'))}\n\n`);
+      response.end('data: [DONE]\n\n');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const port = server.address().port;
+      writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { fixture: {
+        baseUrl: `http://127.0.0.1:${port}/v1`, api: 'openai-completions', apiKey: 'local-fixture',
+        models: [{ id: 'scripted', name: 'Scripted', reasoning: false, input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000,
+          maxTokens: 512 }],
+      } } }));
+      const args = [process.env.PI_CLI_JS, '-p', '--mode', 'json', '--no-session',
+        '--no-extensions', '-e', extension, '--skill', skill, '--no-context-files',
+        '--provider', 'fixture', '--model', 'scripted',
+        'Use the supplied original CUA tools in the generated Windows desktop fixture.'];
+      const child = spawn(process.execPath, args, { cwd: project, env: childEnv(agentDir),
+        stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', part => { stdout += part; });
+      child.stderr.on('data', part => { stderr += part; });
+      let timer;
+      const exit = await Promise.race([
+        new Promise((resolve, reject) => { child.on('exit', resolve); child.on('error', reject); }),
+        new Promise((_, reject) => { timer = setTimeout(() => { child.kill(); reject(new Error('Pi timed out')); }, 75_000); }),
+      ]);
+      clearTimeout(timer);
+      assert.equal(exit, 0, stderr.slice(-1200));
+      assert.equal(requests.length, 5, `Pi model rounds: ${requests.length}; stderr: ${stderr.slice(-600)}`);
+      const first = requests[0];
+      const names = first.tools.map(tool => tool.function.name);
+      assert.equal(names.filter(name => name === 'js').length, 1);
+      assert.equal(names.filter(name => name === 'js_reset').length, 1);
+      assert.ok(!names.includes('turn_ended'));
+      assert.ok(!names.includes('js_add_node_module_dir'));
+      assert.match(first.tools.find(tool => tool.function.name === 'js').function.description,
+        /Control native apps or browsers/);
+      const firstMessages = JSON.stringify(first.messages);
+      assert.match(firstMessages, /UI automation through cua_repl/);
+      assert.match(firstMessages, /Windows desktop windows/);
+      assert.match(JSON.stringify(requests[1].messages), /42/);
+      assert.match(JSON.stringify(requests[2].messages), /43/);
+      const events = stdout.split('\n').filter(Boolean).map(line => {
+        try { return JSON.parse(line); } catch { return {}; }
+      });
+      const calls = events.filter(event => event.type === 'tool_execution_end' && event.toolName === 'js');
+      assert.equal(calls.length, 4);
+      assert.ok(calls.every(event => !event.isError), 'An original CUA call failed');
+      assert.ok(events.some(event => event.type === 'agent_end'));
+      console.log('Pi registered Windows extension: original guide, skill, four CUA calls, agent_end verified.');
+      console.log('Host-only turn_ended dispatch is established by the adapter regression; process exit alone cannot prove it here.');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
