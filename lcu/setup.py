@@ -468,6 +468,9 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                     from .codex_hooks import install_hooks
                     registered = json.loads(result.stdout)
                     install_hooks(resources / 'codex', Path(registered['path']), cwd, env, original_plugins)
+                elif name == 'claude-code' and phase == 'MCP':
+                    from .claude_visibility import install as hide_host_only_tools
+                    hide_host_only_tools(home, project=project if scope == 'project' else None)
                 print(f'{client.label}: {phase} registered.')
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))

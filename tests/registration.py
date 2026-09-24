@@ -24,6 +24,16 @@ codex.parent.mkdir(exist_ok=True)
 os.chown(codex.parent, owner.pw_uid, owner.pw_gid)
 codex.write_text('# keep my settings\nmodel = "my-model"\n[mcp_servers.other]\ncommand = "keep-me"\n')
 os.chown(codex, owner.pw_uid, owner.pw_gid)
+claude_settings = home / '.claude/settings.json'
+claude_settings.parent.mkdir(exist_ok=True)
+claude_settings.write_text('{"model":"keep-me","permissions":{"allow":["Read"]}}\n')
+os.chown(claude_settings.parent, owner.pw_uid, owner.pw_gid)
+os.chown(claude_settings, owner.pw_uid, owner.pw_gid)
+project_claude_settings = project / '.claude/settings.local.json'
+project_claude_settings.parent.mkdir(exist_ok=True)
+project_claude_settings.write_text('{"permissions":{"deny":["Bash(rm *)"]}}\n')
+os.chown(project_claude_settings.parent, owner.pw_uid, owner.pw_gid)
+os.chown(project_claude_settings, owner.pw_uid, owner.pw_gid)
 base = [command, 'setup', '--user', account, '--agent', 'all', '--session', 'direct', '--yes']
 for scope in ('user', 'project'):
     args = base + (['--scope', 'project', '--project', str(project)] if scope == 'project' else [])
@@ -49,6 +59,12 @@ for scope in ('user', 'project'):
     assert all(p.read_bytes() == before for p, before in stable.items()), 'Codex formatting did not converge'
 assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
 assert 'mcp_servers.lcu' in codex.read_text()
+user_claude = json.loads(claude_settings.read_text())
+project_claude = json.loads(project_claude_settings.read_text())
+assert user_claude['model'] == 'keep-me'
+assert user_claude['permissions']['allow'] == ['Read']
+assert user_claude['permissions']['deny'] == ['mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir']
+assert project_claude['permissions']['deny'] == ['Bash(rm *)', 'mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir']
 pi_settings = home / '.pi/agent/settings.json'
 assert pi_settings.is_file(), 'Pi local extension must be registered by its own package manager'
 pi_packages = json.loads(pi_settings.read_text())['packages']
