@@ -186,7 +186,9 @@ def main(root, argv):
         print(f"lcu {version} (ChatGPT {target} {policy['version']}; CUA {policy['runtime']})")
         return
     if argv[:1] == ['setup']:
-        if json.loads((root / 'installation.json').read_text()).get('platform') == 'windows':
+        descriptor_path = root / 'installation.json'
+        if (descriptor_path.is_file() and
+                json.loads(descriptor_path.read_text()).get('platform') == 'windows'):
             raise ValueError('Windows agent setup is not implemented; the installed app runtime is available through the direct launcher only.')
         from .setup import main as setup
         if '--prefix' not in argv:
@@ -194,7 +196,9 @@ def main(root, argv):
         setup(argv[1:])
         return
     if argv[:1] == ['browser']:
-        if json.loads((root / 'installation.json').read_text()).get('platform') == 'windows':
+        descriptor_path = root / 'installation.json'
+        if (descriptor_path.is_file() and
+                json.loads(descriptor_path.read_text()).get('platform') == 'windows'):
             raise ValueError('Windows browser host setup is not implemented.')
         from .browser import main as browser
         browser(root, argv[1:])

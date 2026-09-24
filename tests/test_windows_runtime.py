@@ -88,6 +88,15 @@ class WindowsRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Windows browser host setup is not implemented'):
             main(self.root, ['browser', 'install'])
 
+    def test_source_checkout_dispatch_without_installation_descriptor(self):
+        (self.root / 'installation.json').unlink()
+        with patch('lcu.setup.main') as setup:
+            main(self.root, ['setup', '--list-agents'])
+        setup.assert_called_once_with(['--list-agents', '--prefix', str(self.root.parent.parent)])
+        with patch('lcu.browser.main') as browser:
+            main(self.root, ['browser', '--help'])
+        browser.assert_called_once_with(self.root, ['--help'])
+
 
 if __name__ == '__main__':
     unittest.main()
