@@ -7,6 +7,7 @@ async function startLifetimeSignal(closeActiveTurn, address = `\\\\.\\pipe\\lcu-
   const server = net.createServer(socket => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
+    socket.on('error', () => socket.destroy());
     socket.setTimeout(4000, () => socket.destroy());
     let input = Buffer.alloc(0);
     let handled = false;

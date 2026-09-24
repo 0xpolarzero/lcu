@@ -105,12 +105,13 @@ class WindowsHostTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('node') and sys.platform != 'win32',
                          'Unix socket test needs Node on a non-Windows test host')
-    def test_private_lifetime_signal_matches_only_active_turn(self):
+    def test_private_lifetime_transport_forwards_ids_and_survives_disconnect(self):
         address = self.base / 'lifetime.sock'
         module = Path(windows_host.__file__).with_name('windows_lifetime_host.cjs')
         script = ("const {startLifetimeSignal}=require(process.argv[1]); "
                   "let active='new'; "
-                  "startLifetimeSignal(({sessionId,turnId})=>{ "
+                  "startLifetimeSignal(async ({sessionId,turnId})=>{ "
+                  "if(turnId==='disconnect'){await new Promise(r=>setTimeout(r,50)); return false;} "
                   "const matched=sessionId==='session'&&turnId===active; "
                   "if(matched)active=null; return matched; }, process.argv[2]) "
                   ".then(signal=>{console.log('ready'); process.stdin.resume(); "
@@ -142,6 +143,14 @@ class WindowsHostTests(unittest.TestCase):
                     return json.loads(stream.readline())
 
         self.assertEqual(call('old'), {'closed': False})
+        with socket.socket(socket.AF_UNIX) as dropped:
+            dropped.connect(str(address))
+            dropped.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+            dropped.sendall(b'{"session_id":"session","turn_id":"disconnect"}\n')
+        # A peer reset during the asynchronous host response must not crash it.
+        import time
+        time.sleep(0.1)
+        self.assertIsNone(child.poll())
         self.assertEqual(call('new'), {'closed': True})
         self.assertEqual(call('new'), {'closed': False})
         child.stdin.close()

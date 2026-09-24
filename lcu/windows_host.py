@@ -103,7 +103,7 @@ def materialize_original_host(app: Path, destination: Path, *, expected_asar_sha
 
 
 def start_original_host(*, node: Path, entry: Path, helper: Path, transport: Path,
-                        env: dict[str, str]) -> tuple[subprocess.Popen, str]:
+                        env: dict[str, str]) -> tuple[subprocess.Popen, str, str]:
     """Start the extracted original host and wait for its actual pipe readiness."""
     if not all(path.is_file() for path in (node, entry, helper, transport)):
         raise ValueError('The selected original Windows native host is incomplete.')
