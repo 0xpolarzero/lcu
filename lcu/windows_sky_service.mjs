@@ -35,8 +35,8 @@ function lifetimeSignal(runtime, session_id, turn_id) {
         finish(null, result.closed);
       } catch (error) { finish(error); }
     });
-    socket.once('error', error => finish(error));
-    socket.once('close', () => finish(Error('Windows native cleanup channel closed')));
+    socket.on('error', error => finish(error));
+    socket.on('close', () => finish(Error('Windows native cleanup channel closed')));
     socket.write(Buffer.from(JSON.stringify({session_id, turn_id}) + '\n'));
   }));
 }

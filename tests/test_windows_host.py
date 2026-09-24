@@ -162,18 +162,33 @@ class WindowsHostTests(unittest.TestCase):
         original = self.base / 'original-sky.mjs'
         original.write_text('export function handleRpc(request) { return request.type; }\n')
         wrapper = Path(windows_host.__file__).with_name('windows_sky_service.mjs')
-        script = ("import {pathToFileURL} from 'node:url'; "
-                  "let handlers=0; globalThis.nodeRepl={env:{LCU_WRE_SKY_SERVICE_PATH:process.argv[2]}, "
-                  "addTurnEndedHandler:()=>{handlers++}}; "
-                  "const service=await import(pathToFileURL(process.argv[1]).href); "
-                  "const first=await service.handleRpc({type:'setup'}); "
-                  "const second=await service.handleRpc({type:'execute'}); "
-                  "console.log(JSON.stringify({first,second,handlers}));")
+        script = r'''import {pathToFileURL} from 'node:url';
+let handlers = 0, ended = false, written, callback;
+const listeners = {};
+const socket = {
+  on(name, fn) { listeners[name] = fn; return this; },
+  write(bytes) {
+    written = Buffer.from(bytes).toString('utf8');
+    queueMicrotask(() => listeners.data(Buffer.from('{"closed":true}\n')));
+  },
+  end() { ended = true; },
+};
+globalThis.nodeRepl = {
+  env: {LCU_WRE_SKY_SERVICE_PATH: process.argv[2], LCU_WRE_LIFETIME_PIPE: 'fixture'},
+  nativePipe: {createConnection: async () => socket},
+  addTurnEndedHandler(handler) { handlers++; callback = handler.run; },
+};
+const service = await import(pathToFileURL(process.argv[1]).href);
+const first = await service.handleRpc({type:'setup'});
+const second = await service.handleRpc({type:'execute'});
+await callback({session_id:'session', turn_id:'turn'});
+console.log(JSON.stringify({first, second, handlers, ended, written}));'''
         result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script,
                                  str(wrapper), str(original)], check=True, capture_output=True,
                                 env={'PATH': os.environ.get('PATH', '')})
         self.assertEqual(json.loads(result.stdout),
-                         {'first': 'setup', 'second': 'execute', 'handlers': 1})
+                         {'first': 'setup', 'second': 'execute', 'handlers': 1,
+                          'ended': True, 'written': '{"session_id":"session","turn_id":"turn"}\n'})
 
 
 if __name__ == '__main__':
