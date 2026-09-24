@@ -8,11 +8,36 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+import subprocess
 
 from lcu import setup
 
 
 class WindowsSetupTests(unittest.TestCase):
+    def test_codex_hooks_use_original_platform_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            resources = base / 'app/resources'
+            config = base / 'account/config.toml'
+            config.parent.mkdir()
+            for system, expected in (('win32', 'codex.exe'), ('linux', 'codex'), ('darwin', 'codex')):
+                def registered(argv, **_options):
+                    output = ('[{"name":"lcu","status":"installed"}]' if ' add ' in f' {" ".join(map(str, argv))} '
+                              else json.dumps({'path': str(config)}))
+                    return subprocess.CompletedProcess(argv, 0, output, '')
+                with self.subTest(system=system), \
+                     mock.patch.object(setup.sys, 'platform', system), \
+                     mock.patch.object(setup, 'installer_environment', return_value={'PATH': 'fixture'}), \
+                     mock.patch.object(setup, 'installer_paths', return_value=(base / 'node', base / 'skills', base / 'mcp')), \
+                     mock.patch.object(setup, 'generate_skill', return_value=base / 'skill'), \
+                     mock.patch.object(setup, 'installed_app_resources', return_value=resources), \
+                     mock.patch.object(setup, 'host_policy', return_value={}), \
+                     mock.patch.object(setup.subprocess, 'run', side_effect=registered), \
+                     mock.patch('lcu.codex_hooks.install_hooks') as hooks:
+                    self.assertEqual(setup.configure(['codex'], config.parent, base / 'skill',
+                        ['lcu'], base / 'tools', base / 'release'), [])
+                    self.assertEqual(hooks.call_args.args[0], resources / expected)
+
     def test_linux_discover_setup_keeps_version_probe_on_direct_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             prefix = Path(temporary).resolve() / 'lcu'
