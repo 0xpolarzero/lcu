@@ -51,10 +51,10 @@ class UpstreamRuntimeTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_default_enables_both_original_surfaces(self):
+    def test_default_enables_original_computer_surface(self):
         with patch.dict(os.environ, {}, clear=True):
             env = environment(self.root)
-        self.assertEqual(env['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+        self.assertEqual(env['CUA_REPL_ENABLED_SURFACES'], 'computer')
         self.assertEqual(env['CUA_REPL_BROWSER_ENV'], 'codex-app')
         self.assertEqual(env['CODEX_CLI_PATH'], str(self.root / 'app/resources/codex'))
         self.assertEqual(env['BROWSER_USE_AVAILABLE_BACKENDS'], 'chrome')
@@ -133,6 +133,24 @@ class UpstreamRuntimeTests(unittest.TestCase):
             [str(self.root / 'app/resources/cua_node/bin/node'),
              str(self.root / 'app/resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')])
 
+    def test_chrome_flag_selects_original_combined_runtime(self):
+        with patch.dict(os.environ, {}, clear=True), patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--chrome'])
+        self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+
+    def test_chrome_registration_keeps_version_probe(self):
+        output = io.StringIO()
+        with patch('sys.stdout', output), patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--chrome', '--version'])
+        self.assertIn('ChatGPT linux 26.915.31945', output.getvalue())
+        execute.assert_not_called()
+
+    def test_explicit_surface_override_takes_precedence_over_chrome_flag(self):
+        with patch.dict(os.environ, {'CUA_REPL_ENABLED_SURFACES': 'computer'}, clear=True), \
+             patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--chrome'])
+        self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'computer')
+
     def test_mcp_discovery_compat_probes_then_execs_original_server(self):
         following = b'{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'
         source = io.BytesIO(b'{"jsonrpc":"2.0","id":0,"method":"server/discover"}\n' + following)
@@ -152,6 +170,17 @@ class UpstreamRuntimeTests(unittest.TestCase):
         launcher = self.root / 'app/resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
         execute.assert_called_once()
         self.assertEqual(execute.call_args.args[:2], (node, [str(node), str(launcher)]))
+
+    def test_chrome_command_preserves_discovery_compatibility(self):
+        source = io.BytesIO(b'{"jsonrpc":"2.0","id":0,"method":"server/discover"}\n')
+        destination = io.BytesIO()
+        stdin = SimpleNamespace(buffer=SimpleNamespace(raw=source))
+        stdout = SimpleNamespace(buffer=destination)
+        with patch.dict(os.environ, {}, clear=True), patch('lcu.runtime.sys.stdin', stdin), \
+             patch('lcu.runtime.sys.stdout', stdout), patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--chrome', '--mcp-discovery-compat'])
+        self.assertEqual(json.loads(destination.getvalue())['error']['code'], -32601)
+        self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
 
     def test_mcp_discovery_compat_rejects_other_first_request_without_launching(self):
         source = io.BytesIO(b'{"jsonrpc":"2.0","id":0,"method":"tools/list"}\n')
@@ -179,10 +208,10 @@ class UpstreamRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'lcu browser install'):
             main(self.root, ['--with-browser-host'])
 
-    def test_default_combined_runtime_does_not_require_an_electron_host(self):
+    def test_default_computer_runtime_does_not_require_an_electron_host(self):
         with patch.dict(os.environ, {}, clear=True), patch('lcu.runtime.os.execve') as execute:
             main(self.root, [])
-        self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+        self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'computer')
 
     def test_browser_setup_refuses_foreign_directory(self):
         with tempfile.TemporaryDirectory() as folder:

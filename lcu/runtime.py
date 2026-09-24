@@ -72,7 +72,7 @@ def paths(root):
     return app, resources, runtime, lock
 
 
-def environment(root, resolved=None):
+def environment(root, resolved=None, *, chrome=False):
     _, resources, runtime, lock = resolved or paths(root)
     target = json.loads((root / 'installation.json').read_text()).get('platform', 'linux')
     windows = target == 'windows'
@@ -113,7 +113,9 @@ def environment(root, resolved=None):
         NODE_REPL_TRUSTED_CODE_PATHS=prepend('NODE_REPL_TRUSTED_CODE_PATHS',
             env['CODEX_HOME'], module_dir, resources / 'plugins'),
     )
-    env.setdefault('CUA_REPL_ENABLED_SURFACES', 'browser,computer')
+    # The original launcher selects both its API and instructions from this
+    # surface list. External Chrome is an explicit opt-in for LCU clients.
+    env.setdefault('CUA_REPL_ENABLED_SURFACES', 'browser,computer' if chrome else 'computer')
     env.setdefault('CUA_REPL_BROWSER_ENV', 'codex-app')
     env.setdefault('CODEX_CLI_PATH', str(codex))
     if resources.parent.name == 'Contents':
@@ -174,9 +176,13 @@ def reply_to_server_discover(source, destination):
 
 
 def main(root, argv):
+    # Agent registrations place --chrome before generic executable probes.
+    if argv[:1] == ['--chrome'] and argv[1:] in (['--help'], ['-h'], ['--version']):
+        argv = argv[1:]
     if argv[:1] in (['--help'], ['-h']):
-        print('Usage: lcu [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]\n'
-              'With no arguments, starts the original stdio MCP server.')
+        print('Usage: lcu [--chrome] [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]\n'
+              'With no arguments, starts the original computer-use stdio MCP server. '
+              '--chrome also enables its browser surface.')
         return
     if argv[:1] == ['--version']:
         release_path = root / 'bundle.json'
@@ -209,14 +215,16 @@ def main(root, argv):
     if argv == ['--with-browser-host']:
         raise ValueError('--with-browser-host was removed with the embedded browser. '
                          'Run lcu browser install and enable the official Chrome extension.')
-    discovery_compat = argv == ['--mcp-discovery-compat']
-    if argv and argv not in (['doctor'], ['--mcp-discovery-compat']):
-        raise ValueError('Usage: lcu [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]')
+    chrome = argv.count('--chrome') == 1
+    direct_args = [arg for arg in argv if arg != '--chrome']
+    discovery_compat = direct_args == ['--mcp-discovery-compat']
+    if argv.count('--chrome') > 1 or direct_args not in ([], ['doctor'], ['--mcp-discovery-compat']):
+        raise ValueError('Usage: lcu [--chrome] [setup OPTIONS | browser install|status | doctor | --version | --mcp-discovery-compat]')
     resolved = paths(root)
     _, resources, runtime, _ = resolved
-    env = environment(root, resolved)
+    env = environment(root, resolved, chrome=chrome)
     windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
-    if argv == ['doctor']:
+    if direct_args == ['doctor']:
         if not windows and resources.parent.name != 'Contents' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
             raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use lcu-session or run inside the desktop session.')
         script = 'import {handleRpc} from "@oai/sky/service"; const result = await handleRpc({type:"execute", method:"list_windows", args:[]}); console.log(JSON.stringify({windows:result}));'

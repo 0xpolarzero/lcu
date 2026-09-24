@@ -43,6 +43,7 @@ class MacRuntimeTests(unittest.TestCase):
         self.assertEqual(execute.call_args.args[:2], (node, [str(node), str(
             self.runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')]))
         env = execute.call_args.args[2]
+        self.assertEqual(env['CUA_REPL_ENABLED_SURFACES'], 'computer')
         self.assertEqual(env['SKY_CUA_SERVICE_PATH'], str(
             self.runtime / 'lib/node_modules/@oai/sky/Codex Computer Use.app'))
         self.assertEqual(env['BROWSER_USE_AVAILABLE_BACKENDS'], 'chrome')

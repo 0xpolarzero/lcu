@@ -62,7 +62,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         self.assertEqual(exit_status.exception.code, 0)
         self.assertEqual(run.call_args.args[0],
             [str(self.runtime / 'bin/node.exe'), str(self.launcher)])
-        self.assertEqual(run.call_args.kwargs['env']['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+        self.assertEqual(run.call_args.kwargs['env']['CUA_REPL_ENABLED_SURFACES'], 'computer')
         self.assertNotIn('capture_output', run.call_args.kwargs)
 
     def test_doctor_uses_windows_sky_without_x11(self):

@@ -360,7 +360,7 @@ class InstallationTests(unittest.TestCase):
             result = environment(self.root)
         for key in settings:
             self.assertEqual(result[key], settings[key])
-        self.assertEqual(result['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+        self.assertEqual(result['CUA_REPL_ENABLED_SURFACES'], 'computer')
 
     def session(self, pid, display=':1'):
         process = self.root / str(pid)
