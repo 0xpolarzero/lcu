@@ -46,7 +46,7 @@ def build(output, package=None, *, target='linux', app=None):
         scratch = Path(temporary)
         release = scratch / name
         release.mkdir()
-        shutil.copytree(SOURCE / 'bin', release / 'bin')
+        shutil.copytree(SOURCE / 'bin', release / 'bin', ignore=shutil.ignore_patterns('*.cmd'))
         (release / 'lcu').mkdir()
         for filename in ('__init__.py', 'runtime.py', 'session.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
