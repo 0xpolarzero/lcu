@@ -196,13 +196,22 @@ to save a new file through a window-targeted Save As sequence did not complete;
 that sequence alone does not establish an upstream defect or rule out another
 supported way to operate the modal.
 
+The candidate c client sent `tools/call` for `js` without per-call
+`x-codex-turn-metadata` and did not set `NODE_REPL_REQUEST_META`. LCU supplied
+its documented per-connection fallback identity, and those native actions
+still passed. This shows that absent host turn metadata did not block this
+direct native call path; it does not verify Claude Code's Windows model path or
+provide the real turn IDs needed for matched per-turn cleanup.
+
 Installed candidate d, source `a3abd9c`, thin ZIP SHA-256
 `935d95a331fb03f6e497c376ce3c193b5ce2cf9121cf9e286a2089c1b15f46ee`,
 passed the actual original MCP lifecycle sequence: a matching Stop ended the
 first native helper; a stale prior-turn Stop left the new helper running;
 matching Interrupt ended it; and MCP shutdown ended a third helper. The guest
-log is `Desktop\lcu-installed-lifecycle-probe.log`. This tests process cleanup
-for the named turns, not agent-model behavior.
+log is `Desktop\lcu-installed-lifecycle-probe.log`. Unlike the candidate c
+action probe, this fixture attached explicit `x-codex-turn-metadata` with real
+test session/turn IDs so Stop and Interrupt could target the matching helper.
+This tests process cleanup for the named turns, not agent-model behavior.
 
 Installed candidate f, source `36c84b769250651e5af5e6563d1dd28b98c345f4`,
 thin ZIP SHA-256
