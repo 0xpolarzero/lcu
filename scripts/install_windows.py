@@ -100,6 +100,7 @@ def install(prefix):
     prefix = checked_prefix(prefix)
     lock = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['windows']
     entry = lock['architectures']['x64']
+    print('LCU: Verifying the registered official Windows application...', file=sys.stderr, flush=True)
     selected = resolve_installed_windows_app(expected_version=lock['version'],
         expected_runtime=lock['runtime'], expected_hashes=entry['components'])
     # Keep the registered MSIX intact. Its protected WindowsApps directory does
@@ -120,6 +121,8 @@ def install(prefix):
         try:
             stage.mkdir()
             _regular_tree(selected.app)
+            print('LCU: Copying the original application into the private runtime; this can take several minutes...',
+                  file=sys.stderr, flush=True)
             shutil.copytree(_copy_path(selected.app), _copy_path(stage / 'app'), symlinks=True)
             _validated_copy(stage / 'app', lock, entry)
             os.replace(stage, generation)

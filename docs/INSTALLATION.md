@@ -10,7 +10,7 @@ Build the Darwin archive using [development instructions](DEVELOPMENT.md), extra
 ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
-This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture. A Windows x64 thin ZIP and runtime-only installer passed integrity checks in a live Windows 11 guest, but the original native computer-use path failed at process launch. Windows is not a supported LCU target; see the [guest record](verification/windows-source.md).
+This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture.
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
@@ -22,6 +22,21 @@ pi
 Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
 
 Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS Screen Recording or Accessibility: those permissions belong to the original signed Codex Computer Use helper and may require approval in System Settings. Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
+
+## Windows 11 x64 candidate
+
+Install the pinned official `OpenAI.Codex` 26.917.9434.0 Store MSIX for the current Windows account, and install Python 3.12 or newer. Extract the matching thin Windows ZIP, then run from its extracted release directory in PowerShell:
+
+~~~powershell
+python .\scripts\install_windows.py --runtime-only
+& "$env:LOCALAPPDATA\LCU\lcu.cmd" --version
+~~~
+
+To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
+
+The installer verifies the Store registration and pinned files, then copies the complete original package unchanged into `%LOCALAPPDATA%\LCU\apps\<package-hash>\app`. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
+
+The default-prefix private copy, runtime-only installer, and `--version` passed in a clean Windows 11 guest. Installed-candidate desktop actions, native-host lifecycle, and agent registration are still being verified. See the [Windows guest record](verification/windows-source.md) for the exact result before treating this candidate as a supported Windows target.
 
 ## Linux: acquire and install
 
