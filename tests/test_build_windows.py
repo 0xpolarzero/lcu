@@ -37,7 +37,7 @@ class WindowsBuildTests(unittest.TestCase):
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('windows', 'x64'))
                 self.assertFalse(any(name.startswith(prefix + 'app/') for name in names))
                 self.assertFalse(any(name.endswith(('.exe', '.msix', '.node')) for name in names))
-                for path in ('bin/lcu-session', 'scripts/install.sh', 'scripts/install.py',
+                for path in ('bin/lcu-session', 'lcu/session.py', 'scripts/install.sh', 'scripts/install.py',
                              'scripts/installed_app.py'):
                     self.assertNotIn(prefix + path, names)
 

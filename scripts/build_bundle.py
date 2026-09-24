@@ -54,9 +54,12 @@ def build(output, package=None, *, target='linux', app=None):
                         ignore=(shutil.ignore_patterns('lcu-session') if target == 'windows'
                                 else shutil.ignore_patterns('*.cmd')))
         (release / 'lcu').mkdir()
-        for filename in ('__init__.py', 'runtime.py', 'session.py', 'setup.py',
+        modules = ('__init__.py', 'runtime.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
-                         'native_host.py', 'claude_visibility.py'):
+                         'native_host.py', 'claude_visibility.py')
+        if target != 'windows':
+            modules += ('session.py',)
+        for filename in modules:
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'lcu/platforms.py', release / 'lcu/platforms.py')
@@ -84,8 +87,10 @@ def build(output, package=None, *, target='linux', app=None):
         provision_agents(release, SOURCE / 'scripts/agent-tools', target=target,
                          mac_node=selected_node, adapters_source=SOURCE / 'adapters')
         # The installer selects and validates the matching app before registration.
-        subprocess.run([sys.executable, '-B', '-c',
-                        'import lcu.runtime, lcu.session, lcu.setup, lcu.browser, lcu.codex_hooks'],
+        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.codex_hooks'
+        if target != 'windows':
+            imports += ', lcu.session'
+        subprocess.run([sys.executable, '-B', '-c', imports],
                        cwd=release, check=True, timeout=20)
         seal(release, arch, target)
         verify(release, arch, target)
