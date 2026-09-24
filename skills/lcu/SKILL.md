@@ -5,7 +5,7 @@ description: Control Linux desktop windows through the original Codex computer-u
 
 Use LCU's `js` and `js_reset` tools. JavaScript state persists between calls.
 
-Before the first call, read the complete original Linux computer-use guide at [references/upstream/cua/docs/tinysky-alt-core-cua-repl.md](references/upstream/cua/docs/tinysky-alt-core-cua-repl.md), the Linux launcher description at [references/upstream/cua-repl/instructions/linux/description.md](references/upstream/cua-repl/instructions/linux/description.md), and the native Linux guide at [references/upstream/sky/linux/SKILL.md](references/upstream/sky/linux/SKILL.md). LCU uses the unified original `cua` entrypoints and the capability-specific guidance returned by its runtime.
+Before the first call, read the complete original Linux computer-use guide at `references/upstream/cua/docs/tinysky-alt-core-cua-repl.md`, the Linux launcher description at `references/upstream/cua-repl/instructions/linux/description.md`, and the native Linux guide at `references/upstream/sky/linux/SKILL.md`. LCU setup populates these paths beside the generated local skill; the release template does not contain copied upstream documents. LCU uses the unified original `cua` entrypoints and the capability-specific guidance returned by its runtime.
 
 On first use or after reset, make one documented entrypoint call by itself, normally `await cua.getState()`. Do not combine it with other API calls, waits, or snapshots. Read the returned tool descriptions, policies, and inventory before continuing. After context compaction, call `await cua.rewriteDocumentation()` by itself and reread the returned guidance.
 
