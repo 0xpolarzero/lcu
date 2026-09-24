@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from bundle import seal, verify
@@ -65,3 +66,25 @@ class BundleTests(unittest.TestCase):
         self.binary.chmod(0o644)
         with self.assertRaisesRegex(ValueError, 'integrity'):
             verify(self.root, 'arm64')
+
+    def test_windows_zip_extraction_preserves_byte_integrity_without_unix_modes(self):
+        windows = self.root.with_name('windows')
+        (windows / 'bin').mkdir(parents=True)
+        launcher = windows / 'bin/lcu.cmd'
+        launcher.write_bytes(b'fixture launcher\r\n')
+        launcher.chmod(0o755)
+        seal(windows, 'x64', 'windows')
+        archive = self.root.with_name('windows.zip')
+        with ZipFile(archive, 'w') as zipped:
+            for path in windows.rglob('*'):
+                if path.is_file():
+                    zipped.write(path, path.relative_to(windows))
+        extracted = self.root.with_name('extracted')
+        with ZipFile(archive) as zipped:
+            zipped.extractall(extracted)
+        # Windows ZIP extraction does not preserve a Unix executable bit.
+        (extracted / 'bin/lcu.cmd').chmod(0o644)
+        verify(extracted, 'x64', 'windows')
+        (extracted / 'bin/lcu.cmd').write_bytes(b'tampered\r\n')
+        with self.assertRaisesRegex(ValueError, 'integrity'):
+            verify(extracted, 'x64', 'windows')
