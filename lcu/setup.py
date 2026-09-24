@@ -232,7 +232,8 @@ try {
 def preflight_mcp(node, mcp, client, scope, cwd, env):
     result = subprocess.run([str(node), '--input-type=module', '-e', MCP_PREFLIGHT,
                              str(mcp), client.mcp_agent, scope], cwd=cwd, env=env,
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', timeout=20)
     if result.returncode:
         raise ValueError(result.stderr.strip() or 'MCP configuration preflight failed')
 
@@ -457,7 +458,8 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                                    Change(selected_command, previous, (json.dumps(config, indent=2) + '\n').encode())])
                 phase_env = {**env, 'PI_OFFLINE': '1'} if phase == 'extension' else env
                 result = subprocess.run(argv, cwd=cwd, env=phase_env, stdin=subprocess.DEVNULL,
-                                        capture_output=True, text=True, timeout=120)
+                                        capture_output=True, text=True,
+                                        encoding='utf-8', errors='replace', timeout=120)
                 if result.returncode:
                     # Upstream diagnostics are shown to the invoking user, never stored.
                     detail = (result.stderr or result.stdout).strip()

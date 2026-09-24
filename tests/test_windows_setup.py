@@ -9,11 +9,39 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 import subprocess
+import sys
 
 from lcu import setup
 
 
 class WindowsSetupTests(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'This decoder fixture uses a POSIX executable shebang')
+    def test_node_installer_output_decodes_under_legacy_windows_locale(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            home = base / 'home'
+            home.mkdir()
+            node = base / 'node-fixture'
+            node.write_text('#!' + sys.executable + '\n'
+                            'import json,sys\n'
+                            'args=sys.argv[1:]\n'
+                            'if args and args[0].endswith("skills.mjs"):\n'
+                            '  print(json.dumps([{"name":"lcu","status":"installed"}]))\n'
+                            '  sys.stderr.buffer.write(b"note \\xe2\\x80\\x8f\\n")\n'
+                            'elif any("upsertServer" in arg for arg in args):\n'
+                            '  print(json.dumps({"path":"' + str(base / 'mcp.json').replace('\\', '\\\\') + '"}))\n')
+            node.chmod(0o755)
+            skill = base / 'skill'
+            skill.mkdir()
+            with mock.patch.object(setup, 'installer_paths', return_value=(node, base / 'skills.mjs', base / 'mcp.mjs')), \
+                 mock.patch.object(setup, 'generate_skill', return_value=skill), \
+                 mock.patch.object(setup, 'installed_app_resources', return_value=base / 'resources'), \
+                 mock.patch.object(setup, 'host_policy', return_value={}), \
+                 mock.patch('subprocess._text_encoding', return_value='cp1252'):
+                failures = setup.configure(['claude-code'], home, skill, ['lcu'], base / 'tools', base,
+                                           environ={'HOME': str(home), 'PATH': str(base)})
+            self.assertEqual(failures, [])
+
     def test_codex_hooks_use_original_platform_executable(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
