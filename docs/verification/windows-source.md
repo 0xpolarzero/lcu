@@ -221,9 +221,9 @@ Claude Code, and Pi 0.73 without the prior Unicode reader exception. The
 generated Windows skill, Pi extension wrapper and Pi commands were present;
 the guest log is `Desktop\lcu-candidate-f-native-setup.log`. No real model
 session was run in those Windows agents. The official Chrome MSI was installed
-after a valid guest Authenticode check. The opt-in connector install and status
-checks passed; the extension action is pending. Candidate f is a verification
-artifact, not a published release.
+after a valid guest Authenticode check. The opt-in connector was configured;
+the extension action is pending. Candidate f is a verification artifact, not
+a published release.
 
 Candidate f also passed a local scripted-provider Pi 0.73 fixture using normal
 project auto-discovery, without explicit extension or skill flags. The fixture
