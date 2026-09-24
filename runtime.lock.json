@@ -55,6 +55,31 @@
           }
         }
       }
+    },
+    "windows": {
+      "source": "https://persistent.oaistatic.com/codex-app-prod/releases/26.917.9434.0/ChatGPT-x64.msix",
+      "version": "26.917.9434.0",
+      "runtime": "0.0.16/20260915001755-492f19756c31",
+      "architectures": {
+        "x64": {
+          "sha256": "9892383820c5505997456bde8385810afadd6076ae7fff9e3835a48ca0555c98",
+          "components": {
+            "app/ChatGPT.exe": "f1bffad855a0b39b9954764953ab0092995b48288d4125571bae393434734a86",
+            "app/resources/app.asar": "d4234b03eb532fe0f3e9a7d90caad51edb68af45f771cc786d966377e7446f5a",
+            "app/resources/cua_node/bin/node.exe": "a604969e8eb5154a3d5617ff377c13b439e2436ff2ef98e546a05bd234724d78",
+            "app/resources/cua_node/bin/node_repl.exe": "af7d3ce6f220fecac63206c7d6a45c9739aafbe928921fea0122d3f7dbe8a1d9",
+            "app/resources/cua_node/manifest.json": "32fbcc083060f8373d2a650ddd31ebace32b7fb120393c9d51c43955d21ef9ed",
+            "app/resources/cua_node/bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs": "992174a5e637645aeb444adfdb1bae688e997bb84d7db07532f68e358e60f278",
+            "app/resources/codex.exe": "9015c47d1714294ecd9033c4b5aefc3076797d867d1c36aa37749fcb76c8942f",
+            "app/resources/codex-code-mode-host.exe": "4e89591187d7c02e160fb0ad4cc19a7bed01ac5e701b1f7ccb88e6d72ab148ca",
+            "app/resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json": "9e59152afffaf744d419f3330e077bab28315c456eccdc08f3b3ed24f8e79ddf",
+            "app/resources/plugins/openai-bundled/plugins/chrome/extension-host/windows/x64/extension-host.exe": "7e82f82e03168378e0105181df918d55e6805706b449c55faaf8e43454187957",
+            "app/resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json": "e7297a8851d46bb5d7f53d57e82d86cfdf4b04524bedf8c2ce6cf4a80ffe71da",
+            "app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/codex-computer-use.exe": "9493af2cebd3c11e2e38ce692f6ccd8e00f4320bdbbcf14f242d036a9736635f",
+            "app/resources/cua_node/bin/node_modules/@oai/sky/bin/windows/swift/x64/codex-computer-use-swift.exe": "17a126a8c308161abf3513d57930edbcb5993b97966afb974e10fba851d53561"
+          }
+        }
+      }
     }
   }
 }
