@@ -51,11 +51,12 @@ def build(output, package=None, *, target='linux', app=None):
         release = scratch / name
         release.mkdir()
         shutil.copytree(SOURCE / 'bin', release / 'bin',
-                        ignore=None if target == 'windows' else shutil.ignore_patterns('*.cmd'))
+                        ignore=(shutil.ignore_patterns('lcu-session') if target == 'windows'
+                                else shutil.ignore_patterns('*.cmd')))
         (release / 'lcu').mkdir()
         for filename in ('__init__.py', 'runtime.py', 'session.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
-                         'native_host.py'):
+                         'native_host.py', 'claude_visibility.py'):
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'lcu/platforms.py', release / 'lcu/platforms.py')
@@ -71,7 +72,9 @@ def build(output, package=None, *, target='linux', app=None):
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
             shutil.copy2(SOURCE / filename, release / filename)
         (release / 'scripts').mkdir()
-        for filename in ('install.sh', 'install.py', 'installed_app.py', 'bundle.py'):
+        scripts = (('bundle.py',) if target == 'windows'
+                   else ('install.sh', 'install.py', 'installed_app.py', 'bundle.py'))
+        for filename in scripts:
             shutil.copy2(SOURCE / 'scripts' / filename, release / 'scripts' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'scripts/install_macos.py', release / 'scripts/install_macos.py')

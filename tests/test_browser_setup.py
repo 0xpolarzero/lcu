@@ -53,13 +53,16 @@ class BrowserSetupTests(unittest.TestCase):
                  mock.patch.dict(os.environ, {'USERPROFILE': str(home), 'LOCALAPPDATA': str(local)}), \
                  mock.patch('lcu.runtime.paths', return_value=(app, resources, None, {})), \
                  mock.patch('lcu.runtime.environment', return_value=env), \
-                 mock.patch('lcu.browser.subprocess.run', side_effect=original_install) as run:
+                 mock.patch('lcu.browser.subprocess.run', side_effect=original_install) as run, \
+                 mock.patch('lcu.browser.sys.executable', 'C:\\Python313\\python.exe'):
                 destination = install(root)
             configured = json.loads(manifest.read_text())
             self.assertEqual(configured['path'], str(destination / 'lcu-native-host.cmd'))
             self.assertEqual(configured['allowed_origins'], ['chrome-extension://fixture/'])
             self.assertEqual((destination / 'lcu-native-host.py').read_text(), relay.read_text())
             self.assertIn(b'@echo off', (destination / 'lcu-native-host.cmd').read_bytes())
+            self.assertIn(b'"C:\\Python313\\python.exe" -B -u',
+                          (destination / 'lcu-native-host.cmd').read_bytes())
             self.assertEqual((destination / '.lcu-browser-host').read_text(), str(app) + '\n')
             self.assertEqual(run.call_count, 2)
 

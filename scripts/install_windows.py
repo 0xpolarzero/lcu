@@ -64,7 +64,9 @@ def install(prefix):
         paths(release)
         stable = prefix / 'windows_launcher.py'
         shutil.copy2(release / 'scripts/windows_launcher.py', stable)
-        (prefix / 'lcu.cmd').write_text('@echo off\r\npy -3.12 "%~dp0windows_launcher.py" %*\r\nexit /b %ERRORLEVEL%\r\n')
+        (prefix / 'lcu.cmd').write_text(
+            f'@echo off\r\n"{sys.executable}" -B "%~dp0windows_launcher.py" %*\r\n'
+            'exit /b %ERRORLEVEL%\r\n')
         temporary = prefix / ('.current-' + uuid.uuid4().hex + '.json')
         temporary.write_text(json.dumps({'release': release.name}) + '\n')
         os.replace(temporary, prefix / 'current.json')

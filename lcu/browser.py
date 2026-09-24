@@ -7,6 +7,7 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -103,7 +104,9 @@ def install(root, directory=None):
         # Chromium uses cmd.exe for a non-.exe native host. The wrapper emits
         # no text before Python's binary native-messaging frames.
         command = destination / 'lcu-native-host.cmd'
-        command.write_bytes(b'@echo off\r\npy -3.12 -u "%~dp0lcu-native-host.py" %*\r\nexit /b %ERRORLEVEL%\r\n')
+        command.write_text(
+            f'@echo off\r\n"{sys.executable}" -B -u "%~dp0lcu-native-host.py" %*\r\n'
+            'exit /b %ERRORLEVEL%\r\n', newline='')
         relay = command
     script = ('const {install} = await import(process.argv[1]); '
               'await install({appServerRuntimePaths:{codexCliPath:process.env.CODEX_CLI_PATH,'
