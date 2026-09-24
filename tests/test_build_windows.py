@@ -110,6 +110,7 @@ class WindowsBuildTests(unittest.TestCase):
             wrapper = (prefix / 'lcu.cmd').read_text()
             self.assertIn('"C:\\Python313\\python.exe" -B', wrapper)
             self.assertNotIn('py -3.12', wrapper)
+            self.assertNotIn(b'\r\r\n', (prefix / 'lcu.cmd').read_bytes())
 
     def test_installer_stages_full_package_and_keeps_current_on_invalid_generation(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -149,7 +150,7 @@ class WindowsBuildTests(unittest.TestCase):
                 descriptor = json.loads((prefix / 'current.json').read_text())
                 release = prefix / 'releases' / descriptor['release']
                 app = Path(json.loads((release / 'installation.json').read_text())['app'])
-                self.assertEqual(app.parent, prefix / 'apps' / ('26.917.9434.0-x64-' + 'a' * 16))
+                self.assertEqual(app.parent, prefix / 'apps' / ('a' * 16))
                 self.assertEqual((app / 'app/resources/NOTICE.txt').read_text(), 'original notice')
                 self.assertEqual((official / 'app/resources/NOTICE.txt').read_text(), 'original notice')
                 install_windows.install(prefix)
@@ -157,6 +158,21 @@ class WindowsBuildTests(unittest.TestCase):
                 self.assertEqual(Path(json.loads((prefix / 'releases' /
                     descriptor['release'] /
                     'installation.json').read_text())['app']), app)
+                launcher_before = (prefix / 'windows_launcher.py').read_bytes()
+                command_before = (prefix / 'lcu.cmd').read_bytes()
+                (source / 'scripts/windows_launcher.py').write_text('new launcher')
+                original_replace = install_windows.os.replace
+                def fail_pointer(source_path, destination_path):
+                    if Path(destination_path) == prefix / 'current.json':
+                        raise OSError('pointer blocked')
+                    return original_replace(source_path, destination_path)
+                with mock.patch.object(install_windows.os, 'replace', side_effect=fail_pointer):
+                    with self.assertRaisesRegex(OSError, 'pointer blocked'):
+                        install_windows.install(prefix)
+                self.assertEqual(json.loads((prefix / 'current.json').read_text()), descriptor)
+                self.assertEqual((prefix / 'windows_launcher.py').read_bytes(), launcher_before)
+                self.assertEqual((prefix / 'lcu.cmd').read_bytes(), command_before)
+                (source / 'scripts/windows_launcher.py').write_text('fixture')
                 original_lock = (source / 'runtime.lock.json').read_text()
                 changed_lock = json.loads(original_lock)
                 changed_lock['platforms']['windows']['architectures']['x64']['sha256'] = 'b' * 64
@@ -165,7 +181,7 @@ class WindowsBuildTests(unittest.TestCase):
                                        side_effect=ValueError('copied bytes changed')):
                     with self.assertRaisesRegex(ValueError, 'copied bytes changed'):
                         install_windows.install(prefix)
-                self.assertFalse(list((prefix / 'apps').glob('*.stage')))
+                self.assertEqual(list((prefix / 'apps').iterdir()), [app.parent])
                 self.assertEqual(json.loads((prefix / 'current.json').read_text()), descriptor)
                 self.assertEqual((app / 'app/resources/NOTICE.txt').read_text(), 'original notice')
                 (source / 'runtime.lock.json').write_text(original_lock)
@@ -192,6 +208,14 @@ class WindowsBuildTests(unittest.TestCase):
                                    side_effect=lambda path: path == junction):
                 with self.assertRaisesRegex(ValueError, 'linked Windows installation path'):
                     install_windows.checked_prefix(prefix)
+
+    def test_internal_copy_paths_use_windows_extended_length_spelling(self):
+        self.assertEqual(install_windows._extended_windows_name('C:\\LCU\\apps\\app'),
+                         '\\\\?\\C:\\LCU\\apps\\app')
+        self.assertEqual(install_windows._extended_windows_name('\\\\server\\share\\app'),
+                         '\\\\?\\UNC\\server\\share\\app')
+        self.assertEqual(install_windows._extended_windows_name('\\\\?\\C:\\already'),
+                         '\\\\?\\C:\\already')
 
 
 if __name__ == '__main__':

@@ -25,13 +25,27 @@ def _redirected(path):
     return path.is_symlink() or path.is_junction()
 
 
+def _extended_windows_name(value):
+    if value.startswith('\\\\?\\'):
+        return value
+    if value.startswith('\\\\'):
+        return '\\\\?\\UNC\\' + value[2:]
+    return '\\\\?\\' + value
+
+
+def _copy_path(path):
+    # Windows long-path registry settings vary. The standard extended-length
+    # spelling applies only to internal traversal/copy; descriptors stay normal.
+    return _extended_windows_name(os.path.abspath(path)) if os.name == 'nt' else Path(path)
+
+
 def _regular_tree(root):
     """Refuse reparse redirects before copying a registered package tree."""
     if _redirected(root) or not root.is_dir():
         raise ValueError(f'Windows application directory is missing or redirected: {root}')
     def unreadable(error):
         raise error
-    for parent, directories, files in os.walk(root, followlinks=False, onerror=unreadable):
+    for parent, directories, files in os.walk(_copy_path(root), followlinks=False, onerror=unreadable):
         for name in directories + files:
             item = Path(parent) / name
             if _redirected(item):
@@ -39,13 +53,24 @@ def _regular_tree(root):
 
 
 def _generation(prefix, lock, entry):
-    return prefix / 'apps' / f"{lock['version']}-x64-{entry['sha256'][:16]}"
+    return prefix / 'apps' / entry['sha256'][:16]
 
 
 def _validated_copy(app, lock, entry):
     _regular_tree(app)
     return validate_windows_app_tree(app, expected_version=lock['version'],
         expected_runtime=lock['runtime'], expected_hashes=entry['components'])
+
+
+def _atomic_bytes(path, data):
+    if _redirected(path):
+        raise ValueError(f'Refusing a redirected Windows launcher file: {path}')
+    temporary = path.with_name('.' + path.name + '-' + uuid.uuid4().hex + '.tmp')
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def checked_prefix(prefix):
@@ -91,11 +116,11 @@ def install(prefix):
     if generation.exists():
         _validated_copy(generation / 'app', lock, entry)
     else:
-        stage = apps / ('.' + generation.name + '-' + uuid.uuid4().hex + '.stage')
+        stage = apps / ('.' + uuid.uuid4().hex[:8])
         try:
             stage.mkdir()
             _regular_tree(selected.app)
-            shutil.copytree(selected.app, stage / 'app', symlinks=True)
+            shutil.copytree(_copy_path(selected.app), _copy_path(stage / 'app'), symlinks=True)
             _validated_copy(stage / 'app', lock, entry)
             os.replace(stage, generation)
         except BaseException:
@@ -106,6 +131,8 @@ def install(prefix):
         raise ValueError(f'Refusing a redirected Windows release directory: {releases}')
     releases.mkdir(exist_ok=True)
     release = releases / (VERSION + '-' + uuid.uuid4().hex[:12])
+    previous_launchers = {}
+    temporary = None
     try:
         shutil.copytree(SOURCE, release)
         verify(release, arch, 'windows')
@@ -119,14 +146,26 @@ def install(prefix):
         from lcu.runtime import paths
         paths(release)
         stable = prefix / 'windows_launcher.py'
-        shutil.copy2(release / 'scripts/windows_launcher.py', stable)
-        (prefix / 'lcu.cmd').write_text(
+        command_file = prefix / 'lcu.cmd'
+        if _redirected(stable) or _redirected(command_file):
+            raise ValueError('Refusing a redirected Windows launcher file.')
+        previous_launchers = {path: path.read_bytes() if path.exists() else None
+                              for path in (stable, command_file)}
+        _atomic_bytes(stable, (release / 'scripts/windows_launcher.py').read_bytes())
+        _atomic_bytes(command_file, (
             f'@echo off\r\n"{sys.executable}" -B "%~dp0windows_launcher.py" %*\r\n'
-            'exit /b %ERRORLEVEL%\r\n')
+            'exit /b %ERRORLEVEL%\r\n').encode())
         temporary = prefix / ('.current-' + uuid.uuid4().hex + '.json')
         temporary.write_text(json.dumps({'release': release.name}) + '\n')
         os.replace(temporary, prefix / 'current.json')
     except BaseException:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        for path, content in previous_launchers.items():
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                _atomic_bytes(path, content)
         shutil.rmtree(release, ignore_errors=True)
         raise
     return release
