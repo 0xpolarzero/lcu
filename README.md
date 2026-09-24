@@ -1,12 +1,14 @@
 # LCU
 
-LCU installs a fixed official ChatGPT Linux application as a private dependency and launches its original computer-use runtime for an existing Linux desktop. It exposes the original persistent MCP JavaScript tools to supported agents. LCU releases contain LCU code and installer metadata, not OpenAI application files.
+LCU launches the original computer-use runtime from a pinned official ChatGPT application. It preserves the original `cua` API, tool descriptions, schemas and platform instructions. Linux uses a verified private installation; macOS reuses the signed locally installed app in place. Thin LCU archives contain adapters and installer metadata, without OpenAI application files.
 
 **Status:** native computer use and the thin installed-app path passed the offline differential checks. The installed ARM64 and x86-64 builds passed no-sign-in Chrome actions in Ubuntu 24.04.5 guests with AppArmor active; the x86-64 guest ran under KVM on physical AMD hardware. LCU installs a small native-host relay that enables the official extension's `x-browser-agent` header locally. The original package's AppArmor profile targets its Electron UI, not LCU's Node/REPL executable. See [current status](docs/PARITY-STATUS.md) for exact evidence and limitations.
 
+The macOS Apple Silicon path and [Pi adapter](docs/ADAPTERS.md) are under validation. A [live TextEdit flow](docs/verification/macos-live-2026-09-24.md) passed for native typing, screenshots and saving. Cold helper startup and Chrome actions remain unverified; one close shortcut behaved unexpectedly. Windows is not implemented. MCP remains the original runtime's internal transport; Pi uses its native extension API through the small shared MCP client.
+
 ## Requirements
 
-Use Ubuntu 24.04-compatible glibc Linux on ARM64 or x86-64, Python 3.12 or newer, an existing X11 desktop and D-Bus session, and a Linux account that owns the desktop. The application runs on that Linux machine, including inside a VM. A macOS installation cannot supply its executables.
+Linux requires Ubuntu 24.04-compatible glibc on ARM64 or x86-64, Python 3.12 or newer, and an existing X11 desktop and D-Bus session owned by the target account. macOS requires Apple Silicon, Python 3.12 or newer, and the pinned signed `/Applications/ChatGPT.app` 26.917.62051. Each platform uses its own application binaries. An app update requires reviewed pins before LCU will launch it.
 
 The fixed dependency is ChatGPT Linux 26.915.31945 with CUA runtime 0.0.16/20260915001755-492f19756c31. [runtime.lock.json](runtime.lock.json) pins the official package URLs, hashes and critical files. Setup verifies the package before extraction. A hash checks integrity; it is not a package signature.
 
@@ -28,7 +30,9 @@ Use --skip-system only when the required Ubuntu libraries are already installed.
 
 ## Use
 
-After setup, reconnect the agent and ask it to inspect the existing desktop. The generated user-local LCU skill links byte-identical original Linux and Chrome guides before the first tool call. The original provider supplies dynamic instructions and capability checks during use.
+For macOS installation and Pi launch commands, see [installation](docs/INSTALLATION.md#macos-and-pi). Setup can run without prompts using explicit choices and `--yes`. macOS Screen Recording/Accessibility and unresolved browser site approvals remain the original provider's permission boundaries; `--yes` does not grant them.
+
+After setup, reconnect the agent and ask it to inspect the existing desktop. The generated user-local LCU skill links byte-identical original platform and Chrome guides before the first tool call. The original provider supplies dynamic instructions and capability checks during use.
 
 An agent starts with one documented call:
 
@@ -36,7 +40,7 @@ An agent starts with one documented call:
 await cua.getState();
 ~~~
 
-Then it can select an observed Linux window by its ID:
+On Linux it can then select an observed window by its ID:
 
 ~~~javascript
 let app = await cua.getApp({ windowId: 123 });

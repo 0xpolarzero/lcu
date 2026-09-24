@@ -1,4 +1,4 @@
-"""Launch the pinned application's original Linux computer-use provider."""
+"""Launch the selected application's original computer-use provider."""
 import json
 import os
 from pathlib import Path
@@ -16,6 +16,22 @@ def paths(root):
     descriptor = json.loads((root / 'installation.json').read_text())
     selected = Path(descriptor.get('app', ''))
     arch = descriptor.get('architecture')
+    target = descriptor.get('platform', 'linux')
+    if target == 'darwin':
+        policy = lock.get('platforms', {}).get('darwin', {})
+        entry = policy.get('architectures', {}).get(arch)
+        if (not selected.is_absolute() or not entry or
+                selected.resolve() != app.resolve() or
+                descriptor.get('package_version') != policy.get('version') or
+                descriptor.get('runtime') != policy.get('runtime')):
+            raise ValueError('Selected application descriptor does not match the macOS lock and app link.')
+        from .platforms import resolve_installed_mac_app
+        resolved = resolve_installed_mac_app(selected,
+            expected_version=policy['version'], expected_runtime=policy['runtime'],
+            expected_hashes=entry['components'], arch=arch)
+        return resolved.app, resolved.resources, resolved.runtime, policy
+    if target != 'linux':
+        raise ValueError(f'Unsupported installed application platform: {target}')
     if (not selected or selected.is_absolute() or
             (root / selected).resolve() != app.resolve() or
             arch not in lock['architectures'] or
@@ -40,8 +56,8 @@ def paths(root):
     return app, resources, runtime, lock
 
 
-def environment(root):
-    _, resources, runtime, lock = paths(root)
+def environment(root, resolved=None):
+    _, resources, runtime, lock = resolved or paths(root)
     env = dict(os.environ)
     # Original gM/nne selects and trusts CODEX_HOME verbatim, including an
     # explicitly empty value. This changes only the launched child environment.
@@ -67,6 +83,10 @@ def environment(root):
     env.setdefault('CUA_REPL_ENABLED_SURFACES', 'browser,computer')
     env.setdefault('CUA_REPL_BROWSER_ENV', 'codex-app')
     env.setdefault('CODEX_CLI_PATH', str(resources / 'codex'))
+    if resources.parent.name == 'Contents':
+        # Original Sky's macOS native-pipe transport uses this signed helper
+        # through LaunchServices when no existing CUA service is connected.
+        env.setdefault('SKY_CUA_SERVICE_PATH', str(runtime / 'lib/node_modules/@oai/sky/Codex Computer Use.app'))
     # Fixed host defaults from nne/kie in the pinned application. The unified
     # codex-app surface is selected only with browserUseTinysky in original Lre.
     env.setdefault('NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS', '1000')
@@ -126,7 +146,11 @@ def main(root, argv):
         release_path = root / 'bundle.json'
         version = json.loads(release_path.read_text())['version'] if release_path.is_file() else 'source-checkout'
         lock = json.loads((root / 'runtime.lock.json').read_text())
-        print(f"lcu {version} (ChatGPT Linux {lock['version']}; CUA {lock['runtime']})")
+        descriptor_path = root / 'installation.json'
+        descriptor = json.loads(descriptor_path.read_text()) if descriptor_path.is_file() else {}
+        target = descriptor.get('platform', 'linux')
+        policy = lock.get('platforms', {}).get(target, lock)
+        print(f"lcu {version} (ChatGPT {target} {policy['version']}; CUA {policy['runtime']})")
         return
     if argv[:1] == ['setup']:
         from .setup import main as setup
@@ -144,10 +168,11 @@ def main(root, argv):
     discovery_compat = argv == ['--mcp-discovery-compat']
     if argv and argv not in (['doctor'], ['--mcp-discovery-compat']):
         raise ValueError('Usage: lcu [setup OPTIONS | browser install | doctor | --version | --mcp-discovery-compat]')
-    _, _, runtime, _ = paths(root)
-    env = environment(root)
+    resolved = paths(root)
+    _, resources, runtime, _ = resolved
+    env = environment(root, resolved)
     if argv == ['doctor']:
-        if not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS'):
+        if resources.parent.name != 'Contents' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
             raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use lcu-session or run inside the desktop session.')
         script = 'import {handleRpc} from "@oai/sky/service"; const result = await handleRpc({type:"execute", method:"list_windows", args:[]}); console.log(JSON.stringify({windows:result}));'
         subprocess.run([str(runtime / 'bin/node'), '--input-type=module', '-e', script],

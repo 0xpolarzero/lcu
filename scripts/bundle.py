@@ -8,10 +8,11 @@ import platform
 VERSION = '0.3.0'
 
 
-def architecture():
+def architecture(target='linux'):
     arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
-    if platform.system() != 'Linux' or arch is None:
-        raise ValueError('LCU requires Linux ARM64 or x86-64.')
+    expected = {'linux': 'Linux', 'darwin': 'Darwin'}.get(target)
+    if expected is None or platform.system() != expected or arch is None:
+        raise ValueError(f'LCU requires {target} ARM64 or x86-64.')
     return arch
 
 
@@ -36,18 +37,18 @@ def inventory(root):
     return files
 
 
-def seal(root, arch):
-    manifest = {'format': 1, 'version': VERSION, 'platform': 'linux', 'architecture': arch,
+def seal(root, arch, target='linux'):
+    manifest = {'format': 1, 'version': VERSION, 'platform': target, 'architecture': arch,
                 'files': inventory(root)}
     (root / 'bundle.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
 
 
-def verify(root, arch):
+def verify(root, arch, target='linux'):
     path = root / 'bundle.json'
     if not path.is_file() or path.is_symlink():
         raise ValueError('Install from an extracted LCU release bundle. Source checkouts contain no runtime; build a release with scripts/build_bundle.py first.')
     manifest = json.loads(path.read_text())
-    if not isinstance(manifest, dict) or manifest.get('format') != 1 or manifest.get('platform') != 'linux' or manifest.get('version') != VERSION:
+    if not isinstance(manifest, dict) or manifest.get('format') != 1 or manifest.get('platform') != target or manifest.get('version') != VERSION:
         raise ValueError('Unsupported LCU bundle manifest')
     if manifest.get('architecture') != arch:
         raise ValueError(f'Bundle architecture {manifest.get("architecture")} does not match this machine ({arch})')

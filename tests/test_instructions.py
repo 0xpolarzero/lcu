@@ -93,6 +93,31 @@ class InstalledInstructionTests(unittest.TestCase):
             generate_skill(self.skill_source, self.home, self.release)
         self.assertEqual((generated / 'marker').read_text(), 'previous generation')
 
+    def test_macos_skill_selects_original_macos_guides_without_linux_guidance(self):
+        # A macOS bundle has a different resources root, but its original guides
+        # must be copied exactly as Linux guides are, never translated or edited.
+        contents = self.app / 'Contents'
+        contents.mkdir()
+        self.resources.rename(contents / 'Resources')
+        self.resources = contents / 'Resources'
+        self.modules = self.resources / 'cua_node/lib/node_modules'
+        (self.release / 'installation.json').write_text(
+            '{"platform":"darwin","app":"app"}')
+        sky = self.modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md'
+        sky.parent.mkdir(parents=True)
+        sky.write_bytes(b'complete original macOS guide\n')
+        generated = generate_skill(self.skill_source, self.home, self.release)
+        self.assertEqual(installed_app_resources(self.release), self.resources.resolve())
+        self.assertEqual((generated / 'references/upstream/sky/macos/SKILL.md').read_bytes(),
+                         sky.read_bytes())
+        self.assertEqual((generated / 'references/upstream/cua-repl/instructions/macos/description.md').read_bytes(),
+                         (self.modules / '@oai/cua-repl/instructions/macos/description.md').read_bytes())
+        self.assertFalse((generated / 'references/upstream/cua-repl/instructions/linux').exists())
+        wrapper = (generated / 'SKILL.md').read_text()
+        self.assertIn('references/upstream/sky/macos/SKILL.md', wrapper)
+        self.assertNotIn('Linux', wrapper)
+        self.assertNotIn('instructions/linux', wrapper)
+
     def test_export_contains_only_lcu_authored_bootstrap_not_upstream_payload(self):
         destination = self.root / 'export'
         with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):

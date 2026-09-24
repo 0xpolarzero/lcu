@@ -28,7 +28,7 @@ def export_files(command, host_root):
     """Native plugin files; exported skills live at the standard ./skills path."""
     original = original_plugin(host_root)
     manifest = json.loads((original / '.codex-plugin/plugin.json').read_text())
-    manifest.update(name='lcu', description='Computer use for AI agents on Linux.', skills='./skills')
+    manifest.update(name='lcu', description='Computer use through the locally installed Codex runtime.', skills='./skills')
     manifest['hooks']['hooks'] = original_hooks(host_root)
     descriptor = json.loads((original / '.mcp.json').read_text())
     server = descriptor['mcpServers'].pop('cua_repl')
@@ -77,7 +77,9 @@ def install_hooks(cli, config_path, cwd, env, host_root):
             if group not in groups:
                 groups.append(group)
     with tempfile.TemporaryDirectory(prefix='lcu-codex-config-') as temporary:
-        scratch = Path(temporary)
+        # macOS tempfile paths can use /var while Codex reports /private/var.
+        # Match the native writer's canonical source path for exact hook trust.
+        scratch = Path(temporary).resolve()
         config = scratch / 'config.toml'
         config.write_bytes(before or b'')
         # The scratch home keeps account credentials and project layers out of

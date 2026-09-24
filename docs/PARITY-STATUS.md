@@ -1,4 +1,18 @@
-# Installed-app migration status
+# Installed-app and adapter status
+
+## macOS and Pi extension, 2026-09-24
+
+The added Apple Silicon macOS installer reuses signed local ChatGPT.app 26.917.62051 in place. A real thin archive build and temporary-prefix install passed. Separate original and LCU processes matched complete MCP initialization, tools, macOS guidance, persistent JavaScript and reset in disposable homes. The original Chrome native-host installer produced all eight macOS registrations in a disposable home. These checks performed no GUI or browser actions. See [runtime comparison](verification/macos-runtime.md), [platform source evidence](verification/platform-selection.md) and [browser host checks](verification/macos-browser-host.md).
+
+The shared SDK client and Pi 0.73 extension keep the original API and MCP server. The actual Pi executable, an isolated home and a scripted local model exercised the installed macOS runtime with pure JavaScript. Tool descriptions and initialization instructions reached the model; persistent state survived two tool calls. A separate protocol fixture verified that both calls shared one agent-turn ID and cleanup ran once after the full turn. No paid model, personal credentials or personal desktop was used. [Adapter limitations](ADAPTERS.md) are explicit: Pi cannot represent audio/resource result blocks or nonempty approval forms.
+
+**Live follow-up:** the standalone macOS client completed a TextEdit click/type/screenshot/save flow, with independently verified file output and original MCP app approvals. One close shortcut behaved unexpectedly; cleanup used the original visible control. See [live native evidence](verification/macos-live-2026-09-24.md).
+
+**Open gates:** cold macOS helper startup, macOS Chrome actions, first-time OS approval delivery, and broader keyboard behavior. Windows has no implementation or inspected installed binary. The original packages contain Windows JavaScript and instructions, which alone do not prove Windows support. Do not call this complete cross-platform parity.
+
+The shared installer changes also passed fresh Linux offline gates on both architectures; see [platform regressions](verification/platform-regression.md) for artifact boundaries.
+
+## Previously verified Linux release
 
 The target is native Linux computer use and external Chrome control without a Codex sign-in, using original app 26.915.31945 / CUA 0.0.16. The versioned v0.3.0 archives passed the offline and differential release gates on ARM64 and x86-64. The installed native desktop and no-sign-in Chrome paths passed on Ubuntu 24.04.5 ARM64 and on an isolated KVM guest running on physical AMD x86-64 hardware, with AppArmor active on both. Goose 1.51.0 completed an independently hosted browser action using the opt-in MCP discovery compatibility flag; OpenCode 1.18.32 remains browser-incompatible because it did not offer MCP site approval. The Chrome header decision is a local LCU policy override, not an exact Codex account feature-gate result.
 

@@ -251,7 +251,10 @@ def installed_app_resources(release_root):
         raise ValueError(f'Installed application path is incomplete: {release_root}') from exc
     if described_app != selected_app:
         raise ValueError(f'Installed application descriptor does not match selected app: {descriptor}')
-    resources = selected_app / 'resources'
+    target = installation.get('platform', 'linux')
+    if target not in ('linux', 'darwin'):
+        raise ValueError(f'Unsupported installed application platform: {target}')
+    resources = selected_app / ('Contents/Resources' if target == 'darwin' else 'resources')
     if not resources.is_dir():
         raise ValueError(f'Installed application resources missing: {resources}')
     return resources
@@ -279,8 +282,11 @@ def _copy_resource_file(source, destination):
 
 
 def generate_skill(source, home, release_root):
-    """Materialize applicable original Linux and Chrome references user-locally."""
+    """Materialize the selected platform's original references byte for byte."""
     resources = installed_app_resources(release_root)
+    installation = json.loads((Path(release_root) / 'installation.json').read_text())
+    target = installation.get('platform', 'linux')
+    instruction_platform = {'linux': 'linux', 'darwin': 'macos'}[target]
     modules = resources / 'cua_node/lib/node_modules'
     selections = (
         (modules / '@oai/cua/docs', Path('upstream/cua/docs')),
@@ -295,10 +301,16 @@ def generate_skill(source, home, release_root):
     stage = generated_root / ('.lcu-stage-' + uuid.uuid4().hex)
     stage.mkdir()
     try:
-        (stage / 'SKILL.md').write_bytes((source / 'SKILL.md').read_bytes())
+        wrapper = (source / 'SKILL.md').read_text()
+        if target == 'darwin':
+            # Only LCU-authored bootstrap text changes. All upstream documents
+            # below are copied without altering their prose or APIs.
+            wrapper = wrapper.replace('Linux', 'macOS').replace('/linux/', '/macos/')
+            wrapper = wrapper.replace('For native macOS windows, target an exact observed window ID. ', '')
+        (stage / 'SKILL.md').write_text(wrapper)
         refs = stage / 'references'
-        # The REPL directory has inactive macOS/Windows trees; expose only shared
-        # launcher docs and the Linux branch relevant to this installation.
+        # Match upstream load_instructions(process.platform): expose shared
+        # launcher documents and the branch for the selected application.
         repl_source, repl_target = selections[1]
         for name in ('banner.js', 'browser-disabled.md', 'code.md', 'computer-disabled.md', 'reset.md', 'server.md'):
             path = repl_source / name
@@ -306,11 +318,11 @@ def generate_skill(source, home, release_root):
                 target = refs / repl_target / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, target)
-        _copy_resource_tree(repl_source / 'linux', refs / repl_target / 'linux')
+        _copy_resource_tree(repl_source / instruction_platform, refs / repl_target / instruction_platform)
         for upstream, relative in (selections[0], *selections[2:]):
             _copy_resource_tree(upstream, refs / relative)
-        _copy_resource_file(modules / '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md',
-                            refs / 'upstream/sky/linux/SKILL.md')
+        _copy_resource_file(modules / f'@oai/sky/docs/skills/oai_sky_lib/{instruction_platform}/SKILL.md',
+                            refs / f'upstream/sky/{instruction_platform}/SKILL.md')
         _copy_resource_file(modules / '@oai/sky/docs/sky-full-desktop-api.md',
                             refs / 'upstream/sky/native-api.md')
         _copy_resource_file(modules / '@oai/sky/docs/sky-window-api.md',
@@ -392,13 +404,21 @@ def export_bundle(destination, source, command, release_root):
     # Portable exports carry only LCU-authored bootstrap guidance. The original
     # application and its instruction files are resolved on the target machine.
     files = {'SKILL.md': (source / 'SKILL.md').read_bytes()}
+    installation = json.loads((Path(release_root) / 'installation.json').read_text())
+    target = installation.get('platform', 'linux')
+    native_docs = 'macos' if target == 'darwin' else 'linux'
+    resource_root = 'Contents/Resources' if target == 'darwin' else 'resources'
     manifest = {'$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
-                'name': 'lcu', 'description': 'Computer use for AI agents on Linux.'}
+                'name': 'lcu', 'description': 'Computer use through the locally installed Codex runtime.'}
     # A cross-machine export cannot retain the producer's prefix or account.
     # Resolve the destination's selected release when its MCP client starts.
-    launch = ('set -eu; prefix=${LCU_PREFIX:-/opt/lcu}; '
+    launch = ('set -eu; case "$(uname -s)" in '
+              'Darwin) default_prefix="$HOME/.local/share/lcu"; default_session=direct;; '
+              'Linux) default_prefix=/opt/lcu; default_session=discover;; '
+              '*) echo "Unsupported LCU platform" >&2; exit 2;; esac; '
+              'prefix=${LCU_PREFIX:-$default_prefix}; '
               'case "$prefix" in /*) ;; *) echo "LCU_PREFIX must be absolute" >&2; exit 2;; esac; '
-              'case "${LCU_SESSION_MODE:-discover}" in '
+              'case "${LCU_SESSION_MODE:-$default_session}" in '
               'direct) exec "$prefix/current/bin/lcu" "$@";; '
               'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
               '"$prefix/current/bin/lcu" "$@";; '
@@ -411,19 +431,19 @@ def export_bundle(destination, source, command, release_root):
                Change(destination / 'host-contract.json', None, (json.dumps(host_policy(release_root), indent=2) + '\n').encode())]
     bootstrap_metadata = {
         'requiresInstalledApplication': True,
-        'applicationResourceRoot': 'resources',
+        'applicationResourceRoot': resource_root,
         'instructionSources': [
-            'resources/cua_node/lib/node_modules/@oai/cua/docs',
-            'resources/cua_node/lib/node_modules/@oai/cua-repl/instructions/linux',
-            'resources/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app',
-            'resources/cua_node/lib/node_modules/@oai/sky/docs/skills/oai_sky_lib/linux',
-            'resources/cua_node/lib/node_modules/@oai/sky/docs/sky-full-desktop-api.md',
-            'resources/plugins/openai-bundled/plugins/chrome/docs',
-            'resources/plugins/openai-bundled/plugins/chrome/skills/control-chrome',
+            f'{resource_root}/cua_node/lib/node_modules/@oai/cua/docs',
+            f'{resource_root}/cua_node/lib/node_modules/@oai/cua-repl/instructions/{native_docs}',
+            f'{resource_root}/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app',
+            f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/skills/oai_sky_lib/{native_docs}',
+            f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/sky-full-desktop-api.md',
+            f'{resource_root}/plugins/openai-bundled/plugins/chrome/docs',
+            f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome',
         ],
-        'destinationSetup': 'Install the thin LCU archive and pinned application, then run lcu setup --export /new/path --yes on that Linux account. Import the newly generated export and its local full skill.',
-        'runtimePrefix': 'Set LCU_PREFIX on the destination when it is not /opt/lcu.',
-        'sessionMode': 'Set LCU_SESSION_MODE=direct when the agent already has DISPLAY and D-Bus; default is discover.',
+        'destinationSetup': 'Install the matching thin LCU archive and selected application, then run lcu setup --export /new/path --yes on the destination account. Import the newly generated export and its local full skill.',
+        'runtimePrefix': 'Set LCU_PREFIX for a nondefault destination prefix: /opt/lcu on Linux, $HOME/.local/share/lcu on macOS.',
+        'sessionMode': 'Linux defaults to XFCE discovery; set LCU_SESSION_MODE=direct inside its desktop session. macOS defaults to direct.',
         'preCallRequirement': 'Generate and register the local skill before the first computer-use call.',
     }
     changes.append(Change(destination / 'lcu-bootstrap.json', None,
@@ -438,7 +458,7 @@ def export_bundle(destination, source, command, release_root):
     changes += [Change(destination / name, None, data)
                 for name, data in export_files(portable_command, original_plugins).items()]
     bootstrap = ("# LCU skill bootstrap\n\n"
-                 "Install LCU and its pinned application on this Linux machine, then run "
+                 "Install LCU and its selected application on this machine, then run "
                  "`lcu setup --export /new/path --yes` here and import that new export. "
                  "Use the generated local full skill before the first computer-use call.\n")
     files['SKILL.md'] = bootstrap.encode()
@@ -448,15 +468,17 @@ def export_bundle(destination, source, command, release_root):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, epilog='Run on the machine hosting the agent backend. For Codex SSH remote projects, that is the VM. This command never installs or authenticates the agent itself.')
-    p.add_argument('--prefix', type=Path, default=Path('/opt/lcu'), help='Managed runtime prefix (default: /opt/lcu)')
-    p.add_argument('--user', help='Target Linux account; root must select one explicitly')
+    p.add_argument('--prefix', type=Path,
+                   default=Path.home() / '.local/share/lcu' if sys.platform == 'darwin' else Path('/opt/lcu'),
+                   help='Runtime prefix (Linux: /opt/lcu; macOS: ~/.local/share/lcu)')
+    p.add_argument('--user', help='Target account; root must select one explicitly')
     p.add_argument('--agent', action='append', default=[], help='Agent ID; repeat for several, all for every supported client, or auto for detected clients. Use --list-agents.')
     p.add_argument('--scope', choices=['user', 'project'], default='user')
     p.add_argument('--project', type=Path, help='Absolute existing project directory for project scope')
     p.add_argument('--yes', action='store_true', help='Apply explicit choices without a confirmation prompt')
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
-    p.add_argument('--session', choices=['discover', 'direct'], default='discover', help='discover attaches through lcu-session (XFCE); direct inherits agent desktop environment')
+    p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform == 'darwin' else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
@@ -474,7 +496,7 @@ def validate(args):
     try:
         account = pwd.getpwnam(args.user) if args.user else pwd.getpwuid(os.getuid())
     except KeyError:
-        raise ValueError('The selected Linux account does not exist. Create it before setup.') from None
+        raise ValueError('The selected account does not exist. Create it before setup.') from None
     if os.getuid() not in (0, account.pw_uid):
         raise ValueError('Run as the selected account or root.')
     if not Path(account.pw_dir).is_absolute() or not Path(account.pw_dir).is_dir():
@@ -607,7 +629,7 @@ def main(argv=None):
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.export:
-            print('Import this plugin with a compatible client, or use its mcp.json and skills/lcu with your custom agent. Its command runs on this Linux machine.')
+            print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         if args.check_desktop:
             print('Checking the live desktop...')
             doctor = command + ['doctor']

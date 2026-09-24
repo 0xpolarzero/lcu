@@ -1,8 +1,32 @@
 # Installation
 
-LCU runs on an existing Ubuntu 24.04-compatible glibc Linux desktop. Supported CPU architectures are ARM64 and x86-64. The target account must exist and own an X11 desktop with D-Bus. Native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. LCU does not install a desktop, create a VM, sign into ChatGPT, or change the browser's default profile.
+LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64. The added macOS Apple Silicon path reuses a signed local app; its live desktop gate remains open. The target account must exist and own an X11 desktop with D-Bus. Native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. LCU does not install a desktop, create a VM, sign into ChatGPT, or change the browser's default profile.
 
-## Acquire and install
+## macOS and Pi
+
+Build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, and run as the intended desktop account:
+
+~~~sh
+./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
+~~~
+
+This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture; Windows is unimplemented.
+
+Pi uses a native extension instead of requiring built-in MCP support. Install LCU with `--runtime-only`, then generate its account-local skill and register the original Chrome native host:
+
+~~~sh
+~/.local/share/lcu/current/bin/lcu setup --export "$HOME/lcu-bootstrap" --yes
+~/.local/share/lcu/current/bin/lcu browser install
+LCU_MCP_COMMAND="[\"$HOME/.local/share/lcu/current/bin/lcu\"]" \
+  pi -e "$HOME/.local/share/lcu/current/adapters/pi/index.ts" \
+  --skill "$HOME/.local/share/lcu/skills/lcu/SKILL.md"
+~~~
+
+Choose an unused export directory. The export is a portable bootstrap; the `--skill` path above contains the original local instructions. Linux can use the same extension with the `lcu-session` command shown in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
+
+Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS Screen Recording or Accessibility: those permissions belong to the original signed Codex Computer Use helper and may require approval in System Settings. Browser extension installation and unresolved site approvals also remain required. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
+
+## Linux: acquire and install
 
 Extract an architecture-matching thin LCU archive. Install as root for automatic Ubuntu libraries:
 
@@ -45,7 +69,7 @@ The default --session discover mode attaches to exactly one existing XFCE sessio
 /opt/lcu/current/bin/lcu doctor
 ~~~
 
-For Chrome, the selected browser and extension must run under the same Linux account as LCU. Agent setup installs the original native host for that account. To refresh it, run:
+For Chrome, the selected browser and extension must run under the same desktop account as LCU. Agent setup installs the original native host for that account. To refresh it, run:
 
 ~~~sh
 /opt/lcu/current/bin/lcu browser install

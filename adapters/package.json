@@ -1,0 +1,23 @@
+{
+  "name": "lcu-harness-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.73.0",
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": { "optional": true },
+    "@sinclair/typebox": { "optional": true }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "pi": {
+    "extensions": ["./pi/index.ts"]
+  }
+}

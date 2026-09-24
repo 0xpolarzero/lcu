@@ -64,13 +64,15 @@ def validate_release(release, account=None):
             raise ValueError(f'Cannot validate the installation as {account.pw_name} from this account')
     subprocess.run([str(release / 'bin/lcu'), '--version'], check=True, timeout=20,
                    env=env, **user_options)
-    runtime = release / 'app/resources/cua_node'
+    runtime = setup.installed_app_resources(release) / 'cua_node'
     subprocess.run([str(runtime / 'bin/node_repl'), '--help'], check=True, timeout=20,
                    stdout=subprocess.DEVNULL, env=env, **user_options)
     env['NODE_REPL_DISABLE_ANALYTICS'] = '1'
+    target = json.loads((release / 'installation.json').read_text()).get('platform', 'linux')
     subprocess.run([str(runtime / 'bin/node'), '--input-type=module', '-e',
-                    'const s = await import(process.argv[1]); const r = await s.handleRpc({type:"setup"}); if(r.target!=="linux") throw Error("Wrong platform");',
-                    (runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js').as_uri()], env=env,
+                    'const s = await import(process.argv[1]); const r = await s.handleRpc({type:"setup"}); if(r.target!==process.argv[2]) throw Error("Wrong platform");',
+                    (runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js').as_uri(),
+                    'mac' if target == 'darwin' else 'linux'], env=env,
                    check=True, timeout=20, **user_options)
 
 
@@ -82,6 +84,17 @@ def install(prefix, *, app_package=None, existing_app=None, offline=False, accou
     application, generation = provision_app(prefix, arch, package=app_package,
                                            existing_app=existing_app, offline=offline, root=SOURCE,
                                            account=account)
+    lock_data = json.loads((SOURCE / 'runtime.lock.json').read_text())
+    return select_release(prefix, arch, application, {
+        'package_version': lock_data['version'], 'architecture': arch,
+        'sha256': lock_data['architectures'][arch]['sha256'],
+    }, account=account)
+
+
+def select_release(prefix, arch, application, descriptor, *, account=None,
+                   target='linux', source=None):
+    """Publish one validated thin release; installed application files stay put."""
+    source = Path(source) if source is not None else SOURCE
     with (prefix / '.lcu-install').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         releases = prefix / 'releases'
@@ -89,16 +102,12 @@ def install(prefix, *, app_package=None, existing_app=None, offline=False, accou
         release = releases / (VERSION + '-' + uuid.uuid4().hex[:12])
         release.mkdir(mode=0o755)
         try:
-            shutil.copytree(SOURCE, release, dirs_exist_ok=True, symlinks=True)
-            verify(release, arch)
-            app_relative = os.path.relpath(application, release)
+            shutil.copytree(source, release, dirs_exist_ok=True, symlinks=True)
+            verify(release, arch, target)
+            app_relative = str(application) if target == 'darwin' else os.path.relpath(application, release)
             (release / 'app').symlink_to(app_relative, target_is_directory=True)
-            lock_data = json.loads((SOURCE / 'runtime.lock.json').read_text())
-            app_entry = lock_data['architectures'][arch]
-            (release / 'installation.json').write_text(json.dumps({
-                'package_version': lock_data['version'], 'architecture': arch,
-                'sha256': app_entry['sha256'], 'app': app_relative,
-            }, indent=2) + '\n')
+            (release / 'installation.json').write_text(json.dumps(
+                {**descriptor, 'app': app_relative}, indent=2) + '\n')
             validate_release(release, account)
             current = prefix / 'current'
             if current.exists() and not current.is_symlink():

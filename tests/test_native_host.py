@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lcu.native_host import _enable_agent_header, _read_frame, _relay
+from lcu.native_host import _enable_agent_header, _original_host, _read_frame, _relay
 
 
 class NativeHostRelayTests(unittest.TestCase):
@@ -45,6 +47,33 @@ class NativeHostRelayTests(unittest.TestCase):
     def test_truncated_native_message_fails_closed(self):
         with self.assertRaisesRegex(ValueError, 'Short native-message body'):
             _read_frame(io.BytesIO(struct.pack('<I', 20) + b'partial'))
+
+    def test_original_host_selects_installed_platform_binary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            relay = Path(temporary) / 'lcu-native-host'
+            relay.write_text('fixture')
+            for system, machine, segment, name in (
+                ('Linux', 'x86_64', 'linux/x64', 'extension-host'),
+                ('Linux', 'aarch64', 'linux/arm64', 'extension-host'),
+                ('Darwin', 'arm64', 'macos/arm64', 'ChatGPT for Chrome'),
+                ('Darwin', 'x86_64', 'macos/x64', 'ChatGPT for Chrome'),
+            ):
+                expected = relay.parent / 'chrome/extension-host' / segment / name
+                expected.parent.mkdir(parents=True, exist_ok=True)
+                expected.write_text('fixture')
+                with self.subTest(system=system, machine=machine), \
+                        mock.patch('lcu.native_host.__file__', str(relay)), \
+                        mock.patch('lcu.native_host.platform.system', return_value=system), \
+                        mock.patch('lcu.native_host.platform.machine', return_value=machine):
+                    self.assertEqual(_original_host(), expected.resolve())
+
+    def test_missing_original_host_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch('lcu.native_host.__file__', str(Path(temporary) / 'relay')), \
+                mock.patch('lcu.native_host.platform.system', return_value='Darwin'), \
+                mock.patch('lcu.native_host.platform.machine', return_value='arm64'):
+            with self.assertRaisesRegex(ValueError, 'original Chrome native host is missing'):
+                _original_host()
 
 
 if __name__ == '__main__':

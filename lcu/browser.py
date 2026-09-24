@@ -4,21 +4,52 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import tempfile
 
 
-def install(root, directory=None):
-    from .runtime import environment
+_MACOS_NATIVE_HOST_DIRS = (
+    'Google/Chrome', 'Chromium', 'Google/ChromeForTesting',
+    'Google/Chrome for Testing', 'Microsoft Edge',
+    'BraveSoftware/Brave-Browser', 'com.operasoftware.Opera', 'Vivaldi',
+)
 
-    # `app` is the installed complete application, including its original
-    # plugin resources. Resolve through it so packaged layouts do not need a
-    # second mutable plugin tree beside the sealed application.
-    source = root / 'app/resources/plugins/openai-bundled/plugins/chrome'
+
+def _manifest_paths(env, system):
+    home = Path(env.get('HOME', Path.home()))
+    name = 'com.openai.codexextension.json'
+    if system == 'Darwin':
+        # These are the per-user destinations in the original Chrome plugin's
+        # installManifest.mjs for macOS. Do not inspect system-wide registrations.
+        support = home / 'Library/Application Support'
+        return {support / browser / 'NativeMessagingHosts' / name
+                for browser in _MACOS_NATIVE_HOST_DIRS}
+    config_roots = {home / '.config'}
+    for key in ('XDG_CONFIG_HOME', 'CHROME_CONFIG_HOME'):
+        if env.get(key):
+            config_roots.add(Path(env[key]))
+    paths = set()
+    for config_root in config_roots:
+        paths.update(config_root.glob(f'*/NativeMessagingHosts/{name}'))
+        paths.update(config_root.glob(f'*/*/NativeMessagingHosts/{name}'))
+    return paths
+
+
+def install(root, directory=None):
+    from .runtime import environment, paths
+
+    system = platform.system()
+    if system not in ('Linux', 'Darwin'):
+        raise ValueError('The original Chrome native host is supported on Linux and macOS only.')
     # The upstream installer writes its host configuration beside the executable.
     # Keep the sealed release immutable; give this account a private host copy.
-    data = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
+    home = Path(os.environ.get('HOME', Path.home()))
+    if system == 'Darwin':
+        data = home / 'Library/Application Support'
+    else:
+        data = Path(os.environ.get('XDG_DATA_HOME', home / '.local/share'))
     selected_app = (root / 'app').resolve()
     identity = hashlib.sha256(str(selected_app).encode()).hexdigest()[:16]
     destination = Path(directory).expanduser().absolute() if directory else data / 'lcu/browser' / identity
@@ -32,7 +63,12 @@ def install(root, directory=None):
         installed_plugin = destination / 'chrome'
         if not (installed_plugin / 'scripts/installManifest.mjs').is_file():
             raise ValueError('The private browser host copy is incomplete or corrupt; remove it and run `lcu browser install` again.')
-    else:
+    selected = paths(root)
+    env = environment(root, selected)
+    # Runtime selection returns the original resource tree. Linux stores it
+    # under app/resources; macOS stores it under app/Contents/Resources.
+    source = selected[1] / 'plugins/openai-bundled/plugins/chrome'
+    if not destination.exists():
         if not (source / 'scripts/installManifest.mjs').is_file():
             raise ValueError('The complete upstream Chrome plugin is missing from this bundle.')
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -56,7 +92,6 @@ def install(root, directory=None):
         staged_path.replace(relay)
     finally:
         staged_path.unlink(missing_ok=True)
-    env = environment(root)
     script = ('const {install} = await import(process.argv[1]); '
               'await install({appServerRuntimePaths:{codexCliPath:process.env.CODEX_CLI_PATH,'
               'nodePath:process.env.NODE_REPL_NODE_PATH,nodeReplPath:process.env.CUA_REPL_NODE_REPL_PATH}});')
@@ -66,22 +101,17 @@ def install(root, directory=None):
     # The pinned original installer returns no manifest list. Locate only its
     # native-host manifest name at the documented config depths, then require
     # each candidate to point at this selected private copy before changing it.
-    config_roots = {Path(env.get('HOME', Path.home())) / '.config'}
-    for key in ('XDG_CONFIG_HOME', 'CHROME_CONFIG_HOME'):
-        if env.get(key):
-            config_roots.add(Path(env[key]))
-    manifest_paths = set()
-    name = 'com.openai.codexextension.json'
-    for config_root in config_roots:
-        manifest_paths.update(config_root.glob(f'*/NativeMessagingHosts/{name}'))
-        manifest_paths.update(config_root.glob(f'*/*/NativeMessagingHosts/{name}'))
+    manifest_paths = _manifest_paths(env, system)
+    host_name = 'extension-host' if system == 'Linux' else 'ChatGPT for Chrome'
     changed = 0
     for manifest_path in sorted(manifest_paths):
         if manifest_path.is_symlink():
             raise ValueError(f'Native-host manifest must be a regular file: {manifest_path}')
+        if not manifest_path.is_file():
+            continue
         manifest = json.loads(manifest_path.read_text())
         original = Path(manifest.get('path', ''))
-        if (original.name != 'extension-host' or
+        if (original.name != host_name or
                 not original.resolve().is_relative_to((destination / 'chrome/extension-host').resolve())):
             continue
         manifest['path'] = str(relay)
@@ -104,12 +134,12 @@ def install(root, directory=None):
 def main(root, argv):
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest='action', required=True)
-    setup = subparsers.add_parser('install', help='Install the original native host for the current Linux account')
-    setup.add_argument('--directory', type=Path, help='Private writable host directory (default: XDG data directory)')
+    setup = subparsers.add_parser('install', help='Install the original native host for the current desktop account')
+    setup.add_argument('--directory', type=Path, help='Private writable host directory')
     if argv[:1] in (['serve'], ['protocol']):
         parser.error('the in-app browser host and codex:// protocol commands were removed; use the installed app browser. For external Chrome, run `lcu browser install` and enable the official ChatGPT extension.')
     args = parser.parse_args(argv)
     destination = install(root, args.directory)
     print(f'LCU browser native host configured: {destination}')
     print('Install or enable the official ChatGPT browser extension in the browser you want to use.')
-    print('The extension and browser must run under this same Linux account. See docs/INSTALLATION.md.')
+    print('The extension and browser must run under this same desktop account. See docs/INSTALLATION.md.')

@@ -1,6 +1,6 @@
 # Development and validation
 
-LCU releases are thin architecture-specific tarballs. The official ChatGPT Linux app is acquired on the target Linux machine during installation and is never part of the archive. [runtime.lock.json](../runtime.lock.json) pins app 26.915.31945, runtime 0.0.16/20260915001755-492f19756c31, package SHA-256 values and critical component hashes.
+LCU releases are thin platform/architecture-specific tarballs. The official app is never part of an archive. Linux installation acquires app 26.915.31945; macOS reuses locally installed app 26.917.62051. [runtime.lock.json](../runtime.lock.json) pins both and CUA runtime 0.0.16/20260915001755-492f19756c31. macOS also verifies the OpenAI signature and original signed native helper before execution.
 
 ## Build
 
@@ -11,6 +11,16 @@ python3 scripts/build_bundle.py --output dist
 ~~~
 
 The builder creates a tarball and SHA-256 sidecar. It provisions the fixed third-party agent registration tools and links their Node executable to the application that setup selects later. It does not download or extract the OpenAI app. Build-time --package is retired; pass --app-package to scripts/install.sh on the target machine.
+
+On Apple Silicon macOS, with the pinned app already installed and `npm` available:
+
+~~~sh
+python3 scripts/build_bundle.py --platform darwin --app /Applications/ChatGPT.app --output dist
+~~~
+
+Both archives include the same shared MCP SDK client and Pi extension. The macOS archive adds only app resolution, signature validation and installation dispatch. The builder uses the verified app's Node and the host's npm CLI to install locked registration and adapter dependencies. It does not install or alter the app.
+
+Run adapter checks with `npm test --prefix adapters`. [Mac runtime verification](verification/macos-runtime.md) distinguishes transport/instruction checks from live native control. A sandbox that prevents `codesign` reading signing services or prohibits nested `sandbox-exec` cannot perform those checks; preserve original sandbox settings and run verification in an appropriate host environment.
 
 Before publishing, inspect the tar member list and unpacked tree. They must contain LCU-owned launchers, wrapper skill, lock/installer metadata and redistributable registration dependencies only. They must not contain app binaries, upstream instruction copies, generated app fragments, profiles or tokens. Portable exports have the same no-OpenAI-payload requirement.
 

@@ -37,5 +37,24 @@
         "resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json": "e7297a8851d46bb5d7f53d57e82d86cfdf4b04524bedf8c2ce6cf4a80ffe71da"
       }
     }
+  },
+  "platforms": {
+    "darwin": {
+      "version": "26.917.62051",
+      "runtime": "0.0.16/20260915001755-492f19756c31",
+      "architectures": {
+        "arm64": {
+          "components": {
+            "Resources/cua_node/bin/node": "185e384f0784005202c0ad19c569f6764c6109f1c9903a36417578d28322f68a",
+            "Resources/cua_node/bin/node_repl": "14989930cde236c46cd4731891197356c39670787355e061fb7050590e379aef",
+            "Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs": "992174a5e637645aeb444adfdb1bae688e997bb84d7db07532f68e358e60f278",
+            "Resources/codex": "c67698d0990aae05211d9c43ab343ad9517e406824dea77eca103a2806232b3a",
+            "Resources/codex-code-mode-host": "fbdee92a9ed9dd5f6388499d10c98b3628fb74d7cbeb91cc470083e08bc2005a",
+            "Resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json": "e7297a8851d46bb5d7f53d57e82d86cfdf4b04524bedf8c2ce6cf4a80ffe71da",
+            "Resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json": "32721dd4b86cd0e5306266056d0eddc3192d92cd6a6b93ff1a0e08013c503420"
+          }
+        }
+      }
+    }
   }
 }

@@ -1,5 +1,6 @@
 """LCU names mapped to upstream installers; configuration formats belong upstream."""
 from dataclasses import dataclass
+import sys
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,9 @@ CLIENTS = {
     'cursor': Client('Cursor', 'cursor', '.cursor', 'cursor', 'cursor'),
     'gemini-cli': Client('Gemini CLI', 'gemini', '.gemini', 'gemini-cli', 'gemini-cli'),
     'opencode': Client('OpenCode', 'opencode', '.config/opencode', 'opencode', 'opencode'),
-    'vscode': Client('VS Code (default local Linux profile)', 'code', '.config/Code', 'github-copilot', 'vscode'),
+    'vscode': Client('VS Code (default local profile)', 'code',
+                     'Library/Application Support/Code' if sys.platform == 'darwin' else '.config/Code',
+                     'github-copilot', 'vscode'),
     'copilot-cli': Client('GitHub Copilot CLI', 'copilot', '.copilot', 'github-copilot', 'github-copilot-cli'),
 }
 

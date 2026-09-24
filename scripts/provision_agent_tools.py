@@ -30,26 +30,36 @@ def download(url, destination, expected):
         raise ValueError('Node download integrity check failed; refusing to execute it.')
 
 
-def provision(release, source):
+def provision(release, source, *, target='linux', mac_node=None, adapters_source=None):
     architecture = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
-    if platform.system() != 'Linux' or architecture is None:
-        raise ValueError('Agent installer runtime requires Linux arm64 or x64.')
+    expected_system = {'linux': 'Linux', 'darwin': 'Darwin'}.get(target)
+    if expected_system is None or platform.system() != expected_system or architecture is None:
+        raise ValueError(f'Agent installer runtime requires {target} arm64 or x64.')
     destination = release / 'agent-tools'
     destination.mkdir()
     # Keep download/cache off /tmp (often a small tmpfs in VM images).
     try:
         with tempfile.TemporaryDirectory(prefix='.agent-tools-', dir=release) as temporary:
             scratch = Path(temporary)
-            name = f'node-v{NODE_VERSION}-linux-{architecture}'
-            archive = scratch / 'node.tar.xz'
-            download(f'https://nodejs.org/dist/v{NODE_VERSION}/{name}.tar.xz', archive, NODE_SHA256[architecture])
-            with tarfile.open(archive, 'r:xz') as bundle:
-                bundle.extractall(scratch, filter='data')
-            (scratch / name).rename(destination / 'node')
+            if target == 'linux':
+                name = f'node-v{NODE_VERSION}-linux-{architecture}'
+                archive = scratch / 'node.tar.xz'
+                download(f'https://nodejs.org/dist/v{NODE_VERSION}/{name}.tar.xz', archive, NODE_SHA256[architecture])
+                with tarfile.open(archive, 'r:xz') as bundle:
+                    bundle.extractall(scratch, filter='data')
+                (scratch / name).rename(destination / 'node')
+                node = destination / 'node/bin/node'
+                npm = destination / 'node/lib/node_modules/npm/bin/npm-cli.js'
+            else:
+                node = Path(mac_node) if mac_node is not None else None
+                npm_command = shutil.which('npm')
+                npm = Path(npm_command).resolve() if npm_command else None
+                if node is None or not node.is_file() or not os.access(node, os.X_OK):
+                    raise ValueError('A verified installed macOS CUA Node executable is required.')
+                if npm is None or not npm.is_file():
+                    raise ValueError('A local npm CLI is required to build the macOS agent tools.')
             for filename in ('package.json', 'package-lock.json'):
                 shutil.copyfile(source / filename, destination / filename)
-            node = destination / 'node/bin/node'
-            npm = destination / 'node/lib/node_modules/npm/bin/npm-cli.js'
             # Do not read caller npmrc, use their cache, or install globally.
             environment = {
                 'PATH': str(node.parent) + ':/usr/bin:/bin',
@@ -58,10 +68,10 @@ def provision(release, source):
                 'NPM_CONFIG_GLOBALCONFIG': str(scratch / 'global.npmrc'),
                 'NPM_CONFIG_UPDATE_NOTIFIER': 'false',
             }
-            subprocess.run([str(node), str(npm), 'ci', '--prefix', str(destination),
+            subprocess.run([str(node), str(npm), 'ci',
                             '--cache', str(scratch / 'npm-cache'), '--ignore-scripts',
                             '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'],
-                           cwd=scratch, env=environment, check=True, timeout=180)
+                           cwd=destination, env=environment, check=True, timeout=180)
             expected = json.loads((destination / 'package.json').read_text())['dependencies']
             for package, entry in (('skills', 'bin/cli.mjs'), ('add-mcp', 'dist/index.js')):
                 metadata = json.loads((destination / 'node_modules' / package / 'package.json').read_text())
@@ -69,13 +79,34 @@ def provision(release, source):
                     raise ValueError(f'Unexpected installed {package} version.')
                 subprocess.run([str(node), str(destination / 'node_modules' / package / entry), '--version'],
                                cwd=scratch, env=environment, check=True, timeout=20)
+            if adapters_source is not None:
+                adapters = release / 'adapters'
+                adapters.mkdir()
+                for filename in ('package.json', 'package-lock.json', 'client.mjs'):
+                    shutil.copy2(adapters_source / filename, adapters / filename)
+                (adapters / 'pi').mkdir()
+                shutil.copy2(adapters_source / 'pi/index.ts', adapters / 'pi/index.ts')
+                subprocess.run([str(node), str(npm), 'ci',
+                                '--cache', str(scratch / 'npm-cache'), '--omit=dev', '--omit=peer',
+                                '--ignore-scripts', '--no-audit', '--no-fund',
+                                '--registry=https://registry.npmjs.org'],
+                               cwd=adapters, env=environment, check=True, timeout=180)
+                expected_sdk = json.loads((adapters / 'package.json').read_text())['dependencies']['@modelcontextprotocol/sdk']
+                installed_sdk = json.loads((adapters / 'node_modules/@modelcontextprotocol/sdk/package.json').read_text())['version']
+                if installed_sdk != expected_sdk:
+                    raise ValueError('Unexpected installed MCP SDK version.')
             # Registration uses the official CUA Node selected at install time.
             # npm is only a build dependency; keep no second Node distribution.
-            shutil.rmtree(destination / 'node')
+            if target == 'linux':
+                shutil.rmtree(destination / 'node')
             (destination / 'node/bin').mkdir(parents=True)
-            (destination / 'node/bin/node').symlink_to('../../../app/resources/cua_node/bin/node')
+            selected_node = ('../../../app/resources/cua_node/bin/node' if target == 'linux'
+                             else '../../../app/Contents/Resources/cua_node/bin/node')
+            (destination / 'node/bin/node').symlink_to(selected_node)
     except BaseException:
         shutil.rmtree(destination)
+        if adapters_source is not None:
+            shutil.rmtree(release / 'adapters', ignore_errors=True)
         raise
 
 
@@ -83,5 +114,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release', type=Path, required=True)
     parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parent / 'agent-tools')
+    parser.add_argument('--target', choices=('linux', 'darwin'), default='linux')
+    parser.add_argument('--mac-node', type=Path)
+    parser.add_argument('--adapters-source', type=Path)
     arguments = parser.parse_args()
-    provision(arguments.release.resolve(), arguments.source.resolve())
+    provision(arguments.release.resolve(), arguments.source.resolve(), target=arguments.target,
+              mac_node=arguments.mac_node, adapters_source=arguments.adapters_source)
