@@ -13,4 +13,6 @@ Use the original `cua` entrypoints and only capabilities shown by the connected 
 
 The original [Chrome plugin skill](references/upstream/chrome/skill/SKILL.md) and [Chrome plugin docs](references/upstream/chrome/docs) remain available byte-for-byte as references to that separate plugin mode. Its legacy `setupBrowserRuntime()` and `agent.browsers` instructions do not describe LCU's unified `cua` runtime; follow the entrypoints and returned docs above.
 
+For standalone Chrome setup failures, run `lcu browser status` and, if the native host is missing, `lcu browser install` as the desktop account. Enable the official extension in the chosen browser profile; Codex's Settings and Browser-plugin reinstall instructions apply only inside Codex.
+
 This skill's references are generated from the selected installed Linux application during setup. If they are missing, run `lcu setup` on the Linux machine that hosts the agent.

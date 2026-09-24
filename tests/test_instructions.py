@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lcu.setup import configure, export_bundle, generate_skill, host_policy, installed_app_resources, parser, validate
+from lcu.setup_clients import CLIENTS
 
 class InstalledInstructionTests(unittest.TestCase):
     def setUp(self):
@@ -177,6 +178,35 @@ class InstalledInstructionTests(unittest.TestCase):
                                  environ={'HOME': str(self.home)})
         self.assertEqual(failures, [])
         self.assertEqual(len(calls), 2)
+
+    def test_pi_registration_uses_original_skill_and_offline_local_package(self):
+        self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi'})
+        tool_root = self.root / 'agent-tools'
+        node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
+        (self.release / 'adapters/pi').mkdir(parents=True)
+        (self.release / 'adapters/pi/index.ts').write_text('fixture')
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            if argv[1:3] == [str(skill_cli), 'add']:
+                self.assertIn('--agent', argv)
+                self.assertEqual(argv[argv.index('--agent') + 1], 'pi')
+                self.assertIn('--copy', argv)
+                return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
+            self.assertEqual(argv[1:3], ['install', str(self.release / 'adapters')])
+            self.assertEqual(kwargs['env']['PI_OFFLINE'], '1')
+            return SimpleNamespace(returncode=0, stdout='Installed')
+
+        with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
+                patch('lcu.setup.shutil.which', return_value='/bin/pi'), \
+                patch('lcu.setup.subprocess.run', side_effect=run):
+            failures = configure(['pi'], self.home, self.skill_source,
+                                 ['/usr/bin/lcu'], tool_root, self.release,
+                                 environ={'HOME': str(self.home)})
+        self.assertEqual(failures, [])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1][0][0], '/bin/pi')
 
     def test_selected_app_descriptor_and_resources_are_required(self):
         self.assertEqual(installed_app_resources(self.release), self.resources.resolve())

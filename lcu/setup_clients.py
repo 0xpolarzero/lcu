@@ -1,6 +1,5 @@
 """LCU names mapped to upstream installers; configuration formats belong upstream."""
 from dataclasses import dataclass
-import sys
 
 
 @dataclass(frozen=True)
@@ -15,13 +14,7 @@ class Client:
 CLIENTS = {
     'codex': Client('Codex', 'codex', '.codex', 'codex', 'codex'),
     'claude-code': Client('Claude Code', 'claude', '.claude.json', 'claude-code', 'claude-code'),
-    'cursor': Client('Cursor', 'cursor', '.cursor', 'cursor', 'cursor'),
-    'gemini-cli': Client('Gemini CLI', 'gemini', '.gemini', 'gemini-cli', 'gemini-cli'),
-    'opencode': Client('OpenCode', 'opencode', '.config/opencode', 'opencode', 'opencode'),
-    'vscode': Client('VS Code (default local profile)', 'code',
-                     'Library/Application Support/Code' if sys.platform == 'darwin' else '.config/Code',
-                     'github-copilot', 'vscode'),
-    'copilot-cli': Client('GitHub Copilot CLI', 'copilot', '.copilot', 'github-copilot', 'github-copilot-cli'),
+    'pi': Client('Pi', 'pi', '.pi/agent', 'pi', 'pi'),
 }
 
-ALIASES = {'claude': 'claude-code', 'gemini': 'gemini-cli', 'copilot': 'copilot-cli'}
+ALIASES = {'claude': 'claude-code'}

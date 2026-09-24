@@ -49,6 +49,11 @@ for scope in ('user', 'project'):
     assert all(p.read_bytes() == before for p, before in stable.items()), 'Codex formatting did not converge'
 assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
 assert 'mcp_servers.lcu' in codex.read_text()
+pi_settings = home / '.pi/agent/settings.json'
+assert pi_settings.is_file(), 'Pi local extension must be registered by its own package manager'
+pi_packages = json.loads(pi_settings.read_text())['packages']
+assert any((pi_settings.parent / item).resolve() == (prefix / 'current/adapters').resolve()
+           for item in pi_packages if isinstance(item, str), pi_packages
 browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
 assert len(browser_hosts) == 1, 'Setup must install one original native host for this account'
 assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()
@@ -98,14 +103,14 @@ upstream_sample = (module_root / '@oai/cua/docs/tinysky-alt-core-cua-repl.md').r
 assert upstream_sample not in b'\n'.join(p.read_bytes() for p in export.rglob('*') if p.is_file())
 subprocess.run(['runuser', '-u', account, '--', 'python3',
                 '/src/tests/portable_consumer.py', str(export)], check=True)
-# A malformed existing config must be left byte-for-byte intact.
-cursor = home / '.cursor/mcp.json'
-before = cursor.read_bytes()
+# A malformed existing supported-agent config must be left byte-for-byte intact.
+claude = home / '.claude.json'
+before = claude.read_bytes()
 try:
-    cursor.write_bytes(b'{ not valid JSONC')
-    failed = subprocess.run([command, 'setup', '--user', account, '--agent', 'cursor', '--yes'], capture_output=True)
+    claude.write_bytes(b'{ not valid JSONC')
+    failed = subprocess.run([command, 'setup', '--user', account, '--agent', 'claude-code', '--yes'], capture_output=True)
     assert failed.returncode != 0
-    assert cursor.read_bytes() == b'{ not valid JSONC'
+    assert claude.read_bytes() == b'{ not valid JSONC'
 finally:
-    cursor.write_bytes(before)
-print('PASS: seven agents, browser native host, user and project scope, account ownership, config preservation, idempotency, portable export')
+    claude.write_bytes(before)
+print('PASS: Codex, Claude Code, and Pi, browser native host, user and project scope, account ownership, config preservation, idempotency, portable export')

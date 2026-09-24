@@ -358,17 +358,23 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     failures = []
     for name in names:
         client = CLIENTS[name]
-        commands = (
-            ('skill', [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
-                       '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]),
-            ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
-                     client.mcp_agent, scope, json.dumps(command), json.dumps(host_policy(release_root))]),
-        )
+        skill_command = [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
+                         '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
+        if name == 'pi':
+            pi = shutil.which('pi', path=env.get('PATH')) or 'pi'
+            commands = (('skill', skill_command),
+                        ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']),
+                                       str(release_root / 'adapters')]))
+        else:
+            commands = (('skill', skill_command),
+                        ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
+                                 client.mcp_agent, scope, json.dumps(command), json.dumps(host_policy(release_root))]))
         for phase, argv in commands:
             try:
                 if phase == 'MCP':
                     preflight_mcp(node, mcp, client, scope, cwd, env)
-                result = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                phase_env = {**env, 'PI_OFFLINE': '1'} if phase == 'extension' else env
+                result = subprocess.run(argv, cwd=cwd, env=phase_env, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, timeout=120)
                 if result.returncode:
                     # Upstream diagnostics are shown to the invoking user, never stored.
@@ -628,6 +634,7 @@ def main(argv=None):
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
+        print('Check Chrome setup separately with `lcu browser status`; a status check does not prove a live connection.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         if args.check_desktop:

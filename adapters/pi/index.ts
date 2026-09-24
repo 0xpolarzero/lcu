@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { userInfo } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { TSchema } from '@sinclair/typebox';
 import { createCuaClient } from '../client.mjs';
@@ -21,8 +23,14 @@ function piContent(result: { content: OriginalContent[]; isError?: boolean }) {
 
 function commandFromEnvironment() {
   const raw = process.env.LCU_MCP_COMMAND;
-  if (!raw) throw new Error('LCU_MCP_COMMAND must be a JSON argv array supplied by LCU setup');
-  return JSON.parse(raw);
+  if (raw) return JSON.parse(raw);
+  const runtime = fileURLToPath(new URL('../../bin/lcu', import.meta.url));
+  if (process.platform === 'darwin') return [runtime];
+  if (process.platform === 'linux') {
+    const session = fileURLToPath(new URL('../../bin/lcu-session', import.meta.url));
+    return [session, '--user', userInfo().username, '--', runtime];
+  }
+  throw new Error(`LCU does not support ${process.platform}`);
 }
 
 function originsFromEnvironment() {

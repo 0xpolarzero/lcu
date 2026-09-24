@@ -1,3 +1,6 @@
+FROM node:24.11.1-bookworm-slim AS pi-verification
+RUN npm install --global @mariozechner/pi-coding-agent@0.73.0 --ignore-scripts --no-audit --no-fund
+
 FROM ubuntu:24.04
 # Match scripts/install.py's Ubuntu 24.04 runtime dependencies, then add fixtures.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -15,3 +18,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python3-gi gir1.2-gtk-3.0 xvfb openbox xdotool \
     xfce4-session xfwm4 xfdesktop4 xfce4-panel curl binutils \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=pi-verification /usr/local/bin/node /usr/local/bin/node
+COPY --from=pi-verification /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN printf '#!/bin/sh\nexec /usr/local/bin/node /usr/local/lib/node_modules/@mariozechner/pi-coding-agent/dist/main.js "$@"\n' > /usr/local/bin/pi && \
+    chmod +x /usr/local/bin/pi
