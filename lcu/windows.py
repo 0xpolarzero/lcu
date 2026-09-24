@@ -59,7 +59,10 @@ def _registered_package():
     command = (
         "$ErrorActionPreference='Stop'; "
         "$packages=@(Get-AppxPackage -Name 'OpenAI.Codex'); "
-        "$packages | Select-Object Name,Publisher,Version,Architecture,InstallLocation "
+        "$packages | Select-Object Name,Publisher,"
+        "@{Name='Version';Expression={$_.Version.ToString()}},"
+        "@{Name='Architecture';Expression={$_.Architecture.ToString()}},"
+        'InstallLocation '
         '| ConvertTo-Json -Compress'
     )
     result = subprocess.run(
@@ -72,6 +75,9 @@ def _registered_package():
     packages = parsed if isinstance(parsed, list) else [parsed]
     if len(packages) != 1 or not isinstance(packages[0], dict):
         raise ValueError('Expected exactly one registered OpenAI.Codex package for this account.')
+    if (not isinstance(packages[0].get('Version'), str) or
+            not isinstance(packages[0].get('Architecture'), str)):
+        raise ValueError('Windows package query did not return string version and architecture.')
     return packages[0]
 
 

@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from lcu.windows import (PACKAGE_NAME, PACKAGE_PUBLISHER, WINDOWS_REQUIRED_FILES,
+                         _registered_package,
                          resolve_installed_windows_app)
 
 
@@ -64,6 +65,20 @@ class InstalledWindowsPackageTests(unittest.TestCase):
             self._resolve(package={**self.package, 'Version': 'newer'})
         with self.assertRaisesRegex(ValueError, 'does not match'):
             self._resolve(package={**self.package, 'Architecture': 'ARM64'})
+
+    def test_query_projects_typed_powershell_properties_to_strings(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(self.package), '')
+        with patch('lcu.windows.subprocess.run', return_value=result) as powershell:
+            self.assertEqual(_registered_package(), self.package)
+        command = powershell.call_args.args[0][-1]
+        self.assertIn("$_.Version.ToString()", command)
+        self.assertIn("$_.Architecture.ToString()", command)
+        for unprojected in ({**self.package, 'Version': {'Major': 26, 'Minor': 917}},
+                            {**self.package, 'Architecture': 9}):
+            raw = subprocess.CompletedProcess([], 0, json.dumps(unprojected), '')
+            with patch('lcu.windows.subprocess.run', return_value=raw):
+                with self.assertRaisesRegex(ValueError, 'string version and architecture'):
+                    _registered_package()
 
     def test_rejects_incomplete_pins_and_modified_file(self):
         with self.assertRaisesRegex(ValueError, 'pins must cover'):
