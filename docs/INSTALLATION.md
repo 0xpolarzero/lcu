@@ -1,6 +1,6 @@
 # Installation
 
-LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64. The added macOS Apple Silicon path reuses a signed local app; its live desktop gate remains open. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
+LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64. The macOS Apple Silicon path reuses a signed local app; live TextEdit and opt-in Chrome actions passed, while cold helper startup and first-time OS permissions remain unverified. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
 
 ## macOS and Pi
 
@@ -10,7 +10,7 @@ Build the Darwin archive using [development instructions](DEVELOPMENT.md), extra
 ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
-This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture; Windows has only an experimental direct launcher and no supported installer.
+This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture. A Windows x64 thin zip and installer exist, but their installed-app and live desktop behavior remain under VM verification; see the [current status](PARITY-STATUS.md).
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
