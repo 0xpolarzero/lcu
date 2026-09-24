@@ -23,6 +23,40 @@ virtualization. The package includes the original Node `24.21.0`,
 and original instructions. Its CUA manifest names platform `windows`,
 architecture `x64`, runtime `0.0.16/20260915001755-492f19756c31`.
 
+### Packaged launch contract
+
+The inspected `AppxManifest.xml` declares two applications: `App`, whose
+entrypoint is `app/ChatGPT.exe`, and `CodexCoreCommandRunner`, whose entrypoint
+is `app/resources/codex-command-runner.exe`. Its only app execution aliases are
+`codex-chrome-native-host.exe` for the original Chrome extension host and
+`codex-core-command-runner.exe` for that Core runner. It declares no alias or
+application entrypoint for bundled `codex.exe`, `node.exe`, `node_repl.exe`, or
+the CUA helper. Microsoft's [app execution alias documentation](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions)
+describes aliases as manifest-registered process entrypoints; its [MSIX runtime
+documentation](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes)
+describes the protected, read-only WindowsApps installation. The manifest does
+not establish that all unaliased bundled executables are blocked; each launch
+path needs its own native test.
+
+The original Windows `@oai/sky` client, at
+`app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/windows/internal/computer_use_client.js`,
+resolves `bin/windows/codex-computer-use.exe` from its package. Its
+`internal/helper_transport.js` directly spawns that helper with piped stdin,
+stdout, and stderr and `windowsHide: true`. It does not invoke
+`codex-core-command-runner.exe` in this path. The latter binary identifies
+`--pipe-in`/`--pipe-out`, framed `SpawnRequest` fields, and registered package
+image checks in its embedded strings. Those are evidence of an internal Codex
+sandbox runner, not a documented general-purpose stdio entrypoint for LCU.
+Reusing it as a CUA launcher would require an unproven private protocol and
+would depart from the original Sky helper path. No such bridge was added.
+
+In the disposable Windows 11 guest, the official MSIX deployed as
+`OpenAI.Codex` `26.917.9434.0` x64 with Store signature. A direct invocation of
+its installed `app/resources/codex.exe --version` from elevated PowerShell
+returned `Access is denied`. This observation applies to that CLI invocation
+only. Ordinary-user original Node, CUA helper, and LCU runtime results were
+still pending when this source inspection was recorded.
+
 The package's Chrome `installManifest.mjs` selects
 `extension-host/windows/x64/extension-host.exe`, writes the host config under
 the host's directory, writes a manifest under the current user's
