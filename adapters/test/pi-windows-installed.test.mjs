@@ -36,11 +36,14 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
     const agentDir = join(directory, 'agent');
     mkdirSync(agentDir);
     const requests = [];
+    const expectedTitle = process.env.LCU_TEST_WINDOW_TITLE;
     const code = [
       'await cua.getState();',
       'var lcuPiSmoke = 6 * 7; nodeRepl.write(lcuPiSmoke);',
       'nodeRepl.write(lcuPiSmoke + 1);',
-      'var lcuPiWindows = await cua.listWindows({emit:false}); nodeRepl.write(JSON.stringify(lcuPiWindows));',
+      'var lcuPiWindows = await cua.listWindows({emit:false}); '
+        + `var lcuPiTarget = lcuPiWindows.find(w => w.title === ${JSON.stringify(expectedTitle)}); `
+        + 'nodeRepl.write(lcuPiTarget ? "LCU_WINDOW_ID=" + lcuPiTarget.id + ";TITLE=" + lcuPiTarget.title : "LCU_WINDOW_MISSING");',
     ];
     const server = createServer(async (request, response) => {
       if (request.url !== '/v1/chat/completions') { response.writeHead(404).end(); return; }
@@ -97,8 +100,6 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
       assert.match(firstMessages, /Windows desktop windows/);
       assert.match(JSON.stringify(requests[2].messages), /42/);
       assert.match(JSON.stringify(requests[3].messages), /43/);
-      assert.ok(JSON.stringify(requests[4].messages).includes(process.env.LCU_TEST_WINDOW_TITLE),
-        `Original native window result omitted ${process.env.LCU_TEST_WINDOW_TITLE}`);
       const events = stdout.split('\n').filter(Boolean).map(line => {
         try { return JSON.parse(line); } catch { return {}; }
       });
@@ -106,6 +107,9 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
       assert.equal(calls.length, 4);
       assert.ok(calls.every(event => !event.isError), 'An original CUA call failed');
       assert.ok(events.some(event => event.type === 'agent_end'));
+      const finalMessages = JSON.stringify(requests[4].messages);
+      assert.match(finalMessages, new RegExp(`LCU_WINDOW_ID=\\d+;TITLE=${expectedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+        `Original native result omitted the task-owned window ${expectedTitle}`);
       console.log('Pi registered Windows extension: original guide, skill, four CUA calls, native window title, agent_end verified.');
       console.log('Host-only turn_ended dispatch is established by the adapter regression; process exit alone cannot prove it here.');
     } finally {
