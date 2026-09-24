@@ -1,6 +1,6 @@
 # Development and validation
 
-LCU releases are thin platform/architecture-specific tarballs. The official app is never part of an archive. Linux installation acquires app 26.915.31945; macOS reuses locally installed app 26.917.62051. [runtime.lock.json](../runtime.lock.json) pins both and CUA runtime 0.0.16/20260915001755-492f19756c31. macOS also verifies the OpenAI signature and original signed native helper before execution.
+LCU releases are thin platform/architecture-specific archives: Linux and macOS tarballs, plus an experimental Windows ZIP. The official app is never part of an archive. Linux installation acquires app 26.915.31945; macOS reuses locally installed app 26.917.62051. [runtime.lock.json](../runtime.lock.json) pins both and CUA runtime 0.0.16/20260915001755-492f19756c31. macOS also verifies the OpenAI signature and original signed native helper before execution.
 
 ## Build
 
@@ -11,6 +11,8 @@ python3 scripts/build_bundle.py --output dist
 ~~~
 
 The builder creates a tarball and SHA-256 sidecar. It provisions the fixed third-party agent registration tools and links their Node executable to the application that setup selects later. It does not download or extract the OpenAI app. Build-time --package is retired; pass --app-package to scripts/install.sh on the target machine.
+
+The experimental Windows x64 ZIP is built with `python3 scripts/build_bundle.py --platform windows --output dist`. It contains no OpenAI payload. On a disposable Windows 11 guest with the exact pinned official MSIX registered for the current user, `python -B scripts/install_windows.py --runtime-only` from the extracted ZIP passed archive and app-pin validation. `lcu.cmd --version` passed; `lcu.cmd doctor` failed before native control with `[WinError 5] Access is denied` while launching the original executable from the protected installed package. A separate intact, hash-checked private copy initialized the original MCP and ran pure JavaScript, but original Sky native control failed at helper spawn with `EPERM` inside the original Windows Node REPL sandbox. Do not treat a successful Windows build, installer, version probe, or MCP initialization as Windows support. The [live Windows record](verification/windows-source.md) gives the exact boundaries.
 
 On Apple Silicon macOS, with the pinned app already installed and `npm` available:
 

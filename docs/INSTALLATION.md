@@ -10,7 +10,7 @@ Build the Darwin archive using [development instructions](DEVELOPMENT.md), extra
 ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
-This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture. A Windows x64 thin zip and installer exist, but their installed-app and live desktop behavior remain under VM verification; see the [current status](PARITY-STATUS.md).
+This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture. A Windows x64 thin ZIP and runtime-only installer passed integrity checks in a live Windows 11 guest, but the original native computer-use path failed at process launch. Windows is not a supported LCU target; see the [guest record](verification/windows-source.md).
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 

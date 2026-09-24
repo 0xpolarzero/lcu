@@ -1,7 +1,9 @@
-# Windows x64 source inspection (2026-09-24)
+# Windows x64 source and live guest verification (2026-09-24)
 
-Windows is not yet a supported LCU target. This records an inspected official
-package and a fixture-tested selection seam; it is not Windows desktop proof.
+Windows is not a supported LCU target. The exact official package and thin LCU
+archive installed in a disposable Windows 11 guest, but the original native
+computer-use path failed before a screenshot or input action. The results below
+separate installed-archive validation, original MCP transport, and native use.
 
 The [official OpenAI Windows update manifest](https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json)
 identified `OpenAI.Codex` build `26.917.9434.0`. Its
@@ -51,11 +53,12 @@ Reusing it as a CUA launcher would require an unproven private protocol and
 would depart from the original Sky helper path. No such bridge was added.
 
 In the disposable Windows 11 guest, the official MSIX deployed as
-`OpenAI.Codex` `26.917.9434.0` x64 with Store signature. A direct invocation of
-its installed `app/resources/codex.exe --version` from elevated PowerShell
-returned `Access is denied`. This observation applies to that CLI invocation
-only. Ordinary-user original Node, CUA helper, and LCU runtime results were
-still pending when this source inspection was recorded.
+`OpenAI.Codex` `26.917.9434.0` x64 with Store signature. Direct invocation of
+its installed `app/resources/codex.exe --version` returned `Access is denied`
+from elevated PowerShell. Direct invocation of its installed `node.exe --version`
+returned the same error for the ordinary account. A successful read/hash and
+an ordinary-account copy test below narrow those observations; neither error
+alone identifies the Windows enforcement mechanism.
 
 The package's Chrome `installManifest.mjs` selects
 `extension-host/windows/x64/extension-host.exe`, writes the host config under
@@ -80,22 +83,87 @@ MSIX packages are [deployed per user into a protected, read-only package
 location](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes).
 The resolver neither extracts nor modifies the installed app. The Windows
 branch in `lcu/runtime.py` selects the verified package paths and launches its
-original Node/CUA entrypoint through `bin/lcu.cmd`. The thin Windows archive,
-runtime-only installer, and account-local setup have fixture coverage. Those
-tests do not prove native deployment, process launch, helper transport,
-browser control, or GUI behavior.
+original Node/CUA entrypoint through `bin/lcu.cmd`. The thin archive and
+runtime-only installer now have both fixture coverage and a live installation
+check. Account-local agent registration, Chrome relay, and native control do
+not have successful Windows guest tests.
 
-A disposable Windows 11 Enterprise Evaluation VM is being installed on
-`devbox` using the [official evaluation ISO](https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise).
-The official x64 ISO was 7,092,807,680 bytes with local SHA-256
+### Live guest: installation and selected executable
+
+The task-owned KVM guest ran [Microsoft's Windows 11 Enterprise Evaluation
+ISO](https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise),
+7,092,807,680 bytes, SHA-256
 `a61adeab895ef5a4db436e0a7011c92a2ff17bb0357f58b13bbc4062e535e7b9`.
-It runs in an owned KVM container with 6 GiB RAM, four virtual CPUs, TPM,
-UEFI, stock AHCI/e1000 devices, and a blank 80 GB sparse disk. The graphical
-installer recognized the disk and reached its installation progress page
-after the standard evaluation terms were accepted. No product key, Microsoft
-account, or user credential was supplied. Python's [official 3.13.15 Windows
-installer](https://www.python.org/downloads/release/python-31315/) was staged
-for guest verification with its published SHA-256
-`edec09c4853aeae9ac36efb8c9f95b68e2fee65eee56d9767a8b7c69c574403`.
-Windows support remains open until the guest actually deploys the official
-MSIX and proves the original CUA and optional Chrome flows end to end.
+It used 6 GiB RAM, four virtual CPUs, TPM, UEFI, AHCI/e1000 and an 80 GB sparse
+disk. Standard OOBE completed with a generated guest-only local account and
+unique synthetic VM identifiers. No Microsoft account, product key, ChatGPT
+UI, or Codex login was used. The official [Python 3.13.15 installer](https://www.python.org/downloads/release/python-31315/)
+had SHA-256 `edec09c4853aeae9ac36efb8c9f95b68e2fee65eee56d9767a8b7c69c574403`.
+
+The first non-elevated `Add-AppxPackage` of the exact pinned MSIX failed with
+`0x80073D28`: its packaged service required elevation. After ordinary guest
+UAC approval, Windows registered `OpenAI.Codex` `26.917.9434.0` x64, publisher
+`CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B`, `SignatureKind: Store`. The
+installed path was `C:\Program Files\WindowsApps\OpenAI.Codex_26.917.9434.0_x64__2p2nqsd0c76g0`.
+Package installation did not launch the ChatGPT UI.
+
+The experimental thin ZIP built from source `5a6aaf5` had SHA-256
+`74015e33f7b42068fcce3cd7c25324ecf76d5eef37282302cd9d888a9899ec8a`.
+The ordinary account extracted it and ran
+`python -B scripts\install_windows.py --prefix %LOCALAPPDATA%\LCU --runtime-only`.
+Archive seal verification, registered-app identity, all pinned component hashes,
+and original CUA manifest validation passed. `%LOCALAPPDATA%\LCU\lcu.cmd
+--version` printed `lcu 0.3.0 (ChatGPT windows 26.917.9434.0; CUA
+0.0.16/20260915001755-492f19756c31)`. The actual installed `%LOCALAPPDATA%\LCU\lcu.cmd
+doctor` then failed `LCU: [WinError 5] Access is denied` before native control.
+The archive/installer pass is not a usable-runtime result.
+
+As the ordinary account, `Get-FileHash` read the installed Node and Node REPL;
+their hashes matched the lock. `Get-Acl` listed `BUILTIN\Users` with
+`ReadAndExecute` on those files. A scoped query covering the denied launches
+found no matching `node.exe`, `codex.exe`, or `OpenAI.Codex` event in
+CodeIntegrity/Operational, AppLocker/EXE and DLL, or Windows Defender/Operational
+over the preceding 30 minutes. These observations do not identify the denial
+mechanism. A single ordinary-account copy of the installed `node.exe` to a
+task-owned `LOCALAPPDATA` directory matched source SHA-256
+`a604969e8eb5154a3d5617ff377c13b439e2436ff2ef98e546a05bd234724d78`
+and printed `v24.21.0`, exit 0. This proves location-dependent launch behavior
+for that one binary only.
+
+### Live guest: intact original-runtime diagnostic
+
+To test whether private reuse suffices without changing policy, an ordinary
+account used `robocopy /E /COPY:DAT /DCOPY:DAT /R:1 /W:1` to copy the complete
+registered `app` tree into a task-owned private directory. It did not copy
+WindowsApps ACLs or modify the installed app. All 13 required original
+component files matched the source SHA-256 pins after copying. LCU's existing
+environment builder selected the private original `node.exe`, `node_repl.exe`,
+`codex.exe`, module directory and original CUA launcher. It preserved the
+original Node REPL sandbox and enabled only the native computer surface.
+
+The original MCP process initialized at protocol `2024-11-05`, exposed `js`,
+and executed pure JavaScript. Its first native `cua.listWindows({emit:false})`
+failed `spawn EPERM` before listing a window. In the same original REPL kernel,
+`child_process.spawnSync` of the same private Node executable with `--version`
+also returned `EPERM`. Outside that kernel, the same private Node printed
+`v24.21.0`, and the exact private Sky `codex-computer-use.exe` started and
+rejected `--help` as an unknown argument (exit 1). This differential shows a
+child-process restriction in the original Windows REPL context, including the
+Sky helper spawn. It does not prove how Windows implements that restriction.
+
+Source inspection shows the original ChatGPT app hosts a named-pipe transport
+for its helper, while the inspected package exposes no standalone pipe-host
+entry point. No synthetic pipe server, undocumented runner, sandbox disabling,
+or package-permission change was used. A native screenshot, Notepad input/save,
+independent file oracle, and opt-in Chrome action remain unproven. The Windows
+build must stay experimental until an original, supported standalone native
+transport passes those live checks. Guest screenshots and logs remain outside
+Git and release archives. Local screenshots of the installed `--version`,
+shipped `doctor` denial, one-file Node copy, scoped zero-match event query,
+and full-copy `EPERM` comparison are `/private/tmp/lcu-win-sealfix-installed.png`,
+`/private/tmp/lcu-win-installed-doctor-denied.png`,
+`/private/tmp/lcu-win-node-copy-version.png`,
+`/private/tmp/lcu-win-policy-events-zero.png`, and
+`/private/tmp/lcu-win-full-copy-spawn-eperm.png` respectively. The source
+scripts and complete raw logs remain in task-owned temporary storage and the
+disposable guest; no host credential was copied into that evidence.
