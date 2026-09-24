@@ -27,13 +27,15 @@ The package's Chrome `installManifest.mjs` selects
 `extension-host/windows/x64/extension-host.exe`, writes the host config under
 the host's directory, writes a manifest under
 `%LOCALAPPDATA%/OpenAI/extension`, and registers that manifest under
-`HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts`. Chrome launches the
-manifest `path` as one executable. The current POSIX `lcu/native_host.py`
-shebang relay cannot be used as that Windows executable. A Windows native
-messaging relay needs a real executable and a native integration test, or
-upstream browser authorization must be shown to work without the relay. This
-is a browser parity blocker, not a reason to bypass the original extension's
-approval policy.
+`HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts`. [Chromium's Windows
+launcher](https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/extensions/api/messaging/launch_context_win.cc)
+starts `.exe` hosts directly and passes other manifest paths through `cmd.exe`.
+That source supports a `.cmd` relay wrapper in principle. The current POSIX
+`lcu/native_host.py` shebang alone cannot serve as a Windows host; a quiet
+`.cmd` wrapper, binary-safe stdio, and the original Windows `extension-host.exe`
+need native integration tests. Upstream browser authorization must be shown to
+work with the relay. This remains a browser parity blocker, not a reason to
+bypass the original extension's approval policy.
 
 `lcu/windows.py` reads the registered current-user package location through
 `Get-AppxPackage`, checks exact identity/version/architecture, and hashes each

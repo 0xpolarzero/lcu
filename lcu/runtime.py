@@ -1,5 +1,6 @@
 """Launch the selected application's original computer-use provider."""
 import json
+import ntpath
 import os
 from pathlib import Path
 import subprocess
@@ -30,6 +31,21 @@ def paths(root):
             expected_version=policy['version'], expected_runtime=policy['runtime'],
             expected_hashes=entry['components'], arch=arch)
         return resolved.app, resolved.resources, resolved.runtime, policy
+    if target == 'windows':
+        policy = lock.get('platforms', {}).get('windows', {})
+        entry = policy.get('architectures', {}).get(arch)
+        if (not selected.is_absolute() or arch != 'x64' or not entry or
+                descriptor.get('package_version') != policy.get('version') or
+                descriptor.get('runtime') != policy.get('runtime') or
+                descriptor.get('sha256') != entry.get('sha256')):
+            raise ValueError('Selected application descriptor does not match the Windows lock.')
+        from .windows import resolve_installed_windows_app
+        resolved = resolve_installed_windows_app(
+            expected_version=policy['version'], expected_runtime=policy['runtime'],
+            expected_hashes=entry['components'])
+        if selected.resolve() != resolved.app:
+            raise ValueError('Selected application descriptor does not match the registered Windows app.')
+        return resolved.app, resolved.resources, resolved.runtime, policy
     if target != 'linux':
         raise ValueError(f'Unsupported installed application platform: {target}')
     if (not selected or selected.is_absolute() or
@@ -58,31 +74,48 @@ def paths(root):
 
 def environment(root, resolved=None):
     _, resources, runtime, lock = resolved or paths(root)
+    target = json.loads((root / 'installation.json').read_text()).get('platform', 'linux')
+    windows = target == 'windows'
+    path_api = ntpath if windows else os.path
+    separator = ';' if windows else os.pathsep
+    module_dir = runtime / ('bin/node_modules' if windows else 'lib/node_modules')
+    node = runtime / ('bin/node.exe' if windows else 'bin/node')
+    node_repl = runtime / ('bin/node_repl.exe' if windows else 'bin/node_repl')
+    codex = resources / ('codex.exe' if windows else 'codex')
     env = dict(os.environ)
     # Original gM/nne selects and trusts CODEX_HOME verbatim, including an
     # explicitly empty value. This changes only the launched child environment.
     if 'CODEX_HOME' not in env:
-        home = env['HOME'] if 'HOME' in env else str(Path.home())
-        selected = os.path.normpath(os.path.join(home, '.codex'))
+        home = (env.get('USERPROFILE') or env.get('HOME') or str(Path.home())) if windows else (
+            env['HOME'] if 'HOME' in env else str(Path.home()))
+        selected = path_api.normpath(path_api.join(home, '.codex'))
         # Node path.join collapses double leading slashes on Linux.
-        env['CODEX_HOME'] = '/' + selected.lstrip('/') if selected.startswith('//') else selected
+        env['CODEX_HOME'] = ('/' + selected.lstrip('/') if selected.startswith('//') else selected)
     # Select our verified executables, while retaining upstream caller options,
     # metadata, services, policy flags, and additional module/trust roots.
     def prepend(key, *paths):
-        return os.pathsep.join(dict.fromkeys([*(str(path) for path in paths if str(path)),
-            *(path for path in env.get(key, '').split(os.pathsep) if path)]))
+        return separator.join(dict.fromkeys([*(str(path) for path in paths if str(path)),
+            *(path for path in env.get(key, '').split(separator) if path)]))
+
+    if windows:
+        existing_path = next((value for key, value in env.items() if key.upper() == 'PATH'), '')
+        for key in tuple(env):
+            if key.upper() == 'PATH':
+                del env[key]
+    else:
+        existing_path = env.get('PATH', '/usr/bin:/bin')
 
     env.update(
-        PATH=str(runtime / 'bin') + ':' + env.get('PATH', '/usr/bin:/bin'),
-        CUA_REPL_NODE_REPL_PATH=str(runtime / 'bin/node_repl'),
-        NODE_REPL_NODE_PATH=str(runtime / 'bin/node'),
-        NODE_REPL_NODE_MODULE_DIRS=prepend('NODE_REPL_NODE_MODULE_DIRS', runtime / 'lib/node_modules'),
+        PATH=str(runtime / 'bin') + separator + existing_path,
+        CUA_REPL_NODE_REPL_PATH=str(node_repl),
+        NODE_REPL_NODE_PATH=str(node),
+        NODE_REPL_NODE_MODULE_DIRS=prepend('NODE_REPL_NODE_MODULE_DIRS', module_dir),
         NODE_REPL_TRUSTED_CODE_PATHS=prepend('NODE_REPL_TRUSTED_CODE_PATHS',
-            env['CODEX_HOME'], runtime / 'lib/node_modules', resources / 'plugins'),
+            env['CODEX_HOME'], module_dir, resources / 'plugins'),
     )
     env.setdefault('CUA_REPL_ENABLED_SURFACES', 'browser,computer')
     env.setdefault('CUA_REPL_BROWSER_ENV', 'codex-app')
-    env.setdefault('CODEX_CLI_PATH', str(resources / 'codex'))
+    env.setdefault('CODEX_CLI_PATH', str(codex))
     if resources.parent.name == 'Contents':
         # Original Sky's macOS native-pipe transport uses this signed helper
         # through LaunchServices when no existing CUA service is connected.
@@ -153,12 +186,16 @@ def main(root, argv):
         print(f"lcu {version} (ChatGPT {target} {policy['version']}; CUA {policy['runtime']})")
         return
     if argv[:1] == ['setup']:
+        if json.loads((root / 'installation.json').read_text()).get('platform') == 'windows':
+            raise ValueError('Windows agent setup is not implemented; the installed app runtime is available through the direct launcher only.')
         from .setup import main as setup
         if '--prefix' not in argv:
             argv += ['--prefix', str(root.parent.parent)]
         setup(argv[1:])
         return
     if argv[:1] == ['browser']:
+        if json.loads((root / 'installation.json').read_text()).get('platform') == 'windows':
+            raise ValueError('Windows browser host setup is not implemented.')
         from .browser import main as browser
         browser(root, argv[1:])
         return
@@ -171,15 +208,23 @@ def main(root, argv):
     resolved = paths(root)
     _, resources, runtime, _ = resolved
     env = environment(root, resolved)
+    windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
     if argv == ['doctor']:
-        if resources.parent.name != 'Contents' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
+        if not windows and resources.parent.name != 'Contents' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
             raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use lcu-session or run inside the desktop session.')
         script = 'import {handleRpc} from "@oai/sky/service"; const result = await handleRpc({type:"execute", method:"list_windows", args:[]}); console.log(JSON.stringify({windows:result}));'
-        subprocess.run([str(runtime / 'bin/node'), '--input-type=module', '-e', script],
-                       cwd=runtime / 'lib', env=env, check=True, timeout=30)
+        subprocess.run([env['NODE_REPL_NODE_PATH'], '--input-type=module', '-e', script],
+                       cwd=runtime / ('bin' if windows else 'lib'), env=env, check=True, timeout=30)
         return
-    launcher = runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
-    command = [str(runtime / 'bin/node'), str(launcher)]
+    if windows:
+        from .windows import _component
+        launcher = _component(resources.parents[1],
+            'app/resources/cua_node/bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+    else:
+        launcher = runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
+    command = [env['NODE_REPL_NODE_PATH'], str(launcher)]
     if discovery_compat:
         reply_to_server_discover(sys.stdin.buffer.raw, sys.stdout.buffer)
+    if windows:
+        raise SystemExit(subprocess.run(command, env=env, check=False).returncode)
     os.execve(runtime / 'bin/node', command, env)
