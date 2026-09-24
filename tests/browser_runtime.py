@@ -172,7 +172,7 @@ def denied_site(client_env, release):
         approval_requests.extend(urls)
         return {'action': 'decline'}
 
-    client = Client([str(release / 'bin/lcu')], env=client_env,
+    client = Client([str(release / 'bin/lcu'), '--chrome'], env=client_env,
                     request_handler=decline, capabilities={'elicitation': {}})
     try:
         discovery(client)
@@ -297,14 +297,14 @@ def chrome(release, original):
     cli_setup_contract(release)
     base = dict(os.environ)
     base.pop('NODE_REPL_REQUEST_META', None)
-    base['CUA_REPL_ENABLED_SURFACES'] = 'browser'
-    base['CUA_REPL_BROWSER_ENV'] = 'codex-app'
+    base.pop('CUA_REPL_ENABLED_SURFACES', None)
+    base.pop('CUA_REPL_BROWSER_ENV', None)
     base['NODE_REPL_DISABLE_ANALYTICS'] = '1'
     requests_seen = []
     approved_urls = []
     restart_approvals = []
     server = fixture_server(requests_seen)
-    candidate = Client([str(release / 'bin/lcu')], env=base,
+    candidate = Client([str(release / 'bin/lcu'), '--chrome'], env=base,
                        request_handler=local_fixture_approval(approved_urls), capabilities={'elicitation': {}})
     try:
         lcu_browsers = discovery(candidate)
@@ -315,7 +315,8 @@ def chrome(release, original):
         # Discovery should match the untouched service. Its auth decision is
         # tested separately with the original manifest: this Chrome profile
         # currently routes both clients through the installed LCU relay.
-        baseline_env = upstream_environment(original, base)
+        baseline_env = upstream_environment(original, {**base,
+            'CUA_REPL_ENABLED_SURFACES': 'browser', 'CUA_REPL_BROWSER_ENV': 'codex-app'})
         baseline_env['NODE_REPL_REQUEST_META'] = json.dumps(fallback)
         baseline = Client([str(original / 'bin/node'),
                           str(original / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')],
@@ -343,7 +344,7 @@ def chrome(release, original):
         candidate = None
         requests_seen.clear()
 
-        restarted = Client([str(release / 'bin/lcu')], env=base,
+        restarted = Client([str(release / 'bin/lcu'), '--chrome'], env=base,
                            request_handler=local_fixture_approval(restart_approvals),
                            capabilities={'elicitation': {}})
         try:

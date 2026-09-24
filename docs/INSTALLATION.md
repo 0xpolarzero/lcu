@@ -21,7 +21,7 @@ pi
 
 Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
 
-Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS Screen Recording or Accessibility: those permissions belong to the original signed Codex Computer Use helper and may require approval in System Settings. Browser extension installation and unresolved site approvals also remain required. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
+Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS Screen Recording or Accessibility: those permissions belong to the original signed Codex Computer Use helper and may require approval in System Settings. Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
 ## Linux: acquire and install
 

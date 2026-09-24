@@ -13,13 +13,17 @@ if [[ "$browser_kind" == chrome ]]; then
 else
   echo 'NOTICE: unprivileged disposable Playwright Chromium profile; this test exercises real browser actions without Codex sign-in.'
 fi
-"$release/bin/lcu" browser install
+manifest="$HOME/.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json"
+[[ ! -e "$manifest" && ! -e "$HOME/.local/share/lcu/browser" ]] || {
+  echo 'Runtime-only installation unexpectedly configured a Chrome native host.' >&2
+  exit 1
+}
+"$release/bin/lcu" setup --prefix "$LCU_BROWSER_PREFIX" --export "$HOME/lcu-browser-export" --session direct --chrome --yes
+[[ -f "$manifest" ]] || { echo "LCU native-host manifest missing after setup --chrome: $manifest" >&2; exit 1; }
 if [[ "$browser_kind" == chrome ]]; then
   # The fixture uses a non-default Chrome data directory for loopback DevTools.
   # Chrome resolves user-level native hosts from that directory.
-  manifest="$HOME/.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json"
   profile_hosts="$HOME/.config/lcu-chrome-direct-fixture/NativeMessagingHosts"
-  [[ -f "$manifest" ]] || { echo "LCU native-host manifest missing: $manifest" >&2; exit 1; }
   mkdir -p "$profile_hosts"
   cp "$manifest" "$profile_hosts/"
 fi
