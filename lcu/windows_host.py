@@ -128,9 +128,13 @@ def stop_original_host(process: subprocess.Popen, *, require_success=True) -> No
     if process.stdin and not process.stdin.closed:
         process.stdin.close()
     try:
-        status = process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.terminate()
-        status = process.wait(timeout=5)
+        try:
+            status = process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            status = process.wait(timeout=5)
+    finally:
+        if process.stdout:
+            process.stdout.close()
     if require_success and status != 0:
         raise ValueError(f'Original Windows native host exited with status {status}.')

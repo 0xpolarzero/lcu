@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,6 +68,32 @@ class WindowsHostTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'member is missing'):
             self._extract(expected)
         self.assertFalse((self.base / 'derived').exists())
+
+    def test_host_ready_handshake_and_owned_child_disposal(self):
+        entry = self.base / 'host.py'
+        entry.write_text("import json, sys\nprint(json.dumps({'ready': True, "
+                         "'pipePath': r'\\\\.\\pipe\\lcu-wre-fixture'}), flush=True)\n"
+                         "sys.stdin.buffer.read()\n")
+        helper = self.base / 'helper.exe'
+        transport = self.base / 'transport.js'
+        helper.touch()
+        transport.touch()
+        process, pipe = windows_host.start_original_host(
+            node=Path(sys.executable), entry=entry, helper=helper, transport=transport, env={})
+        self.assertEqual(pipe, r'\\.\pipe\lcu-wre-fixture')
+        windows_host.stop_original_host(process)
+        self.assertEqual(process.returncode, 0)
+
+    def test_host_early_exit_is_an_error(self):
+        entry = self.base / 'host.py'
+        entry.write_text("print('not ready', flush=True)\n")
+        helper = self.base / 'helper.exe'
+        transport = self.base / 'transport.js'
+        helper.touch()
+        transport.touch()
+        with self.assertRaisesRegex(ValueError, 'failed to become ready'):
+            windows_host.start_original_host(
+                node=Path(sys.executable), entry=entry, helper=helper, transport=transport, env={})
 
 
 if __name__ == '__main__':
