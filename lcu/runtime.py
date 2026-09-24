@@ -207,10 +207,6 @@ def main(root, argv):
         setup(argv[1:])
         return
     if argv[:1] == ['browser']:
-        descriptor_path = root / 'installation.json'
-        if (descriptor_path.is_file() and
-                json.loads(descriptor_path.read_text()).get('platform') == 'windows'):
-            raise ValueError('Windows browser host setup is not implemented.')
         from .browser import main as browser
         browser(root, argv[1:])
         return

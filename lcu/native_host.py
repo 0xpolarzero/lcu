@@ -61,11 +61,13 @@ def _relay(source, destination, transform=None):
 
 
 def _original_host():
-    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
+    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine().lower())
     system = platform.system()
-    if arch is None or system not in ('Linux', 'Darwin'):
-        raise ValueError('The Chrome native host requires Linux or macOS ARM64 or x86-64')
-    host = ('linux', 'extension-host') if system == 'Linux' else ('macos', 'ChatGPT for Chrome')
+    if arch is None or system not in ('Linux', 'Darwin', 'Windows') or (system == 'Windows' and arch != 'x64'):
+        raise ValueError('The original Chrome native host is available only for supported Linux, macOS, or Windows architectures')
+    host = ({'Linux': ('linux', 'extension-host'),
+             'Darwin': ('macos', 'ChatGPT for Chrome'),
+             'Windows': ('windows', 'extension-host.exe')})[system]
     binary = Path(__file__).resolve().parent / 'chrome/extension-host' / host[0] / arch / host[1]
     if not binary.is_file():
         raise ValueError(f'The original Chrome native host is missing: {binary}')

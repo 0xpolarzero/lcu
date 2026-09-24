@@ -18,7 +18,7 @@ _MACOS_NATIVE_HOST_DIRS = (
 
 
 def _manifest_paths(env, system):
-    home = Path(env.get('HOME', Path.home()))
+    home = Path(env.get('USERPROFILE', Path.home())) if system == 'Windows' else Path(env.get('HOME', Path.home()))
     name = 'com.openai.codexextension.json'
     if system == 'Darwin':
         # These are the per-user destinations in the original Chrome plugin's
@@ -26,6 +26,10 @@ def _manifest_paths(env, system):
         support = home / 'Library/Application Support'
         return {support / browser / 'NativeMessagingHosts' / name
                 for browser in _MACOS_NATIVE_HOST_DIRS}
+    if system == 'Windows':
+        # The pinned original installer writes here and registers this exact
+        # manifest path under the current user's Chrome native-host key.
+        return {home / 'AppData/Local/OpenAI/extension' / name}
     config_roots = {home / '.config'}
     for key in ('XDG_CONFIG_HOME', 'CHROME_CONFIG_HOME'):
         if env.get(key):
@@ -41,16 +45,19 @@ def install(root, directory=None):
     from .runtime import environment, paths
 
     system = platform.system()
-    if system not in ('Linux', 'Darwin'):
-        raise ValueError('The original Chrome native host is supported on Linux and macOS only.')
+    if system not in ('Linux', 'Darwin', 'Windows'):
+        raise ValueError('The original Chrome native host is supported on Linux, macOS, and Windows only.')
     # The upstream installer writes its host configuration beside the executable.
     # Keep the sealed release immutable; give this account a private host copy.
-    home = Path(os.environ.get('HOME', Path.home()))
+    home = (Path(os.environ.get('USERPROFILE', Path.home())) if system == 'Windows'
+            else Path(os.environ.get('HOME', Path.home())))
     if system == 'Darwin':
         data = home / 'Library/Application Support'
+    elif system == 'Windows':
+        data = Path(os.environ.get('LOCALAPPDATA', home / 'AppData/Local'))
     else:
         data = Path(os.environ.get('XDG_DATA_HOME', home / '.local/share'))
-    selected_app = (root / 'app').resolve()
+    selected_app = paths(root)[0] if system == 'Windows' else (root / 'app').resolve()
     identity = hashlib.sha256(str(selected_app).encode()).hexdigest()[:16]
     destination = Path(directory).expanduser().absolute() if directory else data / 'lcu/browser' / identity
     marker = destination / '.lcu-browser-host'
@@ -83,7 +90,7 @@ def install(root, directory=None):
     relay_source = root / 'lcu/native_host.py'
     if not relay_source.is_file():
         raise ValueError('The LCU Chrome native-host relay is missing from this release.')
-    relay = destination / 'lcu-native-host'
+    relay = destination / ('lcu-native-host.py' if system == 'Windows' else 'lcu-native-host')
     with tempfile.NamedTemporaryFile(dir=destination, prefix='.lcu-native-host-', delete=False) as staged:
         staged_path = Path(staged.name)
     try:
@@ -92,6 +99,12 @@ def install(root, directory=None):
         staged_path.replace(relay)
     finally:
         staged_path.unlink(missing_ok=True)
+    if system == 'Windows':
+        # Chromium uses cmd.exe for a non-.exe native host. The wrapper emits
+        # no text before Python's binary native-messaging frames.
+        command = destination / 'lcu-native-host.cmd'
+        command.write_bytes(b'@echo off\r\npy -3.12 -u "%~dp0lcu-native-host.py" %*\r\nexit /b %ERRORLEVEL%\r\n')
+        relay = command
     script = ('const {install} = await import(process.argv[1]); '
               'await install({appServerRuntimePaths:{codexCliPath:process.env.CODEX_CLI_PATH,'
               'nodePath:process.env.NODE_REPL_NODE_PATH,nodeReplPath:process.env.CUA_REPL_NODE_REPL_PATH}});')
@@ -102,7 +115,8 @@ def install(root, directory=None):
     # native-host manifest name at the documented config depths, then require
     # each candidate to point at this selected private copy before changing it.
     manifest_paths = _manifest_paths(env, system)
-    host_name = 'extension-host' if system == 'Linux' else 'ChatGPT for Chrome'
+    host_name = {'Linux': 'extension-host', 'Darwin': 'ChatGPT for Chrome',
+                 'Windows': 'extension-host.exe'}[system]
     changed = 0
     for manifest_path in sorted(manifest_paths):
         if manifest_path.is_symlink():
@@ -128,6 +142,12 @@ def install(root, directory=None):
         changed += 1
     if changed == 0:
         raise ValueError('The original Chrome installer produced no manifest for the selected host.')
+    if system == 'Windows':
+        key = r'HKCU\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension'
+        registered = subprocess.run(['reg.exe', 'query', key, '/ve'],
+                                    capture_output=True, text=True, timeout=20)
+        if registered.returncode or str(next(iter(manifest_paths))) not in registered.stdout:
+            raise ValueError('The original Chrome installer did not register the selected manifest for this account.')
     return destination
 
 
@@ -175,13 +195,20 @@ def status(root, family='chrome'):
             data = json.loads(Path(manifest['manifestPath']).read_text())
             relay = Path(data['path'])
             directory = relay.parent
-            arch = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}[platform.machine()]
-            system, name = ('macos', 'ChatGPT for Chrome') if platform.system() == 'Darwin' else ('linux', 'extension-host')
+            arch = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}[platform.machine().lower()]
+            system, name = {'Darwin': ('macos', 'ChatGPT for Chrome'),
+                            'Linux': ('linux', 'extension-host'),
+                            'Windows': ('windows', 'extension-host.exe')}[platform.system()]
             host = directory / 'chrome/extension-host' / system / arch / name
+            relay_name = 'lcu-native-host.cmd' if system == 'windows' else 'lcu-native-host'
+            source_matches = ((directory / 'lcu-native-host.py').read_bytes() ==
+                              (root / 'lcu/native_host.py').read_bytes()) if system == 'windows' else (
+                              relay.read_bytes() == (root / 'lcu/native_host.py').read_bytes())
             connected_host = (
-                relay.name == 'lcu-native-host' and relay.is_file() and os.access(relay, os.X_OK)
-                and relay.read_bytes() == (root / 'lcu/native_host.py').read_bytes()
-                and (directory / '.lcu-browser-host').read_text() == str((root / 'app').resolve()) + '\n'
+                relay.name == relay_name and relay.is_file() and os.access(relay, os.X_OK)
+                and source_matches
+                and (directory / '.lcu-browser-host').read_text() == str(
+                    selected[0] if system == 'windows' else (root / 'app').resolve()) + '\n'
                 and host.is_file() and os.access(host, os.X_OK))
         except (KeyError, OSError, ValueError):
             pass

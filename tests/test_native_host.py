@@ -57,6 +57,7 @@ class NativeHostRelayTests(unittest.TestCase):
                 ('Linux', 'aarch64', 'linux/arm64', 'extension-host'),
                 ('Darwin', 'arm64', 'macos/arm64', 'ChatGPT for Chrome'),
                 ('Darwin', 'x86_64', 'macos/x64', 'ChatGPT for Chrome'),
+                ('Windows', 'AMD64', 'windows/x64', 'extension-host.exe'),
             ):
                 expected = relay.parent / 'chrome/extension-host' / segment / name
                 expected.parent.mkdir(parents=True, exist_ok=True)

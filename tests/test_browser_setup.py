@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import subprocess
 from unittest import mock
 
 
@@ -14,6 +15,54 @@ from lcu.browser import _manifest_paths, install, status
 
 
 class BrowserSetupTests(unittest.TestCase):
+    def test_windows_original_installer_and_registry_are_reused_for_cmd_relay(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            root = base / 'release'
+            app = base / 'registered-msix'
+            resources = app / 'app/resources'
+            plugin = resources / 'plugins/openai-bundled/plugins/chrome'
+            installer = plugin / 'scripts/installManifest.mjs'
+            installer.parent.mkdir(parents=True)
+            installer.write_text('upstream fixture')
+            host = plugin / 'extension-host/windows/x64/extension-host.exe'
+            host.parent.mkdir(parents=True)
+            host.write_bytes(b'original executable fixture')
+            relay = root / 'lcu/native_host.py'
+            relay.parent.mkdir(parents=True)
+            relay.write_text('original relay fixture')
+            home = base / 'account'
+            home.mkdir()
+            local = home / 'AppData/Local'
+            manifest = local / 'OpenAI/extension/com.openai.codexextension.json'
+            env = {'USERPROFILE': str(home), 'LOCALAPPDATA': str(local),
+                   'NODE_REPL_NODE_PATH': 'C:/node.exe', 'CODEX_CLI_PATH': 'C:/codex.exe',
+                   'CUA_REPL_NODE_REPL_PATH': 'C:/node_repl.exe'}
+
+            def original_install(command, **_options):
+                if command[0] == 'reg.exe':
+                    return subprocess.CompletedProcess(command, 0, stdout=f'{manifest} REG_SZ {manifest}')
+                private = next((local / 'lcu/browser').iterdir()) / 'chrome'
+                selected_host = private / 'extension-host/windows/x64/extension-host.exe'
+                manifest.parent.mkdir(parents=True)
+                manifest.write_text(json.dumps({'name': 'com.openai.codexextension',
+                    'path': str(selected_host), 'allowed_origins': ['chrome-extension://fixture/']}))
+                return subprocess.CompletedProcess(command, 0)
+
+            with mock.patch('lcu.browser.platform.system', return_value='Windows'), \
+                 mock.patch.dict(os.environ, {'USERPROFILE': str(home), 'LOCALAPPDATA': str(local)}), \
+                 mock.patch('lcu.runtime.paths', return_value=(app, resources, None, {})), \
+                 mock.patch('lcu.runtime.environment', return_value=env), \
+                 mock.patch('lcu.browser.subprocess.run', side_effect=original_install) as run:
+                destination = install(root)
+            configured = json.loads(manifest.read_text())
+            self.assertEqual(configured['path'], str(destination / 'lcu-native-host.cmd'))
+            self.assertEqual(configured['allowed_origins'], ['chrome-extension://fixture/'])
+            self.assertEqual((destination / 'lcu-native-host.py').read_text(), relay.read_text())
+            self.assertIn(b'@echo off', (destination / 'lcu-native-host.cmd').read_bytes())
+            self.assertEqual((destination / '.lcu-browser-host').read_text(), str(app) + '\n')
+            self.assertEqual(run.call_count, 2)
+
     def test_macos_manifest_locations_match_original_installer(self):
         home = Path('/private/tmp/disposable-home')
         paths = _manifest_paths({'HOME': str(home)}, 'Darwin')
