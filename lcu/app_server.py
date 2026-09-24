@@ -96,8 +96,10 @@ class AppServer:
                     except queue.Empty:
                         continue
                     if isinstance(part, BaseException):
+                        self._chunks.put(part)
                         raise part
                     if part is None:
+                        self._chunks.put(None)
                         raise ValueError('Bundled Codex app-server exited unexpectedly.')
                     self.buffer += part
                     continue
