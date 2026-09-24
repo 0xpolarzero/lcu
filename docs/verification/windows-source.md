@@ -225,7 +225,7 @@ after a valid guest Authenticode check. Candidate f's opt-in Chrome action
 passed through the official extension in the default guest Chrome profile,
 without sign-in. LCU elicited approval for `http://127.0.0.1:8080`, created a
 tab, typed a Unicode marker, clicked Save, received the extension's saved
-accessibility state and screenshot, and closed the original tab. An independent
+accessibility state and screenshot, and closed the test tab through the original API. An independent
 local server confirmed the exact saved marker and `x-browser-agent` on all
 three requests; MCP exited 0. This was a scripted original-MCP run, not a model
 session, and does not verify automatic Windows browser per-turn cleanup. The
