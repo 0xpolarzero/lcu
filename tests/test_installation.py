@@ -297,7 +297,7 @@ class InstallationTests(unittest.TestCase):
              patch('install.subprocess.run', side_effect=[None, failure]) as run, \
              patch('install.install', side_effect=AssertionError('release install reached')):
             with self.assertRaises(subprocess.CalledProcessError):
-                install_main(['--prefix', str(prefix), '--runtime-only'])
+                install_main(['--prefix', str(prefix), '--runtime-only', '--session', 'discover'])
 
         self.assertEqual(run.call_args_list[0].args[0], ['apt-get', 'update'])
         self.assertEqual(run.call_args_list[1].args[0][:3], ['apt-get', 'install', '-y'])
