@@ -1,9 +1,9 @@
 # Windows x64 source and live guest verification (2026-09-25)
 
 The pinned official package, private app copy, thin LCU install, native
-computer use, helper lifecycle, and native agent registration passed in a
-disposable Windows 11 guest. Opt-in Chrome and Windows real-model use remain
-unverified. The first failed candidates below are retained as diagnostic
+computer use, helper lifecycle, native agent registration, and opt-in Chrome
+connector setup passed in a disposable Windows 11 guest. The official
+extension action and Windows real-model use remain unverified. The first failed candidates below are retained as diagnostic
 history; later installed candidates passed the specific gates stated at the
 end of this record.
 
@@ -221,5 +221,15 @@ Claude Code, and Pi 0.73 without the prior Unicode reader exception. The
 generated Windows skill, Pi extension wrapper and Pi commands were present;
 the guest log is `Desktop\lcu-candidate-f-native-setup.log`. No real model
 session was run in those Windows agents. The official Chrome MSI was installed
-after a valid guest Authenticode check, but the opt-in extension action is
-pending. Candidate f is a verification artifact, not a published release.
+after a valid guest Authenticode check. The opt-in connector install and status
+checks passed; the extension action is pending. Candidate f is a verification
+artifact, not a published release.
+
+Candidate f also passed a local scripted-provider Pi 0.73 fixture using normal
+project auto-discovery, without explicit extension or skill flags. The fixture
+discovered the generated `.pi` assets, received the original guide, skill and
+tool descriptions, then made four original CUA calls, including persistent
+JavaScript values `42` and `43` and native Notepad targeting by exact observed
+ID and title. The guest log is `Desktop\lcu-pi-autodiscovery.log`. This was
+not an external model run and does not independently verify Windows per-turn
+cleanup.
