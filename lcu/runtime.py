@@ -131,6 +131,9 @@ def environment(root, resolved=None):
         env.setdefault('BROWSER_USE_CODEX_APP_BUILD_FLAVOR', flavor if flavor in valid_flavors else 'prod')
         env.setdefault('BROWSER_USE_CODEX_APP_VERSION', lock['version'])
     env.setdefault('NODE_REPL_DISABLE_ANALYTICS', '1')
+    # Original browser service switch: do not initialize account identity or
+    # telemetry. The relay already supplies the local agent-header decision.
+    env.setdefault('BROWSER_USE_DISABLE_AMBIENT_NETWORK', '1')
     # Upstream browser routing needs an identity even for a generic MCP client.
     # This names this actual MCP connection, not a Codex model or an approval.
     # Host-supplied request metadata and per-call metadata keep precedence.

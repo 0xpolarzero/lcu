@@ -18,5 +18,7 @@ tag="lcu-browser-verification:${platform#linux/}"
 docker build --platform "$platform" \
   --build-arg "BASE_IMAGE=${LCU_BROWSER_TEST_BASE:-lcu-verification:${platform#linux/}}" \
   --build-arg "BROWSER_KIND=$browser" -t "$tag" "$context"
-docker run --rm --network none --platform "$platform" -e "LCU_BROWSER_KIND=$browser" -v "$repo:/src:ro" \
+# Docker's default seccomp denies the namespaces used by Chrome's own sandbox.
+# Relax that test-container filter; never launch Chrome with --no-sandbox.
+docker run --rm --network none --security-opt seccomp=unconfined --platform "$platform" -e "LCU_BROWSER_KIND=$browser" -v "$repo:/src:ro" \
   "$tag" dbus-run-session -- bash /src/tests/browser_session.sh

@@ -62,6 +62,7 @@ class UpstreamRuntimeTests(unittest.TestCase):
         self.assertEqual(env['BROWSER_USE_TINYSKY_ENABLED'], '1')
         self.assertEqual(env['BROWSER_USE_CODEX_APP_BUILD_FLAVOR'], 'prod')
         self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], '26.915.31945')
+        self.assertEqual(env['BROWSER_USE_DISABLE_AMBIENT_NETWORK'], '1')
 
     def test_caller_configuration_and_policies_survive(self):
         settings = {'CUA_REPL_BROWSER_ENV': 'orbit', 'CUA_REPL_ENABLED_SURFACES': 'browser',
@@ -72,6 +73,7 @@ class UpstreamRuntimeTests(unittest.TestCase):
                     'BROWSER_USE_AVAILABLE_BACKENDS': 'chrome,cdp,iab', 'BROWSER_USE_CONFIG_PATH': '/browser.json',
                     'NODE_REPL_ENABLE_NETWORK_ISOLATION': '1', 'NODE_REPL_DISABLE_ANALYTICS': '0',
                     'BROWSER_USE_TINYSKY_ENABLED': '0', 'NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS': '2300',
+                    'BROWSER_USE_DISABLE_AMBIENT_NETWORK': '0',
                     'BROWSER_USE_CODEX_APP_BUILD_FLAVOR': 'alpha', 'BROWSER_USE_CODEX_APP_VERSION': 'fixture'}
         with patch.dict(os.environ, settings, clear=True):
             env = environment(self.root)
