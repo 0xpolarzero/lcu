@@ -31,7 +31,7 @@ try:
     initial = client.js('await cua.getState();')
     assert core in text(initial), 'First-use API instructions were changed or truncated'
     assert policy in text(initial), 'Default confirmation policy was changed or truncated'
-    surfaces = json.loads(text(client.js('nodeRepl.write({computer:typeof cua.getApp,browser:typeof cua.createBrowserTab});')))
+    surfaces = json.loads(text(client.js('nodeRepl.write(JSON.stringify({computer:typeof cua.getApp,browser:typeof cua.createBrowserTab}));')))
     assert surfaces == {'computer': 'function', 'browser': 'undefined'}, surfaces
     assert (Path.home() / '.local/share/lcu/skills/lcu/references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').read_text() == core
     for attempt in range(30):
