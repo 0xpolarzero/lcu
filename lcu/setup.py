@@ -347,7 +347,7 @@ def generate_skill(source, home, release_root):
 
 
 def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, environ=None):
-    """Delegate registration and return phase failures; no client executable needed."""
+    """Delegate registration and return phase failures."""
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
     skill_source = generate_skill(source, home, release_root)
@@ -362,8 +362,9 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                          '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
         if name == 'pi':
             pi = shutil.which('pi', path=env.get('PATH'))
-            extension = (home / '.local/share/lcu/pi/user.mjs' if scope == 'user'
-                         else project / '.pi/lcu-extension.mjs')
+            extension = home / '.local/share/lcu/pi/extension.mjs'
+            selected_command = (home / '.local/share/lcu/pi/command.json' if scope == 'user'
+                                else project / '.pi/lcu-command.json')
             commands = (('skill', skill_command),
                         ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']), str(extension)]))
         else:
@@ -381,8 +382,15 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                     if not adapter.is_file():
                         raise ValueError(f'LCU Pi adapter missing: {adapter}')
                     wrapper = ('import lcu from ' + json.dumps(adapter.as_uri()) + ';\n'
-                               'export default pi => lcu(pi, {command: ' + json.dumps(command) + '});\n').encode()
-                    apply_changes([Change(extension, read_file(extension), wrapper)])
+                               'import {existsSync, readFileSync} from "node:fs";\n'
+                               'import {join} from "node:path";\n'
+                               'const project = join(process.cwd(), ".pi/lcu-command.json");\n'
+                               'const selected = existsSync(project) ? project : '
+                               + json.dumps(str(home / '.local/share/lcu/pi/command.json')) + ';\n'
+                               'export default pi => lcu(pi, {command: JSON.parse(readFileSync(selected, "utf8"))});\n').encode()
+                    config = (json.dumps(command) + '\n').encode()
+                    apply_changes([Change(extension, read_file(extension), wrapper),
+                                   Change(selected_command, read_file(selected_command), config)])
                 phase_env = {**env, 'PI_OFFLINE': '1'} if phase == 'extension' else env
                 result = subprocess.run(argv, cwd=cwd, env=phase_env, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, timeout=120)

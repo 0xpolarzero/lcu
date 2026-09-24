@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -15,14 +15,31 @@ function chunk(model, delta, finishReason = null) {
     choices: [{ index: 0, delta, finish_reason: finishReason }] };
 }
 
-test('installed Pi uses original CUA descriptions and persistent pure JS',
+test('installed Pi de-duplicates user and project LCU packages and uses project command',
   { skip: !process.env.PI_BIN || !process.env.LCU_REAL_COMMAND, timeout: 45_000 }, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-original-'));
     const agentDir = join(directory, 'agent');
     mkdirSync(agentDir);
-    const installedExtension = join(directory, 'lcu-extension.mjs');
+    const project = join(directory, 'project');
+    mkdirSync(project);
+    const packageDir = join(directory, '.local/share/lcu/pi');
+    mkdirSync(packageDir, { recursive: true });
+    const installedExtension = join(packageDir, 'extension.mjs');
+    writeFileSync(join(packageDir, 'command.json'), '["/invalid/user/command"]\n');
+    mkdirSync(join(project, '.pi'));
+    writeFileSync(join(project, '.pi/lcu-command.json'), `${process.env.LCU_REAL_COMMAND}\n`);
     writeFileSync(installedExtension, `import lcu from ${JSON.stringify(pathToFileURL(extension).href)};\n` +
-      `export default pi => lcu(pi, {command: ${process.env.LCU_REAL_COMMAND}});\n`);
+      'import {existsSync, readFileSync} from "node:fs";\n' +
+      'import {join} from "node:path";\n' +
+      'const project = join(process.cwd(), ".pi/lcu-command.json");\n' +
+      `const selected = existsSync(project) ? project : ${JSON.stringify(join(packageDir, 'command.json'))};\n` +
+      'export default pi => lcu(pi, {command: JSON.parse(readFileSync(selected, "utf8"))});\n');
+    const installEnv = isolatedEnv(directory, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1' });
+    for (const [cwd, extra] of [[directory, []], [project, ['-l']]]) {
+      const installed = spawnSync(process.env.PI_BIN, ['install', ...extra, installedExtension],
+        { cwd, env: installEnv, encoding: 'utf8' });
+      assert.equal(installed.status, 0, installed.stderr);
+    }
     const requests = [];
     const server = createServer(async (request, response) => {
       if (request.url !== '/v1/chat/completions') { response.writeHead(404).end(); return; }
@@ -52,10 +69,10 @@ test('installed Pi uses original CUA descriptions and persistent pure JS',
     } } }));
     try {
       const child = spawn(process.env.PI_BIN, ['-p', '--mode', 'json', '--no-session',
-        '--no-builtin-tools', '--no-extensions', '-e', installedExtension,
+        '--no-builtin-tools',
         '--no-skills', '--no-context-files', '--provider', 'fixture', '--model', 'scripted',
         'Call original js twice with the supplied pure JavaScript arithmetic, then finish.'],
-      { cwd: directory, env: isolatedEnv(directory, { PI_CODING_AGENT_DIR: agentDir,
+      { cwd: project, env: isolatedEnv(directory, { PI_CODING_AGENT_DIR: agentDir,
         NODE_REPL_DISABLE_ANALYTICS: '1' }), stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '', stderr = '';
       child.stdout.on('data', part => { stdout += part; });
@@ -72,8 +89,10 @@ test('installed Pi uses original CUA descriptions and persistent pure JS',
       assert.ok(js);
       assert.match(js.function.description, /Control native apps or browsers/);
       assert.ok(requests[0].tools.some(tool => tool.function.name === 'js_reset'));
+      assert.equal(requests[0].tools.filter(tool => tool.function.name === 'js').length, 1);
       assert.ok(!requests[0].tools.some(tool => tool.function.name === 'turn_ended'));
       assert.match(JSON.stringify(requests[0].messages), /UI automation through cua_repl/);
+      assert.equal((JSON.stringify(requests[0].messages).match(/UI automation through cua_repl/g) ?? []).length, 1);
       assert.match(JSON.stringify(requests[1].messages), /42/);
       assert.match(JSON.stringify(requests[2].messages), /43/);
       const events = stdout.split('\n').filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return {}; } });

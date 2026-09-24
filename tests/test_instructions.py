@@ -194,7 +194,7 @@ class InstalledInstructionTests(unittest.TestCase):
                 self.assertEqual(argv[argv.index('--agent') + 1], 'pi')
                 self.assertIn('--copy', argv)
                 return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
-            self.assertEqual(argv[1:3], ['install', str(self.home / '.local/share/lcu/pi/user.mjs')])
+            self.assertEqual(argv[1:3], ['install', str(self.home / '.local/share/lcu/pi/extension.mjs')])
             self.assertEqual(kwargs['env']['PI_OFFLINE'], '1')
             return SimpleNamespace(returncode=0, stdout='Installed')
 
@@ -207,9 +207,10 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][0][0], '/bin/pi')
-        wrapper = (self.home / '.local/share/lcu/pi/user.mjs').read_text()
+        wrapper = (self.home / '.local/share/lcu/pi/extension.mjs').read_text()
         self.assertIn((self.release / 'adapters/pi/index.ts').as_uri(), wrapper)
-        self.assertIn('command: ["/usr/bin/lcu"]', wrapper)
+        self.assertIn('.pi/lcu-command.json', wrapper)
+        self.assertEqual(json.loads((self.home / '.local/share/lcu/pi/command.json').read_text()), ['/usr/bin/lcu'])
 
     def test_selected_app_descriptor_and_resources_are_required(self):
         self.assertEqual(installed_app_resources(self.release), self.resources.resolve())
