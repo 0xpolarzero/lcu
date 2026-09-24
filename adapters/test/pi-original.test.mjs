@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,15 +25,16 @@ test('installed Pi de-duplicates user and project LCU packages and uses project 
     const packageDir = join(directory, '.local/share/lcu/pi');
     mkdirSync(packageDir, { recursive: true });
     const installedExtension = join(packageDir, 'extension.mjs');
-    writeFileSync(join(packageDir, 'command.json'), '["/invalid/user/command"]\n');
+    writeFileSync(join(packageDir, 'commands.json'), JSON.stringify({
+      user: ['/invalid/user/command'], projects: { [realpathSync(project)]: JSON.parse(process.env.LCU_REAL_COMMAND) },
+    }));
     mkdirSync(join(project, '.pi'));
-    writeFileSync(join(project, '.pi/lcu-command.json'), `${process.env.LCU_REAL_COMMAND}\n`);
+    // A repository file cannot replace the account-owned command selection.
+    writeFileSync(join(project, '.pi/lcu-command.json'), '["/invalid/repository/command"]\n');
     writeFileSync(installedExtension, `import lcu from ${JSON.stringify(pathToFileURL(extension).href)};\n` +
-      'import {existsSync, readFileSync} from "node:fs";\n' +
-      'import {join} from "node:path";\n' +
-      'const project = join(process.cwd(), ".pi/lcu-command.json");\n' +
-      `const selected = existsSync(project) ? project : ${JSON.stringify(join(packageDir, 'command.json'))};\n` +
-      'export default pi => lcu(pi, {command: JSON.parse(readFileSync(selected, "utf8"))});\n');
+      'import {readFileSync, realpathSync} from "node:fs";\n' +
+      `const config = JSON.parse(readFileSync(${JSON.stringify(join(packageDir, 'commands.json'))}, "utf8"));\n` +
+      'export default pi => lcu(pi, {command: config.projects?.[realpathSync(process.cwd())] ?? config.user});\n');
     const installEnv = isolatedEnv(directory, { PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: '1' });
     for (const [cwd, extra] of [[directory, []], [project, ['-l']]]) {
       const installed = spawnSync(process.env.PI_BIN, ['install', ...extra, installedExtension],
@@ -85,6 +86,7 @@ test('installed Pi de-duplicates user and project LCU packages and uses project 
       clearTimeout(timer);
       assert.equal(exit, 0, stderr.slice(-1800));
       assert.equal(requests.length, 3, stdout.slice(-1800));
+      assert.ok(requests[0].tools, JSON.stringify(requests[0]).slice(0, 1500));
       const js = requests[0].tools.find(tool => tool.function.name === 'js');
       assert.ok(js);
       assert.match(js.function.description, /Control native apps or browsers/);

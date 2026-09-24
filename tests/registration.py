@@ -55,8 +55,10 @@ pi_packages = json.loads(pi_settings.read_text())['packages']
 user_extension = home / '.local/share/lcu/pi/extension.mjs'
 assert any((pi_settings.parent / item).resolve() == user_extension.resolve()
            for item in pi_packages if isinstance(item, str)), pi_packages
-assert json.loads((home / '.local/share/lcu/pi/command.json').read_text()) == [command]
-assert json.loads((project / '.pi/lcu-command.json').read_text()) == [command]
+pi_commands = json.loads((home / '.local/share/lcu/pi/commands.json').read_text())
+assert pi_commands['user'] == [command]
+assert pi_commands['projects'][str(project.resolve())] == [command]
+assert not (project / '.pi/lcu-command.json').exists()
 project_pi_settings = project / '.pi/settings.json'
 assert project_pi_settings.is_file(), 'Pi project extension must be registered independently'
 project_pi_packages = json.loads(project_pi_settings.read_text())['packages']

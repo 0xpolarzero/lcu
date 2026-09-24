@@ -209,8 +209,10 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(calls[1][0][0], '/bin/pi')
         wrapper = (self.home / '.local/share/lcu/pi/extension.mjs').read_text()
         self.assertIn((self.release / 'adapters/pi/index.ts').as_uri(), wrapper)
-        self.assertIn('.pi/lcu-command.json', wrapper)
-        self.assertEqual(json.loads((self.home / '.local/share/lcu/pi/command.json').read_text()), ['/usr/bin/lcu'])
+        self.assertIn('realpathSync(process.cwd())', wrapper)
+        self.assertNotIn('.pi/lcu-command.json', wrapper)
+        self.assertEqual(json.loads((self.home / '.local/share/lcu/pi/commands.json').read_text()),
+                         {'projects': {}, 'user': ['/usr/bin/lcu']})
 
     def test_selected_app_descriptor_and_resources_are_required(self):
         self.assertEqual(installed_app_resources(self.release), self.resources.resolve())

@@ -363,8 +363,7 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
         if name == 'pi':
             pi = shutil.which('pi', path=env.get('PATH'))
             extension = home / '.local/share/lcu/pi/extension.mjs'
-            selected_command = (home / '.local/share/lcu/pi/command.json' if scope == 'user'
-                                else project / '.pi/lcu-command.json')
+            selected_command = home / '.local/share/lcu/pi/commands.json'
             commands = (('skill', skill_command),
                         ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']), str(extension)]))
         else:
@@ -382,15 +381,21 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                     if not adapter.is_file():
                         raise ValueError(f'LCU Pi adapter missing: {adapter}')
                     wrapper = ('import lcu from ' + json.dumps(adapter.as_uri()) + ';\n'
-                               'import {existsSync, readFileSync} from "node:fs";\n'
-                               'import {join} from "node:path";\n'
-                               'const project = join(process.cwd(), ".pi/lcu-command.json");\n'
-                               'const selected = existsSync(project) ? project : '
-                               + json.dumps(str(home / '.local/share/lcu/pi/command.json')) + ';\n'
-                               'export default pi => lcu(pi, {command: JSON.parse(readFileSync(selected, "utf8"))});\n').encode()
-                    config = (json.dumps(command) + '\n').encode()
+                               'import {readFileSync, realpathSync} from "node:fs";\n'
+                               'const config = JSON.parse(readFileSync('
+                               + json.dumps(str(selected_command)) + ', "utf8"));\n'
+                               'export default pi => lcu(pi, {command: '
+                               'config.projects?.[realpathSync(process.cwd())] ?? config.user});\n').encode()
+                    previous = read_file(selected_command)
+                    config = json.loads(previous) if previous else {'projects': {}}
+                    if not isinstance(config, dict) or not isinstance(config.get('projects'), dict):
+                        raise ValueError(f'Invalid LCU Pi command configuration: {selected_command}')
+                    if scope == 'user':
+                        config['user'] = command
+                    else:
+                        config['projects'][str(project.resolve(strict=True))] = command
                     apply_changes([Change(extension, read_file(extension), wrapper),
-                                   Change(selected_command, read_file(selected_command), config)])
+                                   Change(selected_command, previous, (json.dumps(config, indent=2) + '\n').encode())])
                 phase_env = {**env, 'PI_OFFLINE': '1'} if phase == 'extension' else env
                 result = subprocess.run(argv, cwd=cwd, env=phase_env, stdin=subprocess.DEVNULL,
                                         capture_output=True, text=True, timeout=120)
@@ -652,7 +657,18 @@ def main(argv=None):
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
-        print('Check Chrome setup separately with `lcu browser status`; a status check does not prove a live connection.')
+        if not args.export:
+            try:
+                browser_status = subprocess.run([str(runtime), 'browser', 'status'],
+                                                capture_output=True, text=True, timeout=20)
+                if browser_status.stdout.strip():
+                    print(browser_status.stdout.strip())
+                if browser_status.returncode and not browser_status.stdout.strip():
+                    print('Browser status unavailable; run `lcu browser status` after setup.')
+            except (OSError, subprocess.SubprocessError):
+                print('Browser status unavailable; run `lcu browser status` after setup.')
+        else:
+            print('Check Chrome setup on the destination with `lcu browser status`; a status check does not prove a live connection.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         if args.check_desktop:
