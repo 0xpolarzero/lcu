@@ -1,9 +1,11 @@
-# Windows x64 source and live guest verification (2026-09-24)
+# Windows x64 source and live guest verification (2026-09-25)
 
-Windows is not a supported LCU target. The exact official package and thin LCU
-archive installed in a disposable Windows 11 guest, but the original native
-computer-use path failed before a screenshot or input action. The results below
-separate installed-archive validation, original MCP transport, and native use.
+The pinned official package, private app copy, thin LCU install, native
+computer use, helper lifecycle, and native agent registration passed in a
+disposable Windows 11 guest. Opt-in Chrome and Windows real-model use remain
+unverified. The first failed candidates below are retained as diagnostic
+history; later installed candidates passed the specific gates stated at the
+end of this record.
 
 The [official OpenAI Windows update manifest](https://persistent.oaistatic.com/codex-app-prod/windows-store-update.json)
 identified `OpenAI.Codex` build `26.917.9434.0`. Its
@@ -77,18 +79,17 @@ work with the relay. This remains a browser parity blocker, not a reason to
 bypass the original extension's approval policy.
 
 `lcu/windows.py` reads the registered current-user package location through
-`Get-AppxPackage`, checks exact identity/version/architecture, and hashes each
-runtime component before returning original paths. Microsoft documents that
+`Get-AppxPackage`, checks exact identity/version/architecture and Store
+signature kind, and hashes pinned runtime components. Microsoft documents that
 MSIX packages are [deployed per user into a protected, read-only package
 location](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes).
-The resolver neither extracts nor modifies the installed app. The Windows
-branch in `lcu/runtime.py` selects the verified package paths and launches its
-original Node/CUA entrypoint through `bin/lcu.cmd`. The thin archive and
-runtime-only installer now have both fixture coverage and a live installation
-check. Account-local agent registration, Chrome relay, and native control do
-not have successful Windows guest tests.
+Because direct execution from that location failed, the installer copies the
+complete original app into a validated private generation without changing
+the registered source or its policy. `lcu/runtime.py` selects that private app;
+the original native host is derived under the thin release and serves the
+original sandboxed CUA process. The installed guest results are below.
 
-### Live guest: installation and selected executable
+### Live guest: initial installation and selected executable
 
 The task-owned KVM guest ran [Microsoft's Windows 11 Enterprise Evaluation
 ISO](https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise),
@@ -107,7 +108,7 @@ UAC approval, Windows registered `OpenAI.Codex` `26.917.9434.0` x64, publisher
 installed path was `C:\Program Files\WindowsApps\OpenAI.Codex_26.917.9434.0_x64__2p2nqsd0c76g0`.
 Package installation did not launch the ChatGPT UI.
 
-The experimental thin ZIP built from source `5a6aaf5` had SHA-256
+The initial experimental thin ZIP built from source `5a6aaf5` had SHA-256
 `74015e33f7b42068fcce3cd7c25324ecf76d5eef37282302cd9d888a9899ec8a`.
 The ordinary account extracted it and ran
 `python -B scripts\install_windows.py --prefix %LOCALAPPDATA%\LCU --runtime-only`.
@@ -116,7 +117,8 @@ and original CUA manifest validation passed. `%LOCALAPPDATA%\LCU\lcu.cmd
 --version` printed `lcu 0.3.0 (ChatGPT windows 26.917.9434.0; CUA
 0.0.16/20260915001755-492f19756c31)`. The actual installed `%LOCALAPPDATA%\LCU\lcu.cmd
 doctor` then failed `LCU: [WinError 5] Access is denied` before native control.
-The archive/installer pass is not a usable-runtime result.
+That archive/installer pass was not a usable-runtime result; later candidates
+changed the private app and original-host launch paths.
 
 As the ordinary account, `Get-FileHash` read the installed Node and Node REPL;
 their hashes matched the lock. `Get-Acl` listed `BUILTIN\Users` with
@@ -130,7 +132,7 @@ task-owned `LOCALAPPDATA` directory matched source SHA-256
 and printed `v24.21.0`, exit 0. This proves location-dependent launch behavior
 for that one binary only.
 
-### Live guest: intact original-runtime diagnostic
+### Live guest: intact original-runtime diagnostic before host extraction
 
 To test whether private reuse suffices without changing policy, an ordinary
 account used `robocopy /E /COPY:DAT /DCOPY:DAT /R:1 /W:1` to copy the complete
@@ -151,13 +153,12 @@ rejected `--help` as an unknown argument (exit 1). This differential shows a
 child-process restriction in the original Windows REPL context, including the
 Sky helper spawn. It does not prove how Windows implements that restriction.
 
-Source inspection shows the original ChatGPT app hosts a named-pipe transport
-for its helper, while the inspected package exposes no standalone pipe-host
-entry point. No synthetic pipe server, undocumented runner, sandbox disabling,
-or package-permission change was used. A native screenshot, Notepad input/save,
-independent file oracle, and opt-in Chrome action remain unproven. The Windows
-build must stay experimental until an original, supported standalone native
-transport passes those live checks. Guest screenshots and logs remain outside
+Source inspection showed the original ChatGPT app hosts a named-pipe transport
+for its helper. At this diagnostic stage, no pipe host had been extracted from
+the original package; no synthetic server, undocumented runner, sandbox
+disabling, or package-permission change was used. This `EPERM` result is
+historical: later candidates used the exact-source original host and passed
+the native gates below. Guest screenshots and logs remain outside
 Git and release archives. Local screenshots of the installed `--version`,
 shipped `doctor` denial, one-file Node copy, scoped zero-match event query,
 and full-copy `EPERM` comparison are `/private/tmp/lcu-win-sealfix-installed.png`,
@@ -167,3 +168,49 @@ and full-copy `EPERM` comparison are `/private/tmp/lcu-win-sealfix-installed.png
 `/private/tmp/lcu-win-full-copy-spawn-eperm.png` respectively. The source
 scripts and complete raw logs remain in task-owned temporary storage and the
 disposable guest; no host credential was copied into that evidence.
+
+### Live guest: private original runtime and installed candidates
+
+The ordinary-account copy of the complete registered app preserved the pinned
+original bytes and ran its original Node and CUA MCP. The extracted original
+Windows host supplied the named-pipe helper transport outside the CUA sandbox;
+the sandbox stayed enabled. The first candidate installer failed on a long
+original npm path with `WinError 206`. The corrected installer used short
+generation names and Windows extended-length paths for internal copying and
+validation. It left public descriptors as ordinary paths, did not change
+WindowsApps ACLs or system policy, and selected a release only after validating
+the complete private app generation and thin release.
+
+Installed candidate c, source `473de85`, thin ZIP SHA-256
+`c495776126c3f7ec2b9fda7e52efe1bc23dc75c430114ae64b439ecdc45d77f6`,
+passed default-prefix installation, `--version`, and `doctor` under the
+ordinary guest account. The original MCP exposed `cua.getApp` while
+`cua.createBrowserTab` was undefined in default native mode. It enumerated
+Notepad and Explorer, captured a Notepad screenshot, replaced text using the
+original `ctrl+a` and Unicode `typeText`, and saved an existing task-owned file
+using `ctrl+s`. An independent file read matched
+`Installed LCU Windows proof: café λ 東京 2026-09-25`, SHA-256
+`2a788e7b40f8560fe94baeededa7ebf94ec9907b090ee358c1f45d2ae5693b82d`.
+The guest log is `Desktop\lcu-installed-native-probe.log`. A separate attempt
+to save a new file through a window-targeted Save As sequence did not complete;
+that sequence alone does not establish an upstream defect or rule out another
+supported way to operate the modal.
+
+Installed candidate d, source `a3abd9c`, thin ZIP SHA-256
+`935d95a331fb03f6e497c376ce3c193b5ce2cf9121cf9e286a2089c1b15f46ee`,
+passed the actual original MCP lifecycle sequence: a matching Stop ended the
+first native helper; a stale prior-turn Stop left the new helper running;
+matching Interrupt ended it; and MCP shutdown ended a third helper. The guest
+log is `Desktop\lcu-installed-lifecycle-probe.log`. This tests process cleanup
+for the named turns, not agent-model behavior.
+
+Installed candidate f, source `36c84b769250651e5af5e6563d1dd28b98c345f4`,
+thin ZIP SHA-256
+`e28a0e176fc8d049eee3f8b77004d7f6c759bfc4c20fff9cf01ee5fcc484765b`,
+completed all six project-scoped native registration phases for Codex CLI,
+Claude Code, and Pi 0.73 without the prior Unicode reader exception. The
+generated Windows skill, Pi extension wrapper and Pi commands were present;
+the guest log is `Desktop\lcu-candidate-f-native-setup.log`. No real model
+session was run in those Windows agents. The official Chrome MSI was installed
+after a valid guest Authenticode check, but the opt-in extension action is
+pending. Candidate f is a verification artifact, not a published release.
