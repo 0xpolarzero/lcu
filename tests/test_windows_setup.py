@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from contextlib import nullcontext
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -11,6 +13,26 @@ from lcu import setup
 
 
 class WindowsSetupTests(unittest.TestCase):
+    def test_linux_discover_setup_keeps_version_probe_on_direct_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary).resolve() / 'lcu'
+            binary = prefix / 'current/bin/lcu'
+            session = prefix / 'current/bin/lcu-session'
+            binary.parent.mkdir(parents=True)
+            for path in (binary, session):
+                path.write_text('fixture')
+                path.chmod(0o755)
+            account = SimpleNamespace(pw_name='fixture', pw_uid=os.getuid(), pw_dir=str(prefix.parent))
+            with mock.patch.object(setup.sys, 'platform', 'linux'), \
+                 mock.patch.object(setup, 'validate', return_value=(account, ['codex'])), \
+                 mock.patch.object(setup, 'installer_environment'), \
+                 mock.patch.object(setup, 'installer_paths'), \
+                 mock.patch.object(setup, 'setup_lock', return_value=nullcontext()), \
+                 mock.patch.object(setup, 'configure', return_value=[]), \
+                 mock.patch.object(setup.subprocess, 'run') as run:
+                setup.main(['--prefix', str(prefix), '--agent', 'codex', '--session', 'discover', '--yes'])
+            self.assertEqual(run.call_args_list[0].args[0], [str(binary), '--version'])
+
     def test_registered_windows_account_and_direct_session_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary).resolve()

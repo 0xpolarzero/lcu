@@ -350,6 +350,8 @@ def generate_skill(source, home, release_root, *, chrome=False):
             wrapper = wrapper.replace('For native macOS windows, target an exact observed window ID. ', '')
         elif target == 'windows':
             wrapper = wrapper.replace('Linux', 'Windows').replace('/linux/', '/windows/')
+            wrapper = wrapper.replace('For native Windows windows, target an exact observed window ID.',
+                                      'For native Windows apps, target an exact observed window ID.')
         if chrome:
             platform_name = {'darwin': 'macOS', 'linux': 'Linux', 'windows': 'Windows'}[target]
             wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
@@ -691,7 +693,8 @@ def main(argv=None):
             if not sys.stdin.isatty():
                 raise ValueError('Noninteractive setup requires --agent ID (repeatable), --agent all, --agent auto, or --export PATH.')
             names = choose_agents(home)
-        subprocess.run(desktop_command + ['--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
+        direct_runtime = desktop_command if sys.platform == 'win32' else [str(runtime)]
+        subprocess.run(direct_runtime + ['--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
         tools_root = release_root / 'agent-tools'
         if not args.export:
             installer_environment(home, names)
@@ -729,7 +732,7 @@ def main(argv=None):
                 failures = configure(names, home, source, command, tools_root, release_root,
                                      scope=args.scope, project=args.project, chrome=args.chrome)
                 if failures:
-                    retry = [*desktop_command, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
+                    retry = [*direct_runtime, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
                     if args.project:
                         retry += ['--project', str(args.project)]
@@ -742,7 +745,7 @@ def main(argv=None):
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.chrome:
             try:
-                browser_status = subprocess.run(desktop_command + ['browser', 'status'],
+                browser_status = subprocess.run(direct_runtime + ['browser', 'status'],
                                                 capture_output=True, text=True, timeout=20)
                 if browser_status.stdout.strip():
                     print(browser_status.stdout.strip())
