@@ -12,17 +12,14 @@ Build the Darwin archive using [development instructions](DEVELOPMENT.md), extra
 
 This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture; Windows is unimplemented.
 
-Pi uses a native extension instead of requiring built-in MCP support. Install LCU with `--runtime-only`, then generate its account-local skill and register the original Chrome native host:
+Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
 ~~~sh
-~/.local/share/lcu/current/bin/lcu setup --export "$HOME/lcu-bootstrap" --yes
-~/.local/share/lcu/current/bin/lcu browser install
-LCU_MCP_COMMAND="[\"$HOME/.local/share/lcu/current/bin/lcu\"]" \
-  pi -e "$HOME/.local/share/lcu/current/adapters/pi/index.ts" \
-  --skill "$HOME/.local/share/lcu/skills/lcu/SKILL.md"
+./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent pi --yes
+pi
 ~~~
 
-Choose an unused export directory. The export is a portable bootstrap; the `--skill` path above contains the original local instructions. Linux can use the same extension with the `lcu-session` command shown in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
+Setup installs the original local skill, registers the Chrome native host, and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
 
 Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS Screen Recording or Accessibility: those permissions belong to the original signed Codex Computer Use helper and may require approval in System Settings. Browser extension installation and unresolved site approvals also remain required. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
@@ -50,7 +47,7 @@ The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Elec
 
 ## Account and agent registration
 
-Use --agent codex, claude-code, cursor, gemini-cli, opencode, vscode, or copilot-cli. Repeat --agent for several, use all for every supported agent, or auto for detected agents. Aliases claude, gemini and copilot remain available. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references before it registers MCP. It preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files.
+Use --agent pi, codex, or claude-code. Repeat --agent for several, use all for these three agents, or auto for detected agents. The alias claude remains available. Install the selected agent separately; LCU does not install or authenticate it. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references. Pi receives its native extension; Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export; additional integrations are open to contributions.
 
 ~~~sh
 sudo ./scripts/install.sh --user alice --agent codex --agent claude-code --yes
@@ -73,15 +70,20 @@ For Chrome, the selected browser and extension must run under the same desktop a
 
 ~~~sh
 /opt/lcu/current/bin/lcu browser install
+/opt/lcu/current/bin/lcu browser status
 ~~~
 
-This invokes the original plugin's native-host installer from a user-local copy, then points the account's host manifest at LCU's relay. The relay locally enables the official extension's `x-browser-agent` label so Chrome actions do not require Codex sign-in. Sites can see that label; it is not a login credential. Then enable the official extension in the intended Chrome profile using [OpenAI's extension setup instructions](https://learn.chatgpt.com/docs/chrome-extension). [Google's Linux installation guide](https://support.google.com/chrome/answer/95346?hl=en) lists x86-64 and ARM64 Chrome packages. Chrome uses its user configuration for [native messaging host discovery](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging); a custom `--user-data-dir` profile must have access to the installed host manifest. Browser/extension compatibility with this pinned app remains a live test requirement. LCU does not select or change the default browser, browser profile, extension permissions, sign-in or site approvals. Do not use --browser-host, --with-browser-host, or lcu browser serve/protocol; they were IAB-only and now return migration errors.
+The official ChatGPT extension is how the original runtime reads and controls external Chrome tabs. It is required even when LCU runs without Codex sign-in. Desktop applications do not need it. Use your intended Chrome profile; a separate test profile is not an LCU requirement.
+
+`browser install` invokes the original plugin's native-host installer from a user-local copy, then points the account's host manifest at LCU's relay. The relay locally enables the official extension's `x-browser-agent` label so Chrome actions do not require Codex sign-in. Sites can see that label; it is not a login credential. Then enable the official extension in the intended Chrome profile using [OpenAI's extension setup instructions](https://learn.chatgpt.com/docs/chrome-extension). `browser status` uses the original diagnostics to report whether the extension is enabled and the connector points to this LCU installation; it changes nothing and does not claim a live connection. Complete the check by asking your agent to use LCU to list Chrome tabs.
+
+[Google's Linux installation guide](https://support.google.com/chrome/answer/95346?hl=en) lists x86-64 and ARM64 Chrome packages. Chrome uses its user configuration for [native messaging host discovery](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging); a custom `--user-data-dir` profile must have access to the installed host manifest. Browser/extension compatibility with this pinned app remains a live test requirement. LCU does not select or change the default browser, browser profile, extension permissions, sign-in or site approvals. Do not use --browser-host, --with-browser-host, or lcu browser serve/protocol; they were IAB-only and now return migration errors.
 
 The native-host manifest belongs to the Linux account, so other apps using this same extension and browser account also reach LCU's relay. The official extension stores the header-on decision in its Chrome profile after an agent session. Installing or removing the relay therefore does not automatically restore the original account-specific header decision in that profile.
 
 Readiness is staged: package installed, desktop ready, extension discovered, then a browser action independently observed on a page under the intended no-sign-in policy. The installed ARM64 and x86-64 builds passed navigation, Unicode input, click, screenshot and tab close in disposable Ubuntu Chrome profiles; the local page observed `x-browser-agent` on browser requests. Site approval is still required. This local override does not reproduce a user-specific Codex feature-gate decision.
 
-The agent host must support MCP site-approval elicitation for Chrome actions. OpenCode 1.18.32 delivered LCU's tools and instructions but did not advertise elicitation, so the pinned browser provider blocked its page request. Goose 1.51.0 sends `server/discover` before the pinned server's `initialize`. For Goose, append `--mcp-discovery-compat` to the generated LCU MCP export's `args` after `lcu-export`, and use Goose's interactive mode so it can present site approval. This opt-in flag answers only that initial discovery request with JSON-RPC `Method not found`, then launches the unchanged original MCP server; ordinary clients should use the export without the flag. A disposable Goose run completed a localhost page action after explicit scoped approval. See the [verification record](verification/installed-app-2026-09-23.md).
+Custom harnesses must deliver the original instructions and images, present site approvals, and send completion/interruption events. The shared client and Pi reference adapter are documented in [adapters](ADAPTERS.md). Earlier OpenCode and Goose experiments remain in the [verification record](verification/installed-app-2026-09-23.md); neither is an advertised release integration.
 
 ## Upgrades and rollback
 
