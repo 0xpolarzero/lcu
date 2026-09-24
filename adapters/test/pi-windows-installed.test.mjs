@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,9 +29,11 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
     const project = process.env.LCU_TEST_PROJECT;
     const extension = process.env.LCU_TEST_EXTENSION;
     const skill = process.env.LCU_TEST_SKILL;
-    for (const path of [process.env.PI_CLI_JS, extension, skill]) {
+    const installedSkill = join(project, '.pi', 'skills', 'lcu', 'SKILL.md');
+    for (const path of [process.env.PI_CLI_JS, extension, skill, installedSkill]) {
       assert.ok(existsSync(path), `Missing installed test input: ${path}`);
     }
+    assert.match(readFileSync(installedSkill, 'utf8'), /Control Windows desktop windows/);
     const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-windows-'));
     const agentDir = join(directory, 'agent');
     mkdirSync(agentDir);
@@ -71,7 +73,7 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
           maxTokens: 512 }],
       } } }));
       const args = [process.env.PI_CLI_JS, '-p', '--mode', 'json', '--no-session',
-        '--skill', skill, '--no-context-files',
+        '--no-context-files',
         '--provider', 'fixture', '--model', 'scripted',
         'Use the supplied original CUA tools in the generated Windows desktop fixture.'];
       const child = spawn(process.execPath, args, { cwd: project, env: childEnv(agentDir),
