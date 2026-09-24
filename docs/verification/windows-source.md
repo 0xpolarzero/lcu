@@ -42,10 +42,14 @@ bypass the original extension's approval policy.
 runtime component before returning original paths. Microsoft documents that
 MSIX packages are [deployed per user into a protected, read-only package
 location](https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes).
-The resolver neither extracts nor modifies the installed app. Five disposable
-fixture tests passed with `python3 -B -m unittest tests.test_windows_package`;
-they do not prove native deployment, process launch, helper transport,
-browser control, or GUI behavior.
+The resolver neither extracts nor modifies the installed app. The Windows
+branch in `lcu/runtime.py` selects the verified package paths and launches its
+original Node/CUA entrypoint through `bin/lcu.cmd`. Ten disposable fixture
+tests passed across `tests.test_windows_package` and
+`tests.test_windows_runtime`; they do not prove native deployment, process
+launch, helper transport, browser control, or GUI behavior. Windows `lcu setup`
+and `lcu browser install` explicitly report that those paths are not yet
+implemented.
 
 No disposable Windows session was available locally or on `devbox` at
 inspection time. `devbox` has Docker, `/dev/kvm`, 13 GiB available memory,
