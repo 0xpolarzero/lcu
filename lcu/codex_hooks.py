@@ -2,6 +2,8 @@
 import copy
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import tomllib
 
@@ -47,6 +49,38 @@ def export_files(command, host_root):
 
 
 from .app_server import app_server as config_writer
+
+
+def require_cli_hook_support(env):
+    """Reject an installed Codex CLI that cannot parse the original MCP hook type.
+
+    Registration also works before Codex CLI is installed. The probe has an
+    empty home and never starts a model or loads account configuration.
+    """
+    executable = shutil.which('codex', path=env.get('PATH'))
+    if not executable:
+        return
+    with tempfile.TemporaryDirectory(prefix='lcu-codex-hook-probe-') as temporary:
+        home = Path(temporary)
+        (home / 'config.toml').write_text(
+            '[hooks]\n'
+            'Stop = [{ hooks = [{ type = "mcp_tool", server = "lcu", '
+            'tool = "turn_ended", input = { session_id = "s", turn_id = "t" } }] }]\n')
+        safe_env = {key: env[key] for key in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SystemRoot', 'PATHEXT')
+                    if key in env}
+        safe_env.update(HOME=temporary, CODEX_HOME=temporary)
+        try:
+            version = subprocess.run([executable, '--version'], cwd=temporary, env=safe_env,
+                                     stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                     timeout=10).stdout.strip()
+            result = subprocess.run([executable, 'mcp', 'list'], cwd=temporary, env=safe_env,
+                                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError(f'Cannot check installed Codex CLI hook support: {exc}') from exc
+        if result.returncode:
+            raise ValueError(f'Installed Codex CLI {executable} ({version or "unknown version"}) '
+                             'cannot load the original MCP lifecycle hooks. '
+                             'Update Codex CLI to a build supporting mcp_tool hooks, then rerun lcu setup.')
 
 
 def install_hooks(cli, config_path, cwd, env, host_root):

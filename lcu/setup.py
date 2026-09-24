@@ -408,6 +408,14 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     failures = []
     for name in names:
         client = CLIENTS[name]
+        if name == 'codex':
+            from .codex_hooks import require_cli_hook_support
+            try:
+                require_cli_hook_support(env)
+            except ValueError as exc:
+                failures.append((name, 'host', str(exc)))
+                print(f'{client.label}: host failed: {exc}', file=sys.stderr)
+                continue
         skill_command = [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
                          '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
         if name == 'pi':
