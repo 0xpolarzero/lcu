@@ -70,6 +70,12 @@ def build(output, package=None, *, target='linux', app=None):
                          'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
                          'STANDALONE-ADAPTATIONS.md', 'ADAPTERS.md'):
             shutil.copy2(SOURCE / 'docs' / filename, release / 'docs' / filename)
+        verification = release / 'docs/verification'
+        verification.mkdir()
+        for record in sorted((SOURCE / 'docs/verification').glob('*.md')):
+            if record.is_symlink():
+                raise ValueError(f'Verification document cannot be a symlink: {record}')
+            shutil.copy2(record, verification / record.name)
         (release / 'skills/lcu').mkdir(parents=True)
         shutil.copy2(SOURCE / 'skills/lcu/SKILL.md', release / 'skills/lcu/SKILL.md')
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):

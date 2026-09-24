@@ -31,8 +31,15 @@ class WindowsBuildTests(unittest.TestCase):
                 names = set(bundle.namelist())
                 prefix = 'lcu-0.3.0-windows-x64/'
                 for name in ('bin/lcu.cmd', 'lcu/windows.py', 'scripts/install_windows.py',
-                             'scripts/windows_launcher.py', 'bundle.json'):
+                             'scripts/windows_launcher.py', 'bundle.json',
+                             'docs/verification/codex-interactive-2026-09-24.md'):
                     self.assertIn(prefix + name, names)
+                bundled_records = {name.removeprefix(prefix + 'docs/verification/') for name in names
+                                   if name.startswith(prefix + 'docs/verification/')}
+                source_records = {path.name for path in (ROOT / 'docs/verification').glob('*.md')}
+                self.assertEqual(bundled_records, source_records)
+                self.assertFalse(any(name.startswith(prefix + 'docs/verification/')
+                                     and not name.endswith('.md') for name in names))
                 manifest = json.loads(bundle.read(prefix + 'bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('windows', 'x64'))
                 self.assertFalse(any(name.startswith(prefix + 'app/') for name in names))
