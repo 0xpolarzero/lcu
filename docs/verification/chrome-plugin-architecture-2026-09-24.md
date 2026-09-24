@@ -2,6 +2,8 @@
 
 Read-only source audit on 2026-09-24 of LCU `80ef029` and the pinned local `/Applications/ChatGPT.app` 26.917.62051. Two Sol agents independently traced the original package and LCU integration. No browser was opened, no extension was installed, and no product behavior changed for this research.
 
+**Later implementation:** the default-on setup described below is a historical snapshot. [Chrome opt-in](chrome-opt-in-2026-09-24.md) is now implemented and verified, including live macOS Chrome actions. Default setup no longer registers the connector.
+
 ## Distinct components
 
 ### Names that must not be conflated
