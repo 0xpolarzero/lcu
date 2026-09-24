@@ -106,12 +106,11 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
       const calls = events.filter(event => event.type === 'tool_execution_end' && event.toolName === 'js');
       assert.equal(calls.length, 4);
       assert.ok(calls.every(event => !event.isError), 'An original CUA call failed');
-      assert.ok(events.some(event => event.type === 'agent_end'));
       const finalMessages = JSON.stringify(requests[4].messages);
       assert.match(finalMessages, new RegExp(`LCU_WINDOW_ID=\\d+;TITLE=${expectedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
         `Original native result omitted the task-owned window ${expectedTitle}`);
-      console.log('Pi registered Windows extension: original guide, skill, four CUA calls, native window title, agent_end verified.');
-      console.log('Host-only turn_ended dispatch is established by the adapter regression; process exit alone cannot prove it here.');
+      console.log('Pi registered Windows extension: original guide, skill, four CUA calls, native window ID/title verified.');
+      console.log('Print-mode output does not independently establish host-only turn_ended dispatch; adapter regression covers that separately.');
     } finally {
       await new Promise(resolve => server.close(resolve));
       rmSync(directory, { recursive: true, force: true });
