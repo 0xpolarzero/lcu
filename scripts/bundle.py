@@ -9,7 +9,7 @@ VERSION = '0.3.0'
 
 
 def architecture(target='linux'):
-    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine())
+    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine().lower())
     expected = {'linux': 'Linux', 'darwin': 'Darwin', 'windows': 'Windows'}.get(target)
     if expected is None or platform.system() != expected or arch is None or (target == 'windows' and arch != 'x64'):
         raise ValueError(f'LCU requires {target} ARM64 or x86-64.')

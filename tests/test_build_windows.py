@@ -14,9 +14,15 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import build_bundle
 import install_windows
 import windows_launcher
+from bundle import architecture
 
 
 class WindowsBuildTests(unittest.TestCase):
+    def test_native_windows_amd64_name_selects_x64_archive(self):
+        with mock.patch('bundle.platform.system', return_value='Windows'), \
+             mock.patch('bundle.platform.machine', return_value='AMD64'):
+            self.assertEqual(architecture('windows'), 'x64')
+
     def test_cross_built_windows_archive_omits_upstream_payload_and_node(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / 'dist'
