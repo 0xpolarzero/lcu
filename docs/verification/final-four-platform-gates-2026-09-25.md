@@ -33,8 +33,9 @@ archives had their own 120-test offline gates, recorded in
 proves the final archives' offline installation behavior.
 
 Live platform evidence also has separate boundaries. macOS cold helper startup
-and first-time permissions remain unverified. Windows candidate f passed the
-documented native, setup and official-extension checks, but Windows model use
-and automatic browser per-turn cleanup remain unverified. Claude Code's
+and first-time permissions remain unverified. Windows candidates c, d and f
+collectively passed the documented native, lifecycle, setup and official-
+extension checks, but Windows model use and automatic browser per-turn cleanup
+remain unverified. Claude Code's
 per-turn lifecycle hooks remain unwired. These archive builds are local
 verification artifacts, not published releases.
