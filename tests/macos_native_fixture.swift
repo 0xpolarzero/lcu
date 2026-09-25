@@ -34,6 +34,10 @@ final class Fixture: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
     @objc private func saveDraft() {
         do {
             try field.stringValue.write(to: output, atomically: true, encoding: .utf8)

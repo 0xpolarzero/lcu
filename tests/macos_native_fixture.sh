@@ -8,6 +8,7 @@ if [[ -e "$fixture_root/LCUMacFixture.app" ]]; then
   exit 2
 fi
 mkdir -p "$fixture_root/LCUMacFixture.app/Contents/MacOS"
+fixture_root="$(cd "$fixture_root" && pwd -P)"
 bundle_id="dev.lcu.NativeFixture.$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]')"
 cat > "$fixture_root/LCUMacFixture.app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
