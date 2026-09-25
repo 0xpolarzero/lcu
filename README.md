@@ -19,13 +19,20 @@ The fixed dependency is ChatGPT Linux 26.915.31945 with CUA runtime 0.0.16/20260
 Build the thin archive on matching Linux first; see [development](docs/DEVELOPMENT.md). On the target desktop machine, extract it and run:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --agent codex --yes
+sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-Replace alice with the existing desktop account. The installer downloads the pinned official package during setup, stores one immutable app generation under the managed prefix, selects it for LCU, and registers the agent after validation. To use an already downloaded pinned package without acquisition network access:
+Replace `alice` with the existing desktop account. This installs the pinned official package and LCU runtime under the managed prefix without registering an agent. Then, as that desktop account (not root), register and launch the tested app-bundled Codex CLI:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --agent codex --app-package /absolute/chatgpt.deb --offline --skip-system --yes
+PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
+PATH="/opt/lcu/current/app/resources:$PATH" codex
+~~~
+
+The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the pinned app-bundled CLI shown here passes. For details, see [Codex CLI setup](docs/ADAPTERS.md#codex-cli). To use an already downloaded pinned package without acquisition network access:
+
+~~~sh
+sudo ./scripts/install.sh --user alice --runtime-only --app-package /absolute/chatgpt.deb --offline --skip-system --yes
 ~~~
 
 Use --skip-system only when the required Ubuntu libraries are already installed. It does not skip app acquisition. For a user-owned prefix after system dependencies are in place, add --prefix and --skip-system. The installer does not change an existing system ChatGPT installation or add OpenAI's apt repository. See the [installation guide](docs/INSTALLATION.md) for agent choices, desktop sessions, rollback and failure states.

@@ -46,13 +46,20 @@ The default-prefix private copy, runtime-only installer, `--version`, and `docto
 Extract an architecture-matching thin LCU archive. Install as root for automatic Ubuntu libraries:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --agent codex --yes
+sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-For a local official package and no acquisition network:
+Replace `alice` with the existing desktop account. This installs the pinned application and LCU runtime without registering an agent. Run Codex setup and launch as that desktop account, not root, using the tested app-bundled CLI on `PATH`:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --agent codex --app-package /absolute/chatgpt.deb --offline --skip-system --yes
+PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
+PATH="/opt/lcu/current/app/resources:$PATH" codex
+~~~
+
+The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the app-bundled CLI passes. See [Codex CLI setup](ADAPTERS.md#codex-cli). For a local official package and no acquisition network:
+
+~~~sh
+sudo ./scripts/install.sh --user alice --runtime-only --app-package /absolute/chatgpt.deb --offline --skip-system --yes
 ~~~
 
 An exact compatible existing application can be supplied with --existing-app /absolute/usr/lib/chatgpt. Every file, link, and directory is compared with a verified architecture-matching official package before it is copied. The installer does not modify the source installation. A previously verified managed generation is reused on later LCU installs only when its complete inventory matches. An offline existing-app install needs a valid cached official package for this comparison. If the cache or installed generation is corrupt, setup fails closed and leaves the selected release unchanged.
@@ -68,7 +75,7 @@ The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Elec
 Use --agent pi, codex, or claude-code. Repeat --agent for several, use all for these three agents, or auto for detected agents. The alias claude remains available. Install the selected agent separately; LCU does not install or authenticate it. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references. Pi receives its native extension; Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export; additional integrations are open to contributions.
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --agent codex --agent claude-code --yes
+PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --agent claude-code --yes
 ./scripts/install.sh --list-agents
 ~~~
 
