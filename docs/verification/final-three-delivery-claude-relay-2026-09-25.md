@@ -1,4 +1,6 @@
-# Current three-platform local delivery, 2026-09-25
+# Superseded three-platform delivery, 2026-09-25
+
+Superseded by the [corrected current delivery](final-three-delivery-relay-startup-fix-2026-09-25.md). Source `29a81a3` passed the archive audits and offline gates recorded below, but a later installed Claude launch proved its relay entrypoint silently exited when Node resolved `import.meta.url` through the `current` symlink while preserving that symlink path in `process.argv[1]`. The 29a archives therefore do not establish a working installed relay.
 
 The three archives were built from clean source commit `29a81a36304586a8b59dca0840dcdc1bb223f063` into `dist/29a81a36304586a8b59dca0840dcdc1bb223f063/final/`. `source.sha`, per-archive sidecars, and `archives.sha256` identify the files. Source-member, installed-document-link, no-upstream-payload, sidecar, and extracted-bundle-seal audits passed for all three archives.
 
