@@ -24,4 +24,8 @@ Pi 0.73.0 was run in its real terminal UI with the LCU Pi adapter, a local scrip
 
 The deterministic adapter tests cover once, session, always, decline, cancellation, malformed requests, and a scope that the request did not offer. The helper exposes only persistence choices present in the original request and maps a missing or invalid selection to cancel. Browser-origin approval logic is unchanged.
 
+## Combined Pi and original runtime check
+
+A second generated AppKit fixture closed the gap between the Pi UI and the original server. Pi 0.73.0 ran with the pinned staged CUA runtime and signed helper, plus a local scripted provider. I selected **Allow for this session** once; the selector appeared once across three provider requests (`getApp`, then `setValue`/`click`/`getAXState`, then final response). The original Save file `/private/tmp/lcu-pi-original-native-20260925/draft.txt` contained exactly 46 bytes, `LCU_PI_ORIGINAL_RUNTIME_SESSION_SCOPE_20260925`. This demonstrates that the selected session response reached the original runtime and authorized the subsequent protected fixture operations without a second approval prompt. The generated app, logs, and isolated host state remained under `/private/tmp`; the run did not exercise helper restart or grant revocation.
+
 This verifies the original runtime's observed session and always response behavior, plus Pi's selector and response forwarding. It does not prove persistence after native helper restart, application restart, or an explicit revoke operation. LCU adds no native approval storage.
