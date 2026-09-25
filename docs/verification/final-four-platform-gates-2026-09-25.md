@@ -35,10 +35,11 @@ Historical `b11ae52` Linux archives had their own 120-test offline gates,
 recorded in [the earlier archive report](final-linux-gates-2026-09-24.md).
 Those results are separate from this final archive run.
 
-Live platform evidence also has separate boundaries. macOS cold helper startup
-and first-time permissions remain unverified. Windows candidates c, d and f
-collectively passed the documented native, lifecycle, setup and official-
-extension checks, but Windows model use and automatic browser per-turn cleanup
-remain unverified. Claude Code's
+Live platform evidence also has separate boundaries. A subsequent
+[fresh macOS guest check](macos-fresh-guest-2026-09-24.md) passed cold helper
+startup, first-use permissions, and an exact native TextEdit save verified by
+an independent guest read. Windows candidates c, d and f collectively passed
+the documented native, lifecycle, setup and official-extension checks, but
+Windows model use and automatic browser per-turn cleanup remain unverified. Claude Code's
 per-turn lifecycle hooks remain unwired. These archive builds are local
 verification artifacts, not published releases.
