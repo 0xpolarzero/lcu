@@ -69,9 +69,7 @@ assert project_claude['permissions']['deny'] == ['Bash(rm *)', *host_only]
 
 # Claude invokes the shipped relay, which launches the original direct LCU
 # command unchanged. Project registration belongs to the project .mcp.json.
-expected_claude_command = [
-    str(prefix / 'current/adapters/claude.mjs'), command, '--session', 'direct',
-]
+expected_claude_command = [str(prefix / 'current/adapters/claude.mjs'), command]
 for config_path in (home / '.claude.json', project / '.mcp.json'):
     registered = json.loads(config_path.read_text())['mcpServers']['lcu']
     assert registered['command'] == str(prefix / 'current/agent-tools/node/bin/node'), (config_path, registered)
