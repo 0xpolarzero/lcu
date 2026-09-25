@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -10,6 +10,17 @@ import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const relay = fileURLToPath(new URL('../claude.mjs', import.meta.url));
 const fixture = fileURLToPath(new URL('./claude-fixture.mjs', import.meta.url));
+const clientModule = fileURLToPath(new URL('../client.mjs', import.meta.url));
+
+function installedCurrentEntryPoint(directory) {
+  const releaseAdapters = join(directory, 'releases', '0.3.0-test', 'adapters');
+  mkdirSync(releaseAdapters, { recursive: true });
+  copyFileSync(relay, join(releaseAdapters, 'claude.mjs'));
+  copyFileSync(clientModule, join(releaseAdapters, 'client.mjs'));
+  symlinkSync(join(dirname(relay), 'node_modules'), join(releaseAdapters, 'node_modules'), 'dir');
+  symlinkSync(join(directory, 'releases', '0.3.0-test'), join(directory, 'current'), 'dir');
+  return join(directory, 'current', 'adapters', 'claude.mjs');
+}
 
 function readRecords(path) {
   try {
@@ -29,7 +40,7 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   assert.fail(`Condition did not become true within ${timeoutMs} ms`);
 }
 
-async function connectRelay() {
+async function connectRelay({ throughCurrentSymlink = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'lcu-claude-relay-test-'));
   const logPath = join(directory, 'original-fixture.jsonl');
   const env = {
@@ -38,9 +49,10 @@ async function connectRelay() {
     TMPDIR: directory,
     LCU_FIXTURE_LOG: logPath,
   };
+  const scriptPath = throughCurrentSymlink ? installedCurrentEntryPoint(directory) : relay;
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [relay, process.execPath, fixture],
+    args: [scriptPath, process.execPath, fixture],
     env,
     stderr: 'pipe',
   });
@@ -55,7 +67,13 @@ async function connectRelay() {
     elicitationRequests.push(structuredClone(request.params));
     return elicitationResponses.shift() ?? { action: 'cancel' };
   });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    await client.close().catch(() => {});
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
 
   const logs = () => readRecords(logPath);
   async function close() {
@@ -101,45 +119,58 @@ async function callWithContext(client, name, args, {
   } }, undefined, { signal });
 }
 
+async function assertOriginalProtocol(bridge) {
+  assert.equal(bridge.client.getInstructions(),
+    'Original Claude relay fixture instructions. Preserve this text exactly.');
+  const tools = (await bridge.client.listTools()).tools;
+  assert.deepEqual(tools.filter(tool => tool.name === 'js' || tool.name === 'js_reset'), [
+    { name: 'js', description: 'Original JavaScript tool description.', inputSchema: {
+      type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
+    } },
+    { name: 'js_reset', description: 'Original JavaScript reset description.', inputSchema: {
+      type: 'object', properties: {}, additionalProperties: false,
+    } },
+  ]);
+
+  const context = {
+    session_id: 'session-smoke', turn_id: 'prompt-smoke',
+    tool_use_id: 'tool-use-smoke', agent_id: 'agent-smoke',
+  };
+  const bind = await bridge.client.callTool({ name: 'set_turn_context', arguments: context });
+  assert.equal(bind.content[0].text, 'Turn context bound.');
+  const result = await bridge.client.callTool({
+    name: 'js',
+    arguments: { code: 'identity-smoke' },
+    _meta: { 'claudecode/toolUseId': context.tool_use_id, callerMarker: { retained: true } },
+  });
+  assert.deepEqual(result.content, [{ type: 'text', text: 'identity-smoke' }]);
+
+  const forwarded = bridge.logs().find(entry => entry.type === 'tool-call' && entry.name === 'js');
+  assert.deepEqual(forwarded, {
+    type: 'tool-call',
+    name: 'js',
+    args: { code: 'identity-smoke' },
+    meta: {
+      'claudecode/toolUseId': context.tool_use_id,
+      callerMarker: { retained: true },
+      'x-codex-turn-metadata': { session_id: context.session_id, turn_id: context.turn_id },
+    },
+  });
+}
+
 test('Claude relay preserves original tool contract and forwards the exact correlated identity', async () => {
   const bridge = await connectRelay();
   try {
-    assert.equal(bridge.client.getInstructions(),
-      'Original Claude relay fixture instructions. Preserve this text exactly.');
-    const tools = (await bridge.client.listTools()).tools;
-    assert.deepEqual(tools.filter(tool => tool.name === 'js' || tool.name === 'js_reset'), [
-      { name: 'js', description: 'Original JavaScript tool description.', inputSchema: {
-        type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
-      } },
-      { name: 'js_reset', description: 'Original JavaScript reset description.', inputSchema: {
-        type: 'object', properties: {}, additionalProperties: false,
-      } },
-    ]);
+    await assertOriginalProtocol(bridge);
+  } finally {
+    await bridge.close();
+  }
+});
 
-    const context = {
-      session_id: 'session-smoke', turn_id: 'prompt-smoke',
-      tool_use_id: 'tool-use-smoke', agent_id: 'agent-smoke',
-    };
-    const bind = await bridge.client.callTool({ name: 'set_turn_context', arguments: context });
-    assert.equal(bind.content[0].text, 'Turn context bound.');
-    const result = await bridge.client.callTool({
-      name: 'js',
-      arguments: { code: 'identity-smoke' },
-      _meta: { 'claudecode/toolUseId': context.tool_use_id, callerMarker: { retained: true } },
-    });
-    assert.deepEqual(result.content, [{ type: 'text', text: 'identity-smoke' }]);
-
-    const forwarded = bridge.logs().find(entry => entry.type === 'tool-call' && entry.name === 'js');
-    assert.deepEqual(forwarded, {
-      type: 'tool-call',
-      name: 'js',
-      args: { code: 'identity-smoke' },
-      meta: {
-        'claudecode/toolUseId': context.tool_use_id,
-        callerMarker: { retained: true },
-        'x-codex-turn-metadata': { session_id: context.session_id, turn_id: context.turn_id },
-      },
-    });
+test('Claude relay starts and preserves its protocol through an installed current symlink', async () => {
+  const bridge = await connectRelay({ throughCurrentSymlink: true });
+  try {
+    await assertOriginalProtocol(bridge);
   } finally {
     await bridge.close();
   }
