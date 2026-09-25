@@ -1,0 +1,309 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ElicitRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import { pathToFileURL } from 'node:url';
+import {
+  nativeAppApprovalOptions,
+  nativeAppApprovalResponse,
+} from './client.mjs';
+
+const PUBLIC_TOOLS = new Set(['js', 'js_reset']);
+const CONTEXT_TOOL = 'set_turn_context';
+const TURN_END_TOOL = 'turn_ended';
+const TURN_CONTEXT_META = 'x-codex-turn-metadata';
+const CLAUDE_TOOL_USE_META = 'claudecode/toolUseId';
+const TURN_CONTEXT_SCHEMA = {
+  type: 'object',
+  properties: {
+    session_id: { type: 'string', minLength: 1 },
+    turn_id: { type: 'string', minLength: 1 },
+    tool_use_id: { type: 'string', minLength: 1 },
+    agent_id: { type: 'string' },
+  },
+  required: ['session_id', 'turn_id', 'tool_use_id'],
+  additionalProperties: false,
+};
+
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function turnKey(sessionId, turnId) {
+  return JSON.stringify([sessionId, turnId]);
+}
+
+function asError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function callTimeout(name, args) {
+  const requested = Number(args?.timeout_ms);
+  return name === 'js' && Number.isFinite(requested) && requested > 0
+    ? Math.max(120_000, requested + 30_000)
+    : 120_000;
+}
+
+function requireTurnContext(value) {
+  if (!value || typeof value !== 'object' ||
+      !nonEmptyString(value.session_id) || !nonEmptyString(value.turn_id) ||
+      !nonEmptyString(value.tool_use_id) ||
+      (value.agent_id !== undefined && typeof value.agent_id !== 'string')) {
+    throw new Error('Claude turn context requires session_id, prompt_id, and tool_use_id');
+  }
+  return {
+    sessionId: value.session_id,
+    turnId: value.turn_id,
+    toolUseId: value.tool_use_id,
+    ...(typeof value.agent_id === 'string' && value.agent_id ? { agentId: value.agent_id } : {}),
+  };
+}
+
+function nativeForm(params, approval) {
+  const choices = approval.choices;
+  return {
+    ...params,
+    mode: 'form',
+    message: approval.message,
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        choice: {
+          type: 'string',
+          enum: choices.map(choice => choice.value),
+          enumNames: choices.map(choice => choice.label),
+        },
+      },
+      required: ['choice'],
+    },
+  };
+}
+
+/**
+ * Run a Claude-facing MCP server that relays the selected original LCU server.
+ * The relay leaves public tool descriptors, instructions, and result blocks
+ * with the original server and changes only the host-specific identity seams.
+ */
+export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
+  if (!nonEmptyString(command) || !Array.isArray(args) ||
+      args.some(argument => typeof argument !== 'string')) {
+    throw new TypeError('Claude bridge requires the original MCP command and string arguments');
+  }
+
+  const upstreamTransport = new StdioClientTransport({
+    command,
+    args,
+    ...(cwd ? { cwd } : {}),
+    env: env ?? process.env,
+    stderr: 'inherit',
+  });
+  const upstream = new Client({ name: 'lcu-claude-relay', version: '0.1.0' }, {
+    capabilities: { elicitation: { form: {}, url: {} } },
+  });
+  const contexts = new Map();
+  const activeTurns = new Map();
+  const cleanupInFlight = new Map();
+  const cleanedTurns = new Set();
+  let server;
+  let connected = false;
+  let shutdown;
+  let serverClose;
+
+  const clearTurnContexts = (sessionId, turnId) => {
+    for (const [toolUseId, context] of contexts) {
+      if (context.sessionId === sessionId && context.turnId === turnId) contexts.delete(toolUseId);
+    }
+  };
+
+  async function turnEnded(sessionId, turnId, event) {
+    if (!nonEmptyString(sessionId) || !nonEmptyString(turnId) ||
+        !['Stop', 'Interrupt'].includes(event)) {
+      throw new Error('Claude lifecycle cleanup requires an exact session, prompt, and supported event');
+    }
+    const key = turnKey(sessionId, turnId);
+    if (cleanedTurns.has(key)) return { content: [{ type: 'text', text: 'Turn already ended.' }] };
+    let cleanup = cleanupInFlight.get(key);
+    if (!cleanup) {
+      cleanup = upstream.callTool({ name: TURN_END_TOOL, arguments: {
+        hook_event_name: event,
+        session_id: sessionId,
+        turn_id: turnId,
+      } }, undefined, { timeout: 120_000 });
+      cleanupInFlight.set(key, cleanup);
+    }
+    try {
+      const result = await cleanup;
+      if (result.isError) {
+        const detail = (result.content ?? []).filter(item => item.type === 'text')
+          .map(item => item.text).join('\n');
+        throw new Error(`Original CUA turn cleanup failed: ${detail || 'unknown error'}`);
+      }
+      cleanedTurns.add(key);
+      if (cleanedTurns.size > 256) cleanedTurns.delete(cleanedTurns.values().next().value);
+      activeTurns.delete(key);
+      return result;
+    } finally {
+      if (cleanupInFlight.get(key) === cleanup) cleanupInFlight.delete(key);
+      clearTurnContexts(sessionId, turnId);
+    }
+  }
+
+  try {
+    await upstream.connect(upstreamTransport);
+    connected = true;
+    const listed = await upstream.listTools();
+    const upstreamTools = listed.tools;
+    const publicTools = upstreamTools.filter(tool => PUBLIC_TOOLS.has(tool.name));
+    if (publicTools.length !== PUBLIC_TOOLS.size ||
+        !upstreamTools.some(tool => tool.name === TURN_END_TOOL)) {
+      throw new Error('Original CUA js/js_reset and turn_ended tools are required');
+    }
+    if (upstreamTools.some(tool => tool.name === CONTEXT_TOOL)) {
+      throw new Error('Original CUA server already uses the Claude relay context tool name');
+    }
+    const turnEndedTool = upstreamTools.find(tool => tool.name === TURN_END_TOOL);
+    const contextTool = {
+      name: CONTEXT_TOOL,
+      description: 'Internal Claude host hook: bind the exact prompt and tool-use identity.',
+      inputSchema: TURN_CONTEXT_SCHEMA,
+    };
+
+    server = new Server({ name: 'lcu-claude-relay', version: '0.1.0' }, {
+      capabilities: { tools: {} },
+      instructions: upstream.getInstructions() ?? '',
+    });
+    server.onerror = error => console.error('Claude MCP relay server error:', asError(error));
+    upstream.onerror = error => console.error('Claude MCP relay upstream error:', asError(error));
+
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [...publicTools, turnEndedTool, contextTool],
+    }));
+
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+      const { name, arguments: toolArgs = {}, _meta } = request.params;
+      if (name === CONTEXT_TOOL) {
+        const context = requireTurnContext(toolArgs);
+        const previous = contexts.get(context.toolUseId);
+        if (previous && (previous.sessionId !== context.sessionId || previous.turnId !== context.turnId ||
+            previous.agentId !== context.agentId)) {
+          throw new Error('Conflicting Claude identity for the same tool_use_id');
+        }
+        if (!previous && contexts.size >= 1024) {
+          throw new Error('Too many pending Claude tool identities; LCU rejected this call safely');
+        }
+        contexts.set(context.toolUseId, context);
+        activeTurns.set(turnKey(context.sessionId, context.turnId), {
+          sessionId: context.sessionId,
+          turnId: context.turnId,
+        });
+        return { content: [{ type: 'text', text: 'Turn context bound.' }] };
+      }
+      if (name === TURN_END_TOOL) {
+        const event = toolArgs.hook_event_name;
+        return turnEnded(toolArgs.session_id, toolArgs.turn_id, event);
+      }
+      if (!PUBLIC_TOOLS.has(name)) {
+        return { isError: true, content: [{ type: 'text', text: `Unknown LCU tool: ${name}` }] };
+      }
+
+      const toolUseId = _meta?.[CLAUDE_TOOL_USE_META];
+      const context = nonEmptyString(toolUseId) ? contexts.get(toolUseId) : undefined;
+      if (!context || context.toolUseId !== toolUseId) {
+        return { isError: true, content: [{ type: 'text', text:
+          'Missing exact Claude PreToolUse identity; LCU did not run this tool call.' }] };
+      }
+      contexts.delete(toolUseId);
+      const metadata = {
+        ...(_meta ?? {}),
+        [TURN_CONTEXT_META]: { session_id: context.sessionId, turn_id: context.turnId },
+      };
+      try {
+        return await upstream.callTool({ name, arguments: toolArgs, _meta: metadata }, undefined, {
+          signal: extra.signal,
+          timeout: callTimeout(name, toolArgs),
+        });
+      } finally {
+        if (extra.signal.aborted) await turnEnded(context.sessionId, context.turnId, 'Interrupt');
+      }
+    });
+
+    upstream.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
+      const params = request.params;
+      const approval = nativeAppApprovalOptions(params);
+      try {
+        const response = await server.elicitInput(
+          approval ? nativeForm(params, approval) : params,
+          { signal: extra.signal },
+        );
+        if (!approval) return response;
+        if (response.action !== 'accept') return nativeAppApprovalResponse(params, response.action);
+        return nativeAppApprovalResponse(params, response.content?.choice);
+      } catch {
+        return { action: 'cancel' };
+      }
+    });
+
+    const closeUpstreamAfterTurnCleanup = () => {
+      if (shutdown) return shutdown;
+      shutdown = (async () => {
+        for (const turn of [...activeTurns.values()]) {
+          try {
+            await turnEnded(turn.sessionId, turn.turnId, 'Interrupt');
+          } catch (error) {
+            console.error('Claude MCP turn cleanup during shutdown failed:', asError(error));
+          }
+        }
+        if (connected) {
+          connected = false;
+          try {
+            await upstream.close();
+          } catch (error) {
+            console.error('Claude MCP upstream close failed:', asError(error));
+          }
+        }
+      })();
+      return shutdown;
+    };
+    server.onclose = () => { void closeUpstreamAfterTurnCleanup(); };
+    const transport = new StdioServerTransport();
+    const closeDownstream = () => {
+      void closeUpstreamAfterTurnCleanup().finally(() => {
+        if (!serverClose) serverClose = server.close().catch(error => {
+          console.error('Claude MCP relay close failed:', asError(error));
+        });
+      });
+    };
+    await server.connect(transport);
+    // The SDK's stdio server transport owns MCP framing but does not surface stdin EOF.
+    // EOF is the actual Claude-side connection-close signal; use it to drain exact
+    // active turns before closing the original MCP client.
+    process.stdin.once('end', closeDownstream);
+    return { server, upstream, contexts, activeTurns, close: async () => {
+      process.stdin.off('end', closeDownstream);
+      await closeUpstreamAfterTurnCleanup();
+      if (!serverClose) serverClose = server.close();
+      await serverClose;
+    } };
+  } catch (error) {
+    if (connected) await upstream.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function main() {
+  const [command, ...args] = process.argv.slice(2);
+  if (!command) throw new Error('Usage: claude.mjs ORIGINAL_MCP_COMMAND [ARG ...]');
+  await runClaudeBridge({ command, args });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error('Claude MCP relay failed:', asError(error));
+    process.exitCode = 1;
+  });
+}

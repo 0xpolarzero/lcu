@@ -409,6 +409,15 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     failures = []
     for name in names:
         client = CLIENTS[name]
+        mcp_command = command
+        mcp_setup_error = None
+        if name == 'claude-code':
+            adapter = release_root / 'adapters/claude.mjs'
+            if not adapter.is_file():
+                mcp_setup_error = (f'Claude MCP relay missing: {adapter}. '
+                                   'Reinstall LCU into this release prefix, then rerun setup.')
+            else:
+                mcp_command = [str(node), str(adapter), *command]
         if name == 'codex':
             from .codex_hooks import require_cli_hook_support
             try:
@@ -429,10 +438,12 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
         else:
             commands = (('skill', skill_command),
                         ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
-                                 client.mcp_agent, scope, json.dumps(command), json.dumps(host_policy(release_root))]))
+                                 client.mcp_agent, scope, json.dumps(mcp_command), json.dumps(host_policy(release_root))]))
         for phase, argv in commands:
             try:
                 if phase == 'MCP':
+                    if mcp_setup_error:
+                        raise ValueError(mcp_setup_error)
                     preflight_mcp(node, mcp, client, scope, cwd, env)
                 if phase == 'extension':
                     if not pi:
@@ -727,11 +738,11 @@ def main(argv=None):
             if args.chrome:
                 print('Chrome control selected: register the original extension connector for this desktop account and include Chrome guidance.')
                 if 'claude-code' in names:
-                    print('Claude Code: Chrome control is experimental. Browser turn metadata is unverified, and original turn_ended cleanup is not wired on completion or interruption; temporary tabs may remain open.')
+                    print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave temporary tabs open; Chrome remains experimental.')
             else:
                 print('Native desktop control selected; Chrome connector and guidance are excluded.')
             if sys.platform == 'win32' and 'claude-code' in names:
-                print('Claude Code: original Windows native turn cleanup is not wired on completion or interruption; the helper may remain active until the session exits.')
+                print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave native helpers active.')
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')
