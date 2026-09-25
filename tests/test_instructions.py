@@ -182,30 +182,93 @@ class InstalledInstructionTests(unittest.TestCase):
                                 env=env, text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout, f'--user\n{pwd.getpwuid(os.getuid()).pw_name}\n--\n{bin_dir / "lcu"}\ndoctor\n')
 
-    def test_agent_registration_receives_local_pre_call_skill_with_copy(self):
+    def test_claude_setup_forwards_command_and_installs_host_visibility_hooks(self):
         tool_root = self.root / 'agent-tools'
         tool_root.mkdir()
         node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
+        adapter = self.release / 'adapters/claude.mjs'
+        adapter.parent.mkdir(parents=True)
+        adapter.write_text('fixture relay')
+        project = self.root / 'project'
+        project.mkdir()
+        user_settings = self.home / '.claude/settings.json'
+        user_settings.parent.mkdir()
+        user_settings.write_text(json.dumps({
+            'model': 'sonnet',
+            'permissions': {'allow': ['Read'], 'deny': ['Bash(rm *)']},
+            'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': 'keep-me'}]}]},
+        }))
         calls = []
+        selected_chrome = {'value': False}
 
         def run(argv, **kwargs):
             calls.append(argv)
             if argv[1:3] == [str(skill_cli), 'add']:
                 source = Path(argv[3])
                 self.assertTrue((source / 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').is_file())
-                self.assertFalse((source / 'references/upstream/browser-desktop').exists())
-                self.assertFalse((source / 'references/upstream/chrome').exists())
+                self.assertEqual((source / 'references/upstream/browser-desktop').exists(),
+                                 selected_chrome['value'])
+                self.assertEqual((source / 'references/upstream/chrome').exists(),
+                                 selected_chrome['value'])
                 self.assertIn('--copy', argv)
                 return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
             return SimpleNamespace(returncode=0, stdout='{}')
 
-        with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
-                patch('lcu.setup.preflight_mcp'), patch('lcu.setup.subprocess.run', side_effect=run):
-            failures = configure(['claude-code'], self.home, self.skill_source,
-                                 ['/usr/bin/lcu'], tool_root, self.release,
-                                 environ={'HOME': str(self.home)})
-        self.assertEqual(failures, [])
-        self.assertEqual(len(calls), 2)
+        def register(scope, command, *, chrome=False):
+            calls.clear()
+            selected_chrome['value'] = chrome
+            with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
+                    patch('lcu.setup.preflight_mcp'), patch('lcu.setup.subprocess.run', side_effect=run):
+                failures = configure(['claude-code'], self.home, self.skill_source,
+                                     command, tool_root, self.release, scope=scope,
+                                     project=project if scope == 'project' else None,
+                                     chrome=chrome, environ={'HOME': str(self.home)})
+            self.assertEqual(failures, [])
+            self.assertEqual(len(calls), 2)
+            mcp_call = next(argv for argv in calls if argv[1:3] == ['--input-type=module', '-e'])
+            self.assertEqual(mcp_call[4], str(mcp_cli))
+            self.assertEqual(mcp_call[5:7], ['claude-code', scope])
+            return json.loads(mcp_call[-2])
+
+        base_command = ['/usr/bin/lcu', '--session', 'direct']
+        self.assertEqual(register('user', base_command), [str(node), str(adapter), *base_command])
+        configured_user = user_settings.read_bytes()
+        user_data = json.loads(configured_user)
+        self.assertEqual(user_data['model'], 'sonnet')
+        self.assertEqual(user_data['permissions']['allow'], ['Read'])
+        self.assertEqual(user_data['permissions']['deny'], ['Bash(rm *)',
+                         'mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir',
+                         'mcp__lcu__set_turn_context'])
+        self.assertEqual(user_data['hooks']['UserPromptSubmit'][0]['hooks'][0]['command'], 'keep-me')
+        self.assertEqual(user_data['hooks']['PreToolUse'][0]['matcher'],
+                         'mcp__lcu__js|mcp__lcu__js_reset')
+        context_hook = user_data['hooks']['PreToolUse'][0]['hooks'][0]
+        self.assertEqual((context_hook['type'], context_hook['server'], context_hook['tool']),
+                         ('mcp_tool', 'lcu', 'set_turn_context'))
+        self.assertEqual(context_hook['input']['session_id'], '${session_id}')
+        self.assertEqual(context_hook['input']['turn_id'], '${prompt_id}')
+        self.assertEqual(context_hook['input']['tool_use_id'], '${tool_use_id}')
+        cleanup_hook = user_data['hooks']['Stop'][0]['hooks'][0]
+        self.assertEqual((cleanup_hook['type'], cleanup_hook['server'], cleanup_hook['tool']),
+                         ('mcp_tool', 'lcu', 'turn_ended'))
+        self.assertEqual(cleanup_hook['input']['session_id'], '${session_id}')
+        self.assertEqual(cleanup_hook['input']['turn_id'], '${prompt_id}')
+        register('user', base_command)
+        self.assertEqual(user_settings.read_bytes(), configured_user)
+
+        project_command = [*base_command, '--chrome']
+        self.assertEqual(register('project', project_command, chrome=True),
+                         [str(node), str(adapter), *project_command])
+        project_settings = project / '.claude/settings.local.json'
+        self.assertTrue(project_settings.is_file())
+        self.assertFalse((project / '.claude/settings.json').exists())
+        self.assertEqual(json.loads(project_settings.read_text())['permissions']['deny'], [
+            'mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir',
+            'mcp__lcu__set_turn_context'])
+        configured_project = project_settings.read_bytes()
+        register('project', project_command, chrome=True)
+        self.assertEqual(project_settings.read_bytes(), configured_project)
+        self.assertEqual(user_settings.read_bytes(), configured_user)
 
     def test_pi_registration_uses_original_skill_and_offline_local_package(self):
         self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi'})
