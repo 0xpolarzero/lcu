@@ -17,7 +17,12 @@ def record(path):
     session = payload.get('session_id')
     if event not in EVENTS or not isinstance(session, str):
         return
-    line = (json.dumps({'event': event, 'session_id': session}) + '\n').encode()
+    record = {'event': event, 'session_id': session}
+    for key in ('turn_id', 'tool_use_id'):
+        value = payload.get(key)
+        if isinstance(value, str):
+            record[key] = value
+    line = (json.dumps(record) + '\n').encode()
     descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
         os.write(descriptor, line)
