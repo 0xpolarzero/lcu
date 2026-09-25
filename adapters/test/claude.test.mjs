@@ -1,0 +1,350 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+
+const relay = fileURLToPath(new URL('../claude.mjs', import.meta.url));
+const fixture = fileURLToPath(new URL('./claude-fixture.mjs', import.meta.url));
+
+function readRecords(path) {
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function waitFor(predicate, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail(`Condition did not become true within ${timeoutMs} ms`);
+}
+
+async function connectRelay() {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-claude-relay-test-'));
+  const logPath = join(directory, 'original-fixture.jsonl');
+  const env = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    HOME: directory,
+    TMPDIR: directory,
+    LCU_FIXTURE_LOG: logPath,
+  };
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [relay, process.execPath, fixture],
+    env,
+    stderr: 'pipe',
+  });
+  let stderr = '';
+  transport.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+  const client = new Client({ name: 'claude-relay-contract-test', version: '1' }, {
+    capabilities: { elicitation: { form: {}, url: {} } },
+  });
+  const elicitationRequests = [];
+  const elicitationResponses = [];
+  client.setRequestHandler(ElicitRequestSchema, async request => {
+    elicitationRequests.push(structuredClone(request.params));
+    return elicitationResponses.shift() ?? { action: 'cancel' };
+  });
+  await client.connect(transport);
+
+  const logs = () => readRecords(logPath);
+  async function close() {
+    await client.close().catch(() => {});
+    const started = logs().find(entry => entry.type === 'fixture-start');
+    if (started && !logs().some(entry => entry.type === 'fixture-exit')) {
+      try { process.kill(started.pid, 'SIGTERM'); } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+      }
+      await waitFor(() => logs().some(entry => entry.type === 'fixture-exit')).catch(() => {});
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+  return {
+    client,
+    logs,
+    elicitationRequests,
+    respondToNextElicitation(response) { elicitationResponses.push(response); },
+    close,
+    get stderr() { return stderr; },
+  };
+}
+
+async function bindContext(client, {
+  sessionId = 'session-test', turnId = 'prompt-test', toolUseId, agentId,
+}) {
+  const arguments_ = {
+    session_id: sessionId,
+    turn_id: turnId,
+    tool_use_id: toolUseId,
+    ...(agentId ? { agent_id: agentId } : {}),
+  };
+  return client.callTool({ name: 'set_turn_context', arguments: arguments_ });
+}
+
+async function callWithContext(client, name, args, {
+  sessionId = 'session-test', turnId = 'prompt-test', toolUseId, callerMeta = {}, signal,
+}) {
+  await bindContext(client, { sessionId, turnId, toolUseId });
+  return client.callTool({ name, arguments: args, _meta: {
+    'claudecode/toolUseId': toolUseId,
+    ...callerMeta,
+  } }, undefined, { signal });
+}
+
+test('Claude relay preserves original tool contract and forwards the exact correlated identity', async () => {
+  const bridge = await connectRelay();
+  try {
+    assert.equal(bridge.client.getInstructions(),
+      'Original Claude relay fixture instructions. Preserve this text exactly.');
+    const tools = (await bridge.client.listTools()).tools;
+    assert.deepEqual(tools.filter(tool => tool.name === 'js' || tool.name === 'js_reset'), [
+      { name: 'js', description: 'Original JavaScript tool description.', inputSchema: {
+        type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
+      } },
+      { name: 'js_reset', description: 'Original JavaScript reset description.', inputSchema: {
+        type: 'object', properties: {}, additionalProperties: false,
+      } },
+    ]);
+
+    const context = {
+      session_id: 'session-smoke', turn_id: 'prompt-smoke',
+      tool_use_id: 'tool-use-smoke', agent_id: 'agent-smoke',
+    };
+    const bind = await bridge.client.callTool({ name: 'set_turn_context', arguments: context });
+    assert.equal(bind.content[0].text, 'Turn context bound.');
+    const result = await bridge.client.callTool({
+      name: 'js',
+      arguments: { code: 'identity-smoke' },
+      _meta: { 'claudecode/toolUseId': context.tool_use_id, callerMarker: { retained: true } },
+    });
+    assert.deepEqual(result.content, [{ type: 'text', text: 'identity-smoke' }]);
+
+    const forwarded = bridge.logs().find(entry => entry.type === 'tool-call' && entry.name === 'js');
+    assert.deepEqual(forwarded, {
+      type: 'tool-call',
+      name: 'js',
+      args: { code: 'identity-smoke' },
+      meta: {
+        'claudecode/toolUseId': context.tool_use_id,
+        callerMarker: { retained: true },
+        'x-codex-turn-metadata': { session_id: context.session_id, turn_id: context.turn_id },
+      },
+    });
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('Claude relay preserves original results/errors and isolates parallel and stale tool-use identities', async () => {
+  const bridge = await connectRelay();
+  try {
+    const missing = await bridge.client.callTool({ name: 'js', arguments: { code: 'must-not-run' } });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /Missing exact Claude PreToolUse identity/);
+    assert.equal(bridge.logs().filter(entry => entry.type === 'tool-call' && entry.name === 'js').length, 0);
+
+    const rich = await callWithContext(bridge.client, 'js', { code: 'rich-result' }, { toolUseId: 'rich-use' });
+    assert.deepEqual(rich, {
+      content: [
+        { type: 'text', text: 'Original result text.', annotations: { audience: ['assistant'], priority: 0.7 } },
+        { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+      ],
+      structuredContent: { nested: { retained: true } },
+      _meta: { originalResult: { revision: 4 } },
+    });
+    const failure = await callWithContext(bridge.client, 'js', { code: 'tool-error' }, { toolUseId: 'error-use' });
+    assert.deepEqual(failure, {
+      isError: true,
+      content: [{ type: 'text', text: 'Original tool-level failure.' }],
+      _meta: { originalError: true },
+    });
+
+    await bindContext(bridge.client, {
+      sessionId: 'parallel-session-a', turnId: 'parallel-turn-a', toolUseId: 'parallel-use-a',
+    });
+    await bindContext(bridge.client, {
+      sessionId: 'parallel-session-b', turnId: 'parallel-turn-b', toolUseId: 'parallel-use-b',
+    });
+    const [parallelJs, parallelReset] = await Promise.all([
+      bridge.client.callTool({ name: 'js', arguments: { code: 'parallel-slow' }, _meta: {
+        'claudecode/toolUseId': 'parallel-use-a', caller: 'a',
+      } }),
+      bridge.client.callTool({ name: 'js_reset', arguments: {}, _meta: {
+        'claudecode/toolUseId': 'parallel-use-b', caller: 'b',
+      } }),
+    ]);
+    assert.equal(parallelJs.content[0].text, 'parallel-slow');
+    assert.equal(parallelReset.content[0].text, 'Original reset result.');
+    const parallelCalls = bridge.logs().filter(entry => entry.type === 'tool-call' &&
+      (entry.args.code === 'parallel-slow' || entry.name === 'js_reset'));
+    assert.deepEqual(parallelCalls.map(entry => ({
+      name: entry.name,
+      meta: entry.meta,
+    })).sort((a, b) => a.name.localeCompare(b.name)), [
+      { name: 'js', meta: {
+        'claudecode/toolUseId': 'parallel-use-a',
+        caller: 'a',
+        'x-codex-turn-metadata': { session_id: 'parallel-session-a', turn_id: 'parallel-turn-a' },
+      } },
+      { name: 'js_reset', meta: {
+        'claudecode/toolUseId': 'parallel-use-b',
+        caller: 'b',
+        'x-codex-turn-metadata': { session_id: 'parallel-session-b', turn_id: 'parallel-turn-b' },
+      } },
+    ]);
+
+    await bindContext(bridge.client, {
+      sessionId: 'stale-session', turnId: 'stale-turn', toolUseId: 'stale-use',
+    });
+    const cleanup = await bridge.client.callTool({ name: 'turn_ended', arguments: {
+      hook_event_name: 'Stop', session_id: 'stale-session', turn_id: 'stale-turn',
+    } });
+    assert.equal(cleanup.content[0].text, 'Original cleanup completed.');
+    const stale = await bridge.client.callTool({ name: 'js', arguments: { code: 'stale-must-not-run' }, _meta: {
+      'claudecode/toolUseId': 'stale-use',
+    } });
+    assert.equal(stale.isError, true);
+    assert.match(stale.content[0].text, /Missing exact Claude PreToolUse identity/);
+    assert.equal(bridge.logs().filter(entry => entry.type === 'tool-call' &&
+      entry.args.code === 'stale-must-not-run').length, 0);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('Claude relay maps native scopes and passes unrelated form and URL elicitations through unchanged', async () => {
+  const bridge = await connectRelay();
+  try {
+    const nativeMeta = {
+      codex_approval_kind: 'mcp_tool_call',
+      connector_id: 'computer-use',
+      persist: ['session', 'always'],
+      tool_name: 'get_app_state',
+      tool_params: { app: 'dev.lcu.NativeFixture.generated' },
+      fixtureOpaque: { keep: true },
+    };
+    for (const [choice, expected] of [
+      ['once', { action: 'accept', content: {} }],
+      ['session', { action: 'accept', content: {}, _meta: { persist: 'session' } }],
+      ['always', { action: 'accept', content: {}, _meta: { persist: 'always' } }],
+      ['decline', { action: 'decline' }],
+    ]) {
+      bridge.respondToNextElicitation({ action: 'accept', content: { choice } });
+      const result = await callWithContext(bridge.client, 'js', { code: 'approval-native' }, {
+        toolUseId: `approval-${choice}`,
+      });
+      assert.deepEqual(JSON.parse(result.content[0].text), expected);
+      const shown = bridge.elicitationRequests.at(-1);
+      assert.deepEqual(shown._meta, nativeMeta);
+      assert.equal(shown.message, 'Allow Computer Use to use "LCU Fixture App"?');
+      const choiceSchema = shown.requestedSchema.properties.choice;
+      const choices = choiceSchema.enum?.map((value, index) => ({
+        value,
+        label: choiceSchema.enumNames?.[index],
+      })) ?? choiceSchema.oneOf?.map(option => ({ value: option.const, label: option.title }));
+      assert.deepEqual(choices, [
+        { value: 'once', label: 'Allow once' },
+        { value: 'session', label: 'Allow for this session' },
+        { value: 'always', label: 'Always allow' },
+        { value: 'decline', label: 'Decline' },
+      ]);
+    }
+
+    bridge.respondToNextElicitation({ action: 'cancel' });
+    const cancelled = await callWithContext(bridge.client, 'js', { code: 'approval-native' }, {
+      toolUseId: 'approval-cancel',
+    });
+    assert.deepEqual(JSON.parse(cancelled.content[0].text), { action: 'cancel' });
+
+    bridge.respondToNextElicitation({ action: 'accept', content: { choice: 'always' } });
+    const unoffered = await callWithContext(bridge.client, 'js', { code: 'approval-native-session-only' }, {
+      toolUseId: 'approval-unoffered-scope',
+    });
+    assert.deepEqual(JSON.parse(unoffered.content[0].text), { action: 'cancel' });
+    const sessionOnly = bridge.elicitationRequests.at(-1).requestedSchema.properties.choice;
+    assert.deepEqual(sessionOnly.enum, ['once', 'session', 'decline']);
+
+    const unrelatedMeta = { fixture: 'unrelated-form', opaque: { id: 39 } };
+    const unrelatedRequest = {
+      mode: 'form',
+      message: 'Enter the fixture secret.',
+      requestedSchema: { type: 'object', properties: { secret: { type: 'string', minLength: 1 } }, required: ['secret'] },
+      _meta: unrelatedMeta,
+    };
+    bridge.respondToNextElicitation({ action: 'accept', content: { secret: 'kept secret' } });
+    const form = await callWithContext(bridge.client, 'js', { code: 'approval-form' }, {
+      toolUseId: 'approval-unrelated-form',
+    });
+    assert.deepEqual(JSON.parse(form.content[0].text), { action: 'accept', content: { secret: 'kept secret' } });
+    assert.deepEqual(bridge.elicitationRequests.at(-1), unrelatedRequest);
+
+    const urlRequest = {
+      mode: 'url',
+      message: 'Open the original fixture approval URL.',
+      elicitationId: 'fixture-url-elicitation',
+      url: 'https://approval.example.invalid/continue',
+      _meta: { fixture: 'url-form-pass-through', opaque: { id: 71 } },
+    };
+    bridge.respondToNextElicitation({ action: 'decline' });
+    const url = await callWithContext(bridge.client, 'js', { code: 'approval-url' }, {
+      toolUseId: 'approval-url',
+    });
+    assert.deepEqual(JSON.parse(url.content[0].text), { action: 'decline' });
+    assert.deepEqual(bridge.elicitationRequests.at(-1), urlRequest);
+  } finally {
+    await bridge.close();
+  }
+});
+
+test('Claude relay interrupts an active turn on cancel and drains cleanup before a real stdio close', async () => {
+  const cancelled = await connectRelay();
+  try {
+    const controller = new AbortController();
+    const pending = callWithContext(cancelled.client, 'js', { code: 'cancel-active' }, {
+      sessionId: 'cancel-session', turnId: 'cancel-turn', toolUseId: 'cancel-use', signal: controller.signal,
+    }).then(value => ({ value }), error => ({ error }));
+    await waitFor(() => cancelled.logs().some(entry => entry.type === 'active-call-start'));
+    controller.abort();
+    const settled = await pending;
+    assert.ok(settled.error, 'an explicitly canceled MCP request should reject at the caller');
+    await waitFor(() => cancelled.logs().some(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === 'cancel-session' && entry.args.turn_id === 'cancel-turn'));
+    assert.equal(cancelled.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === 'cancel-session').length, 1);
+  } finally {
+    await cancelled.close();
+  }
+
+  const closed = await connectRelay();
+  try {
+    const pending = callWithContext(closed.client, 'js', { code: 'close-active' }, {
+      sessionId: 'close-session', turnId: 'close-turn', toolUseId: 'close-use',
+    }).then(value => ({ value }), error => ({ error }));
+    await waitFor(() => closed.logs().some(entry => entry.type === 'active-call-start'));
+    await closed.client.close();
+    const settled = await pending;
+    assert.ok(settled.error, 'closing the host transport should settle the active tool call');
+    await waitFor(() => closed.logs().some(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === 'close-session' && entry.args.turn_id === 'close-turn'));
+    const events = closed.logs();
+    const startIndex = events.findIndex(entry => entry.type === 'active-call-start' && entry.code === 'close-active');
+    const cleanupIndex = events.findIndex(entry => entry.type === 'turn-ended' && entry.args.session_id === 'close-session');
+    const exitIndex = events.findIndex(entry => entry.type === 'fixture-exit');
+    assert.ok(startIndex >= 0 && cleanupIndex > startIndex && exitIndex > cleanupIndex,
+      'the relay must complete original Interrupt cleanup before closing the original server');
+    assert.equal(events.filter(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === 'close-session').length, 1);
+  } finally {
+    await closed.close();
+  }
+});
