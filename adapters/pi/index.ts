@@ -92,9 +92,11 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
                 (schema.required?.length ?? 0) !== 0 || typeof params.message !== 'string') {
               return { action: 'cancel' as const };
             }
-            const approved = await ctx.ui.confirm('LCU approval', params.message);
-            return { action: approved ? 'accept' as const : 'decline' as const,
-              ...(approved ? { content: {} } : {}) };
+            if (typeof ctx.ui.select !== 'function') return { action: 'cancel' as const };
+            const selected = await ctx.ui.select(params.message, ['Allow', 'Decline']);
+            if (selected === 'Allow') return { action: 'accept' as const, content: {} };
+            if (selected === 'Decline') return { action: 'decline' as const };
+            return { action: 'cancel' as const };
           },
         });
         await candidate.connect();

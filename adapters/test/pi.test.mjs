@@ -74,14 +74,14 @@ test('Pi asks for non-origin empty-form approval and cancels unsupported forms',
     registerTool(tool) { tools.set(tool.name, tool); } };
   const ctx = { sessionManager: { getSessionId: () => 'pi-approval-session' },
     model: { id: 'pi-model' }, hasUI: true,
-    ui: { async confirm(title, message) { prompts.push([title, message]); return true; } } };
+    ui: { async select(title, options) { prompts.push([title, options]); return 'Allow'; } } };
   try {
     piExtension(pi);
     await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
     await handlers.get('agent_start')({}, ctx);
     const native = await tools.get('js').execute('1', { code: 'approval-other' }, undefined, undefined, ctx);
     assert.equal(native.content[0].text, 'accept');
-    assert.deepEqual(prompts, [['LCU approval', 'Allow native window access?']]);
+    assert.deepEqual(prompts, [['Allow native window access?', ['Allow', 'Decline']]]);
     const form = await tools.get('js').execute('2', { code: 'approval-form' }, undefined, undefined, ctx);
     assert.equal(form.content[0].text, 'cancel');
     assert.equal(prompts.length, 1);
