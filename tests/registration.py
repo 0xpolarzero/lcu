@@ -63,8 +63,36 @@ user_claude = json.loads(claude_settings.read_text())
 project_claude = json.loads(project_claude_settings.read_text())
 assert user_claude['model'] == 'keep-me'
 assert user_claude['permissions']['allow'] == ['Read']
-assert user_claude['permissions']['deny'] == ['mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir']
-assert project_claude['permissions']['deny'] == ['Bash(rm *)', 'mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir']
+host_only = ['mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir', 'mcp__lcu__set_turn_context']
+assert user_claude['permissions']['deny'] == host_only
+assert project_claude['permissions']['deny'] == ['Bash(rm *)', *host_only]
+
+# Claude invokes the shipped relay, which launches the original direct LCU
+# command unchanged. Project registration belongs to the project .mcp.json.
+expected_claude_command = [
+    str(prefix / 'current/adapters/claude.mjs'), command, '--session', 'direct',
+]
+for config_path in (home / '.claude.json', project / '.mcp.json'):
+    registered = json.loads(config_path.read_text())['mcpServers']['lcu']
+    assert registered['command'] == str(prefix / 'current/agent-tools/node/bin/node'), (config_path, registered)
+    assert registered['args'] == expected_claude_command, (config_path, registered)
+
+context_group = next(group for group in user_claude['hooks']['PreToolUse']
+                     if group.get('matcher') == 'mcp__lcu__js|mcp__lcu__js_reset')
+context_hook = context_group['hooks'][0]
+assert (context_hook['type'], context_hook['server'], context_hook['tool']) == (
+    'mcp_tool', 'lcu', 'set_turn_context')
+assert context_hook['input'] == {
+    'session_id': '${session_id}', 'turn_id': '${prompt_id}',
+    'tool_use_id': '${tool_use_id}', 'agent_id': '${agent_id}',
+}
+for event, hook_event in (('Stop', 'Stop'), ('StopFailure', 'Interrupt')):
+    cleanup = user_claude['hooks'][event][0]['hooks'][0]
+    assert (cleanup['type'], cleanup['server'], cleanup['tool']) == ('mcp_tool', 'lcu', 'turn_ended')
+    assert cleanup['input'] == {
+        'hook_event_name': hook_event,
+        'session_id': '${session_id}', 'turn_id': '${prompt_id}',
+    }
 pi_settings = home / '.pi/agent/settings.json'
 assert pi_settings.is_file(), 'Pi local extension must be registered by its own package manager'
 pi_packages = json.loads(pi_settings.read_text())['packages']
