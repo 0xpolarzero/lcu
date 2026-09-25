@@ -93,6 +93,61 @@ test('Pi asks for non-origin empty-form approval and cancels unsupported forms',
   }
 });
 
+test('Pi forwards only the native app approval persistence scope selected in its UI', async () => {
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  const handlers = new Map();
+  const tools = new Map();
+  const prompts = [];
+  let selection = 'Allow for this session';
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
+  const ctx = { sessionManager: { getSessionId: () => 'pi-native-approval-session' },
+    model: { id: 'pi-model' }, hasUI: true,
+    ui: {
+      async select(title, options) { prompts.push({ title, options }); return selection; },
+      async confirm() { assert.fail('Native app requests use the scope selector'); },
+    } };
+  try {
+    piExtension(pi);
+    await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
+    await handlers.get('agent_start')({}, ctx);
+    const execute = async (code, id) => {
+      const result = await tools.get('js').execute(id, { code }, undefined, undefined, ctx);
+      return JSON.parse(result.content[0].text);
+    };
+    const session = await execute('approval-native', 'native-session');
+    assert.deepEqual(session, { action: 'accept', content: {}, _meta: { persist: 'session' } });
+    assert.deepEqual(prompts.at(-1), {
+      title: 'Allow Computer Use to use "LCU Fixture App"?',
+      options: ['Allow once', 'Allow for this session', 'Always allow', 'Decline'],
+    });
+
+    selection = 'Always allow';
+    const always = await execute('approval-native', 'native-always');
+    assert.deepEqual(always, { action: 'accept', content: {}, _meta: { persist: 'always' } });
+
+    selection = 'Allow once';
+    const once = await execute('approval-native', 'native-once');
+    assert.deepEqual(once, { action: 'accept', content: {} });
+
+    selection = 'Always allow';
+    const forbidden = await execute('approval-native-session-only', 'native-forbidden-scope');
+    assert.deepEqual(forbidden, { action: 'cancel' });
+    assert.deepEqual(prompts.at(-1).options, ['Allow once', 'Allow for this session', 'Decline']);
+
+    selection = 'Decline';
+    assert.deepEqual(await execute('approval-native', 'native-decline'), { action: 'decline' });
+    selection = undefined;
+    assert.deepEqual(await execute('approval-native', 'native-cancel'), { action: 'cancel' });
+    assert.equal(prompts.length, 6);
+    await handlers.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+  }
+});
+
 test('Pi closes its MCP connection after a reported cleanup failure', async () => {
   const oldCommand = process.env.LCU_MCP_COMMAND;
   process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);

@@ -4,6 +4,51 @@ import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const MODEL_TOOLS = new Set(['js', 'js_reset']);
 
+const NATIVE_APPROVAL_PERSISTENCE = [
+  ['session', 'Allow for this session'],
+  ['always', 'Always allow'],
+];
+
+/** Return the choices supported by an original native-app approval request. */
+export function nativeAppApprovalOptions(params) {
+  const meta = params?._meta;
+  const schema = params?.requestedSchema;
+  const properties = schema?.properties;
+  const app = meta?.tool_params?.app;
+  if (params?.mode !== 'form' || typeof params.message !== 'string' || !params.message ||
+      schema?.type !== 'object' || properties === null || typeof properties !== 'object' ||
+      Array.isArray(properties) || Object.keys(properties ?? {}).length !== 0 ||
+      (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.length !== 0)) ||
+      meta?.codex_approval_kind !== 'mcp_tool_call' || meta?.connector_id !== 'computer-use' ||
+      typeof app !== 'string' || !app) {
+    return undefined;
+  }
+
+  const requested = new Set(Array.isArray(meta.persist) ? meta.persist : []);
+  const choices = [{ value: 'once', label: 'Allow once' }];
+  for (const [value, label] of NATIVE_APPROVAL_PERSISTENCE) {
+    if (requested.has(value)) choices.push({ value, label });
+  }
+  choices.push({ value: 'decline', label: 'Decline' });
+  return { message: params.message, resource: app, choices };
+}
+
+/** Map a selected native-app approval choice to the original MCP response. */
+export function nativeAppApprovalResponse(params, value) {
+  const request = nativeAppApprovalOptions(params);
+  if (!request) return { action: 'cancel' };
+  if (value === 'cancel') return { action: 'cancel' };
+  if (value === 'decline') return { action: 'decline' };
+  if (value === 'once' && request.choices.some(choice => choice.value === 'once')) {
+    return { action: 'accept', content: {} };
+  }
+  if (NATIVE_APPROVAL_PERSISTENCE.some(([scope]) => scope === value) &&
+      request.choices.some(choice => choice.value === value)) {
+    return { action: 'accept', content: {}, _meta: { persist: value } };
+  }
+  return { action: 'cancel' };
+}
+
 function originApproval(params, allowedOrigins) {
   const meta = params?._meta ?? params?.meta;
   if (meta?.tool_name !== 'access_browser_origin' || typeof meta.origin !== 'string') return false;

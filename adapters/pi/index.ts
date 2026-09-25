@@ -3,7 +3,7 @@ import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { TSchema } from '@sinclair/typebox';
-import { createCuaClient } from '../client.mjs';
+import { createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse } from '../client.mjs';
 
 type OriginalContent = { type: string; text?: string; data?: string; mimeType?: string };
 
@@ -78,6 +78,14 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
           onElicitation: async params => {
             const ctx = approvalContext;
             if (!ctx?.hasUI) return { action: 'cancel' as const };
+            const nativeApproval = nativeAppApprovalOptions(params);
+            if (nativeApproval) {
+              if (typeof ctx.ui.select !== 'function') return { action: 'cancel' as const };
+              const selectedLabel = await ctx.ui.select(nativeApproval.message,
+                nativeApproval.choices.map(choice => choice.label));
+              const selectedValue = nativeApproval.choices.find(choice => choice.label === selectedLabel)?.value ?? 'cancel';
+              return nativeAppApprovalResponse(params, selectedValue);
+            }
             const schema = params?.requestedSchema;
             if (params?.mode === 'url' || schema?.type !== 'object' ||
                 Object.keys(schema.properties ?? {}).length !== 0 ||
