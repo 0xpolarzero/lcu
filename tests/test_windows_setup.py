@@ -33,6 +33,9 @@ class WindowsSetupTests(unittest.TestCase):
             node.chmod(0o755)
             skill = base / 'skill'
             skill.mkdir()
+            adapter = base / 'adapters/claude.mjs'
+            adapter.parent.mkdir()
+            adapter.write_text('fixture relay')
             with mock.patch.object(setup, 'installer_paths', return_value=(node, base / 'skills.mjs', base / 'mcp.mjs')), \
                  mock.patch.object(setup, 'generate_skill', return_value=skill), \
                  mock.patch.object(setup, 'installed_app_resources', return_value=base / 'resources'), \
