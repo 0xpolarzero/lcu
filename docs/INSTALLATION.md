@@ -24,7 +24,13 @@ pi
 
 Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
 
-Explicit setup options with `--yes` suppress LCU's setup confirmation. They cannot grant macOS permissions. For native use, allow **Screen & System Audio Recording** for `/Applications/ChatGPT.app` (`com.openai.codex`) and **Accessibility** for its nested signed `Contents/Resources/cua_node/lib/node_modules/@oai/sky/Codex Computer Use.app` (`com.openai.sky.CUAService`) in System Settings > Privacy & Security. The helper appears as **ChatGPT Computer Use** and may also present its own screenshot or screen/audio capture prompt; allow that prompt through the normal macOS UI. This target pair let the original `getApp` call pass in a fresh macOS guest. Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
+`--yes` suppresses LCU's setup confirmation; macOS permissions still require approval. For native use, open System Settings > Privacy & Security:
+
+1. In **Screen & System Audio Recording**, allow **ChatGPT** (`/Applications/ChatGPT.app`).
+2. In **Accessibility**, allow **Codex Computer Use**. If it is absent, use **+** to select `/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/@oai/sky/Codex Computer Use.app`.
+3. If the helper opens a separate **ChatGPT Computer Use** screenshot or screen/audio capture prompt, allow it through the normal macOS UI.
+
+Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
 ## Windows 11 x64 candidate
 
