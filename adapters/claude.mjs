@@ -7,6 +7,7 @@ import {
   ElicitRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
   nativeAppApprovalOptions,
@@ -301,7 +302,16 @@ async function main() {
   await runClaudeBridge({ command, args });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main().catch(error => {
     console.error('Claude MCP relay failed:', asError(error));
     process.exitCode = 1;
