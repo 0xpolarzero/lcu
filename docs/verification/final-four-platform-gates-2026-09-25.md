@@ -15,22 +15,25 @@ bundle passed its seal check.
 | `darwin-arm64/lcu-0.3.0-darwin-arm64.tar.gz` | `a56cc54b0c45d214391c349e4a161d7458c090c246db159d670344ad3b0392bd` |
 | `windows-x64/lcu-0.3.0-windows-x64.zip` | `f5b66fe303999cd24703ca33c003e0d35ad918c0805ac9edd1ce6b7d06908d67` |
 
-The Linux offline archive gates did not complete. Both supplied disposable
-containers verified their archive sidecars, then Docker ended with exit 125
-and `error waiting for container: unexpected EOF`. Read-only status later
-reported OrbStack `Stopped`; after one normal app launch, the app process was
-present but its Docker API socket remained absent. No test assertion failure
-was observed. The exact failure and engine state are preserved in
+The first parallel offline attempt verified both sidecars but Docker ended
+with exit 125 and `error waiting for container: unexpected EOF`. Read-only
+status reported OrbStack `Stopped`, with its Docker API socket absent even
+after one normal app launch. The installed `orbctl start` command would resume
+machines that were running when OrbStack last stopped, so it was not used.
+Those initial failures are preserved in
 `/private/tmp/lcu-final-offline-gate-failure-66bb0fb.txt`.
-The installed `orbctl start` command would resume machines that were running
-when OrbStack last stopped, so it was not used; Docker availability must be
-restored before rerunning these archive gates.
 
-Earlier implementation evidence is separate from these four archives: 142
-ordinary tests passed in the ARM64 container. Historical `b11ae52` Linux
-archives had their own 120-test offline gates, recorded in
-[the earlier archive report](final-linux-gates-2026-09-24.md). Neither result
-proves the final archives' offline installation behavior.
+After Docker became available, the existing offline gates passed serially
+against the same immutable archives, supplied local packages and disposable
+images, with `--network none`. Both sidecars verified; each run completed
+installation, failure/rollback and concurrent-installer checks, **142 Python
+tests**, agent registration checks and the desktop integration test with exit
+0. Logs are `/private/tmp/lcu-offline-arm64-rerun.log` and
+`/private/tmp/lcu-offline-x64-rerun.log`. No archive was rebuilt or modified.
+
+Historical `b11ae52` Linux archives had their own 120-test offline gates,
+recorded in [the earlier archive report](final-linux-gates-2026-09-24.md).
+Those results are separate from this final archive run.
 
 Live platform evidence also has separate boundaries. macOS cold helper startup
 and first-time permissions remain unverified. Windows candidates c, d and f
