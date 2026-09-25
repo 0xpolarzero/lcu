@@ -7,10 +7,13 @@ LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop
 Build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, and run as the intended desktop account:
 
 ~~~sh
-./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
+PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" \
+  ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
 This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture.
+
+The `PATH` prefix selects the app-bundled Codex CLI that passed LCU's lifecycle-hook check. Use that same executable when launching Codex; see [Codex CLI setup](ADAPTERS.md#codex-cli).
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
