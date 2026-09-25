@@ -22,6 +22,9 @@ reported OrbStack `Stopped`; after one normal app launch, the app process was
 present but its Docker API socket remained absent. No test assertion failure
 was observed. The exact failure and engine state are preserved in
 `/private/tmp/lcu-final-offline-gate-failure-66bb0fb.txt`.
+The installed `orbctl start` command would resume machines that were running
+when OrbStack last stopped, so it was not used; Docker availability must be
+restored before rerunning these archive gates.
 
 Earlier implementation evidence is separate from these four archives: 142
 ordinary tests passed in the ARM64 container. Historical `b11ae52` Linux
