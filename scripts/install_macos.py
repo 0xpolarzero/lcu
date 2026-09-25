@@ -73,8 +73,9 @@ def main(argv=None):
             if getattr(args, option):
                 forwarded += ['--' + option.replace('_', '-')]
         subprocess.run([str(runtime), 'setup', *forwarded], check=True)
-    print('macOS Screen Recording and Accessibility approvals belong to the original Codex Computer Use helper. '
-          'Grant them in System Settings when using native control; setup never grants them silently.')
+    print('macOS first use: in System Settings > Privacy & Security, allow Screen & System Audio Recording '
+          f'for {args.existing_app.resolve()} and Accessibility for its signed ChatGPT Computer Use helper.')
+    print('Allow any separate screen-capture prompt from that helper. Setup cannot grant OS permissions.')
 
 
 if __name__ == '__main__':
