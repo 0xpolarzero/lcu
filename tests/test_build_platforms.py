@@ -16,7 +16,7 @@ from provision_agent_tools import provision
 
 
 class BuildPlatformTests(unittest.TestCase):
-    def test_darwin_archive_uses_pinned_app_and_contains_only_thin_platform_files(self):
+    def test_darwin_archive_uses_selected_compatible_app_and_contains_only_thin_platform_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             app = root / 'ChatGPT.app'
@@ -38,15 +38,18 @@ class BuildPlatformTests(unittest.TestCase):
                 (release / 'adapters/pi/index.ts').write_text('fixture')
             with mock.patch.object(build_bundle, 'architecture', return_value='arm64'), \
                     mock.patch('lcu.platforms.resolve_installed_mac_app',
-                               return_value=SimpleNamespace(runtime=node.parent.parent)), \
+                               return_value=SimpleNamespace(runtime=node.parent.parent)) as resolve, \
                     mock.patch.object(build_bundle, 'provision_agents', side_effect=fake_provision):
                 archive = build_bundle.build(root / 'dist', target='darwin', app=app)
+            resolve.assert_called_once_with(app, arch='arm64')
             self.assertEqual(archive.name, 'lcu-0.3.0-darwin-arm64.tar.gz')
             with tarfile.open(archive) as bundle:
                 names = {member.name for member in bundle}
                 prefix = 'lcu-0.3.0-darwin-arm64/'
                 self.assertIn(prefix + 'scripts/install_macos.py', names)
                 self.assertIn(prefix + 'lcu/platforms.py', names)
+                self.assertIn(prefix + 'lcu/app_layout.py', names)
+                self.assertIn(prefix + 'lcu/asar.py', names)
                 self.assertIn(prefix + 'adapters/client.mjs', names)
                 self.assertIn(prefix + 'adapters/claude.mjs', names)
                 self.assertIn(prefix + 'adapters/audio-files.mjs', names)
@@ -54,6 +57,14 @@ class BuildPlatformTests(unittest.TestCase):
                 self.assertNotIn(prefix + 'app/Contents/Resources/cua_node/bin/node', names)
                 manifest = json.load(bundle.extractfile(prefix + 'bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('darwin', 'arm64'))
+
+    def test_darwin_archive_keeps_supported_architecture_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(build_bundle, 'architecture', return_value='x64'), \
+                    mock.patch('lcu.platforms.resolve_installed_mac_app') as resolve:
+                with self.assertRaisesRegex(ValueError, 'does not support macOS x64'):
+                    build_bundle.build(Path(temporary) / 'dist', target='darwin')
+            resolve.assert_not_called()
 
     def test_linux_archive_name_and_manifest_remain_linux(self):
         with tempfile.TemporaryDirectory() as temporary:

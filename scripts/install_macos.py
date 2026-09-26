@@ -19,18 +19,16 @@ def install(prefix, application, *, account=None):
     prefix = checked_prefix(prefix)
     arch = architecture('darwin')
     verify(SOURCE, arch, 'darwin')
-    lock = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['darwin']
-    entry = lock['architectures'].get(arch)
-    if entry is None:
-        raise ValueError(f'No verified macOS {arch} application is pinned in this release')
-    selected = resolve_installed_mac_app(application, expected_version=lock['version'],
-        expected_runtime=lock['runtime'], expected_hashes=entry['components'], arch=arch)
+    policy = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['darwin']
+    if arch not in policy.get('architectures', {}):
+        raise ValueError(f'This LCU release does not support macOS {arch}')
+    selected = resolve_installed_mac_app(application, arch=arch)
     # Validate before creating the prefix or changing the selected release.
     prefix.mkdir(parents=True, exist_ok=True)
     (prefix / '.lcu-install').touch(exist_ok=True)
     return select_release(prefix, arch, selected.app, {
-        'platform': 'darwin', 'architecture': arch, 'package_version': lock['version'],
-        'runtime': lock['runtime'],
+        'platform': 'darwin', 'architecture': arch, 'package_version': selected.version,
+        'runtime': selected.runtime_version,
     }, account=account, target='darwin', source=SOURCE)
 
 
@@ -39,7 +37,7 @@ def main(argv=None):
     parser.description = __doc__
     parser.set_defaults(prefix=Path.home() / '.local/share/lcu', session='direct')
     parser.add_argument('--existing-app', type=Path, default=Path('/Applications/ChatGPT.app'),
-                        help='Pinned signed ChatGPT.app; reused in place without modification')
+                        help='Existing signed ChatGPT.app; reused in place without modification')
     parser.add_argument('--runtime-only', action='store_true')
     parser.add_argument('--offline', action='store_true', help='Accepted for consistency; macOS setup always uses local files')
     parser.add_argument('--skip-system', action='store_true', help='Accepted for consistency; no system packages are installed')
@@ -60,7 +58,7 @@ def main(argv=None):
     install(args.prefix, args.existing_app, account=account)
     runtime = args.prefix / 'current/bin/lcu'
     print(f'LCU installed: {runtime}')
-    print('The signed application is reused in place. An app update requires matching reviewed pins.')
+    print('The signed application is reused in place. Compatible updates are detected automatically.')
     if not args.runtime_only:
         forwarded = ['--prefix', str(args.prefix), '--user', account.pw_name, '--scope', args.scope,
                      '--session', 'direct']

@@ -1,20 +1,16 @@
-"""Validate an installed macOS application for use by the original CUA runtime.
-
-Linux keeps its existing managed-package validator. Windows has no inspected
-application package yet, so neither platform is inferred from shared JS files.
-"""
+"""Validate an installed signed macOS application for the original CUA runtime."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
 import platform as host_platform
 import plistlib
 import subprocess
-from typing import Mapping
+
+from .app_layout import locate_codex_tools
 
 
 MAC_BUNDLE_ID = 'com.openai.codex'
@@ -25,16 +21,12 @@ MAC_REQUIRED_FILES = (
     'Resources/cua_node/bin/node',
     'Resources/cua_node/bin/node_repl',
     'Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
-    'Resources/codex',
-    'Resources/codex-code-mode-host',
     'Resources/plugins/openai-bundled/plugins/unified-computer-use/.mcp.json',
     'Resources/plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
 )
 MAC_EXECUTABLES = (
     'Resources/cua_node/bin/node',
     'Resources/cua_node/bin/node_repl',
-    'Resources/codex',
-    'Resources/codex-code-mode-host',
 )
 
 
@@ -46,17 +38,12 @@ class InstalledApplication:
     backend: str
     version: str
     arch: str
+    codex_cli: Path
+    code_mode_host: Path
+    runtime_version: str
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open('rb') as source:
-        for block in iter(lambda: source.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _identity(bundle: Path, identifier: str, version: str | None = None) -> None:
+def _identity(bundle: Path, identifier: str) -> dict:
     info = bundle / 'Contents/Info.plist'
     if not info.is_file() or info.is_symlink():
         raise ValueError(f'Application bundle metadata is missing: {info}')
@@ -64,8 +51,7 @@ def _identity(bundle: Path, identifier: str, version: str | None = None) -> None
         details = plistlib.load(source)
     if details.get('CFBundleIdentifier') != identifier:
         raise ValueError(f'Unexpected application bundle identifier: {bundle}')
-    if version is not None and details.get('CFBundleShortVersionString') != version:
-        raise ValueError(f'Installed application version does not match pin: {bundle}')
+    return details
 
 
 def _verify_signature(bundle: Path, identifier: str) -> None:
@@ -88,14 +74,8 @@ def _verify_signature(bundle: Path, identifier: str) -> None:
         raise ValueError(f'Installed application signer does not match OpenAI: {bundle}')
 
 
-def resolve_installed_mac_app(app_path: Path, *, expected_version: str,
-                              expected_runtime: str, expected_hashes: Mapping[str, str],
-                              arch: str | None = None) -> InstalledApplication:
-    """Validate a pinned, local ChatGPT.app without relocating signed files.
-
-    ``expected_hashes`` must cover every runtime entry that LCU will execute or
-    use as its MCP policy. The caller owns the trusted, versioned pin source.
-    """
+def resolve_installed_mac_app(app_path: Path, *, arch: str | None = None) -> InstalledApplication:
+    """Validate a local ChatGPT.app without relocating or modifying signed files."""
     if host_platform.system() != 'Darwin':
         raise ValueError('The macOS application can only be validated on macOS')
     app = Path(app_path).expanduser()
@@ -105,33 +85,34 @@ def resolve_installed_mac_app(app_path: Path, *, expected_version: str,
     architecture = arch or {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x64'}.get(host_platform.machine())
     if architecture not in ('arm64', 'x64'):
         raise ValueError(f'Unsupported macOS architecture: {architecture}')
-    if not expected_version or not expected_runtime:
-        raise ValueError('A pinned application version and runtime are required')
-    if set(expected_hashes) != set(MAC_REQUIRED_FILES):
-        raise ValueError('Mac application pins must cover every required runtime file')
-    if any(len(value) != 64 or any(char not in '0123456789abcdef' for char in value)
-           for value in expected_hashes.values()):
-        raise ValueError('Mac application pins must contain SHA-256 hex digests')
-
     contents = app / 'Contents'
     resources = contents / 'Resources'
     runtime = resources / 'cua_node'
-    _identity(app, MAC_BUNDLE_ID, expected_version)
+    details = _identity(app, MAC_BUNDLE_ID)
+    version = details.get('CFBundleShortVersionString')
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError(f'Installed application version is missing: {app}')
     helper = contents / MAC_HELPER
     _identity(helper, MAC_HELPER_ID)
     manifest_path = runtime / 'manifest.json'
     if not manifest_path.is_file() or manifest_path.is_symlink():
         raise ValueError('Installed application CUA manifest is missing')
     manifest = json.loads(manifest_path.read_text())
-    if (manifest.get('platform'), manifest.get('arch'), manifest.get('runtime_archive_version')) != (
-            'darwin', architecture, expected_runtime):
-        raise ValueError('Installed application CUA runtime does not match pin')
+    runtime_version = manifest.get('runtime_archive_version')
+    if (manifest.get('platform') != 'darwin' or manifest.get('arch') != architecture or
+            not isinstance(runtime_version, str) or not runtime_version.strip()):
+        raise ValueError('Installed application CUA runtime has an incompatible platform or architecture')
     for relative in MAC_REQUIRED_FILES:
         file = contents / relative
-        if not file.is_file() or file.is_symlink() or _sha256(file) != expected_hashes[relative]:
-            raise ValueError(f'Installed application file does not match pin: {relative}')
+        if not file.is_file() or file.is_symlink():
+            raise ValueError(f'Required application file is missing or invalid: {relative}')
         if relative in MAC_EXECUTABLES and not os.access(file, os.X_OK):
             raise ValueError(f'Installed application executable is not executable: {relative}')
+    tools = locate_codex_tools(resources)
+    for executable in (tools.cli, tools.code_mode_host):
+        if not os.access(executable, os.X_OK):
+            raise ValueError(f'Installed application executable is not executable: {executable.relative_to(contents)}')
     _verify_signature(app, MAC_BUNDLE_ID)
     _verify_signature(helper, MAC_HELPER_ID)
-    return InstalledApplication(app, resources, runtime, 'mac', expected_version, architecture)
+    return InstalledApplication(app, resources, runtime, 'mac', version, architecture,
+                                tools.cli, tools.code_mode_host, runtime_version)

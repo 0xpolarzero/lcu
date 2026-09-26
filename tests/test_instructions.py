@@ -320,6 +320,11 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(user_settings.read_bytes(), configured_user)
 
     def test_codex_setup_wraps_original_lcu_command_and_retains_host_policy(self):
+        original_codex = self.resources / 'codex-cli/bin/codex'
+        original_host = self.resources / 'codex-cli/bin/codex-code-mode-host'
+        original_codex.parent.mkdir(parents=True, exist_ok=True)
+        original_codex.write_text('original Codex CLI')
+        original_host.write_text('original code-mode host')
         tool_root = self.root / 'agent-tools'
         tool_root.mkdir()
         node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
@@ -357,7 +362,7 @@ class InstalledInstructionTests(unittest.TestCase):
         mcp_call = next(argv for argv in calls if argv[1:3] == ['--input-type=module', '-e'])
         self.assertEqual(json.loads(mcp_call[-2]), [str(node), str(adapter), *original])
         self.assertEqual(json.loads(mcp_call[-1]), policy)
-        self.assertEqual(install_hooks.call_args.args[0], self.resources / 'codex')
+        self.assertEqual(install_hooks.call_args.args[0], original_codex)
         self.assertEqual(install_hooks.call_args.args[1], config)
 
     def test_pi_registration_uses_original_skill_and_offline_local_package(self):

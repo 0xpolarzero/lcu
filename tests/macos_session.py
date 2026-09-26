@@ -1,8 +1,8 @@
 """Bounded original-versus-LCU macOS MCP check without GUI/provider calls.
 
-Run on macOS with an installed, pinned ChatGPT.app and a prepared LCU release.
-Only MCP initialization, pure JavaScript, and reset are exercised. This does
-not prove computer-use or browser provider readiness.
+Run on macOS with an installed compatible signed ChatGPT.app and a prepared
+LCU release. Only MCP initialization, pure JavaScript, and reset are exercised.
+This does not prove computer-use or browser provider readiness.
 """
 
 import argparse
@@ -13,11 +13,14 @@ import platform
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lcu.app_layout import locate_codex_tools
 from mcp_client import Client, text
 
 
 def isolated_env(home: Path, app: Path) -> dict[str, str]:
     resources = app / 'Contents/Resources'
+    tools = locate_codex_tools(resources)
     runtime = resources / 'cua_node'
     modules = runtime / 'lib/node_modules'
     plugins = resources / 'plugins'
@@ -38,7 +41,7 @@ def isolated_env(home: Path, app: Path) -> dict[str, str]:
         'NODE_REPL_DISABLE_ANALYTICS': '1',
         'NODE_REPL_REQUEST_META': json.dumps({'x-codex-turn-metadata': {
             'session_id': 'lcu-macos-validation', 'turn_id': 'pure-js-check'}}),
-        'CODEX_CLI_PATH': str(resources / 'codex'),
+        'CODEX_CLI_PATH': str(tools.cli),
     }
 
 
@@ -82,7 +85,7 @@ def main() -> None:
     lcu = [str(release / 'bin/lcu')]
     if not Path(original[0]).is_file() or not Path(original[1]).is_file() or not Path(lcu[0]).is_file():
         parser.error('Original runtime or LCU release executable is missing')
-    with tempfile.TemporaryDirectory(prefix='lcu-macos-mcp-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='lcu-macos-mcp-', dir='/private/tmp') as temporary:
         root = Path(temporary)
         baseline = exercise(original, isolated_env(root / 'original', app))
         adapted = exercise(lcu, isolated_env(root / 'adapted', app))

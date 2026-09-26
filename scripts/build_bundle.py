@@ -31,13 +31,9 @@ def build(output, package=None, *, target='linux', app=None):
         sys.path.insert(0, str(SOURCE))
         from lcu.platforms import resolve_installed_mac_app
         policy = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['darwin']
-        entry = policy['architectures'].get(arch)
-        if entry is None:
-            raise ValueError(f'No pinned macOS application for {arch}.')
-        selected = resolve_installed_mac_app(
-            app or Path('/Applications/ChatGPT.app'),
-            expected_version=policy['version'], expected_runtime=policy['runtime'],
-            expected_hashes=entry['components'], arch=arch)
+        if arch not in policy.get('architectures', {}):
+            raise ValueError(f'This LCU release does not support macOS {arch}.')
+        selected = resolve_installed_mac_app(app or Path('/Applications/ChatGPT.app'), arch=arch)
         selected_node = selected.runtime / 'bin/node'
     elif target not in ('linux', 'windows') or app is not None:
         raise ValueError('An installed application path is supported only for a macOS build.')
@@ -54,7 +50,7 @@ def build(output, package=None, *, target='linux', app=None):
                         ignore=(shutil.ignore_patterns('lcu-session') if target == 'windows'
                                 else shutil.ignore_patterns('*.cmd')))
         (release / 'lcu').mkdir()
-        modules = ('__init__.py', 'runtime.py', 'setup.py',
+        modules = ('__init__.py', 'app_layout.py', 'asar.py', 'runtime.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
                          'native_host.py', 'claude_visibility.py')
         if target != 'windows':

@@ -494,8 +494,9 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                         raise ValueError('skill installer did not report installing LCU')
                 elif name == 'codex':
                     from .codex_hooks import install_hooks
+                    from .app_layout import locate_codex_tools
                     registered = json.loads(result.stdout)
-                    cli = resources / ('codex.exe' if sys.platform == 'win32' else 'codex')
+                    cli = locate_codex_tools(resources, windows=sys.platform == 'win32').cli
                     install_hooks(cli, Path(registered['path']), cwd, env, original_plugins)
                 elif name == 'claude-code' and phase == 'MCP':
                     from .claude_visibility import install as hide_host_only_tools

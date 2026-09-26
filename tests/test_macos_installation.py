@@ -32,10 +32,12 @@ class MacInstallationTests(unittest.TestCase):
     def _install(self):
         with patch('install_macos.SOURCE', self.source), \
              patch('install_macos.architecture', return_value='arm64'), \
-             patch('install_macos.resolve_installed_mac_app', return_value=SimpleNamespace(app=self.app)):
+             patch('install_macos.resolve_installed_mac_app', return_value=SimpleNamespace(
+                 app=self.app, version='26.924.22138',
+                 runtime_version='0.0.24/20260924074400-f52ea85e2a98', arch='arm64')):
             return install_macos.install(self.prefix, self.app)
 
-    def test_reuses_app_in_place_and_selects_only_validated_release(self):
+    def test_reuses_app_in_place_and_records_observed_version_and_runtime(self):
         with patch('install.validate_release') as validate:
             release = self._install()
         self.assertEqual((self.prefix / 'current').resolve(), release)
@@ -44,6 +46,8 @@ class MacInstallationTests(unittest.TestCase):
         descriptor = json.loads((release / 'installation.json').read_text())
         self.assertEqual(descriptor['platform'], 'darwin')
         self.assertEqual(descriptor['app'], str(self.app))
+        self.assertEqual(descriptor['package_version'], '26.924.22138')
+        self.assertEqual(descriptor['runtime'], '0.0.24/20260924074400-f52ea85e2a98')
         validate.assert_called_once_with(release, None)
 
     def test_invalid_application_fails_before_prefix_or_selection_changes(self):
