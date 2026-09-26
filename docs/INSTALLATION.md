@@ -1,19 +1,27 @@
 # Installation
 
-Install the current official ChatGPT desktop app with Codex before installing LCU. LCU never downloads or installs ChatGPT. If the app is missing, [download ChatGPT](https://chatgpt.com/download/) and install it first. The current delivery supports an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64 and Apple Silicon macOS. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. On macOS, LCU reuses the signed app in place; first-use permissions and an independent TextEdit save passed in a fresh guest ([verification](verification/macos-fresh-guest-2026-09-24.md)). The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
+Install the current official ChatGPT desktop app for LCU's original computer-use runtime, then install the public agent CLIs you plan to use. LCU never downloads or installs these tools. If ChatGPT is missing, [download it](https://chatgpt.com/download/) and install it first. The current delivery supports an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64 and Apple Silicon macOS. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. On macOS, LCU reuses the signed app in place; first-use permissions and an independent TextEdit save passed in a fresh guest ([verification](verification/macos-fresh-guest-2026-09-24.md)). The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
 
 ## macOS and Pi
 
-Install ChatGPT in `/Applications/ChatGPT.app` first, or install it elsewhere and pass that path with `--existing-app`. If it is elsewhere, also update the two `PATH` entries below to point to that app's `Contents/Resources`. Then build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, and run as the intended desktop account:
+Install ChatGPT in `/Applications/ChatGPT.app` first, or install it elsewhere and pass that path with `--existing-app`. Then build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, install or update the standalone Codex CLI, and run as the intended desktop account:
 
 ~~~sh
-PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin:/Applications/ChatGPT.app/Contents/Resources:$PATH" \
-  ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
+npm install -g @openai/codex@latest
+codex --version
+./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
-This reuses the selected signed app in place and installs LCU under `~/.local/share/lcu`. If the app is missing, setup stops with a download link; it never installs it. The app must retain the official bundle and signing identity, supported Apple Silicon architecture, valid runtime manifest, required files, and a recognized original Codex CLI/code-mode-host pair. LCU reports the app and runtime versions it reads from that app; it does not require version or component-hash entries in the repository lock file. The check does not promise compatibility with arbitrary future APIs or layouts. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only.
+This reuses the selected signed app in place and installs LCU under `~/.local/share/lcu`. If the app is missing, setup stops with a download link; it never installs it. The app must retain the official bundle and signing identity, supported Apple Silicon architecture, valid runtime manifest, required files, and recognized original Codex CLI/code-mode-host components used by LCU's runtime integration. This internal app layout does not select the Codex CLI that runs agent turns: setup checks the public `codex` executable on the selected account's `PATH`. LCU reports the app and runtime versions it reads from that app; it does not require version or component-hash entries in the repository lock file. The check does not promise compatibility with arbitrary future APIs or layouts. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only.
 
-The `PATH` prefix selects the app-bundled Codex CLI that passed LCU's lifecycle-hook check. Use that same executable when launching Codex; see [Codex CLI setup](ADAPTERS.md#codex-cli).
+Use the public standalone Codex CLI on the account's normal `PATH` for setup and interactive Codex sessions. If LCU reports that the CLI cannot load its `mcp_tool` lifecycle hooks, update it to the latest public release, then rerun setup. The 2026-09-27 contract run passed with standalone `codex-cli 0.157.1`; see [Codex CLI setup](ADAPTERS.md#codex-cli) and [the verification record](verification/codex-standalone-cli-2026-09-27.md).
+
+~~~sh
+npm install -g @openai/codex@latest
+codex --version
+~/.local/share/lcu/bin/lcu setup --agent codex --yes
+codex
+~~~
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
@@ -55,14 +63,16 @@ Install the official ChatGPT desktop app yourself before LCU. The default Linux 
 sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-Replace `alice` with the existing desktop account. This uses `/usr/lib/chatgpt` and installs the LCU runtime without registering an agent. To select an app installed at another path, add `--existing-app /absolute/path` to the install command. Run Codex setup and launch as that desktop account, not root, using the tested app-bundled CLI on `PATH`:
+Replace `alice` with the existing desktop account. This uses `/usr/lib/chatgpt` and installs the LCU runtime without registering an agent. To select an app installed at another path, add `--existing-app /absolute/path` to the install command. Install or update the public standalone Codex CLI for that account, then run setup and Codex as the desktop account, not root:
 
 ~~~sh
-PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
-PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" codex
+npm install -g @openai/codex@latest
+codex --version
+/opt/lcu/current/bin/lcu setup --agent codex --yes
+codex
 ~~~
 
-The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the app-bundled CLI passes. See [Codex CLI setup](ADAPTERS.md#codex-cli). LCU no longer accepts `--app-package` as an app-acquisition route. If ChatGPT is not installed, download and install it yourself, then rerun LCU setup. For an existing app outside `/usr/lib/chatgpt`, use `--existing-app /absolute/path`. LCU validates the selected app and keeps a private managed copy; it does not replace or modify the original installation.
+The public Codex CLI `0.145.0` failed because its parser did not support `mcp_tool`; the current public `0.157.1` passed. Setup reports the selected executable, version, and parser error, then gives the official npm update command. See [Codex CLI setup](ADAPTERS.md#codex-cli). LCU no longer accepts `--app-package` as an app-acquisition route. If ChatGPT is not installed, download and install it yourself, then rerun LCU setup. For an existing app outside `/usr/lib/chatgpt`, use `--existing-app /absolute/path`. LCU validates the selected app and keeps a private managed copy; it does not replace or modify the original installation.
 
 The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT: the existing app is copied into a private managed generation under the LCU prefix, and LCU leaves the source installation in place.
 
@@ -75,7 +85,7 @@ The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Elec
 Use `--agent pi`, `codex`, or `claude-code` to select agents. Repeat `--agent` for several; `--agent all` selects all three, including agents not installed yet. `--agent auto` selects detected agents (their executable is on `PATH` or their usual config path exists). With no `--agent`, an interactive setup shows a chooser and marks detected agents, but waits for you to choose; it does not select them automatically. Noninteractive agent setup requires an explicit selection. Use `--runtime-only` to install LCU without registering an agent. The `claude` alias remains available. Install and authenticate each selected agent yourself; LCU does not install or authenticate agents. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references. Pi receives its native extension; Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export; additional integrations are open to contributions.
 
 ~~~sh
-PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --agent claude-code --yes
+/opt/lcu/current/bin/lcu setup --agent codex --agent claude-code --yes
 ./scripts/install.sh --list-agents
 ~~~
 
