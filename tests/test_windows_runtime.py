@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from lcu.windows import application_inventory, inventory_sha256
 from lcu.runtime import environment, main, paths
 
 
@@ -20,29 +21,48 @@ class WindowsRuntimeTests(unittest.TestCase):
         prefix = base / 'prefix'
         self.root = prefix / 'releases/release'
         self.root.mkdir(parents=True)
-        self.app = prefix / 'apps/msix-fixture/app'
+        # Deliberately newer than the repository's historical Windows source
+        # metadata: selection follows the installation descriptor.
+        self.package_version = '99.88.77.66'
+        self.runtime_version = 'runtime-selected'
+        source_app = prefix / 'fixture-source-app'
+        source_resources = source_app / 'app/resources'
+        source_runtime = source_resources / 'cua_node'
+        source_launcher = source_runtime / 'bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
+        source_launcher.parent.mkdir(parents=True)
+        source_launcher.write_text('original fixture')
+        (source_resources / 'codex.exe').write_text('original Codex CLI')
+        (source_resources / 'codex-code-mode-host.exe').write_text('original code-mode host')
+        self.inventory = application_inventory(source_app)
+        self.digest = inventory_sha256(self.inventory)
+        self.generation = prefix / 'apps' / self.digest
+        self.generation.mkdir(parents=True)
+        self.app = self.generation / 'app'
+        source_app.rename(self.app)
         self.resources = self.app / 'app/resources'
         self.runtime = self.resources / 'cua_node'
         self.launcher = self.runtime / 'bin/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
-        self.launcher.parent.mkdir(parents=True)
-        self.launcher.write_text('original fixture')
         self.selected = SimpleNamespace(app=self.app, resources=self.resources,
-                                        runtime=self.runtime, launcher=self.launcher)
-        self.policy = {'version': '26.917.9434.0', 'runtime': 'runtime-fixture',
-                       'architectures': {'x64': {'sha256': 'msix-fixture',
-                                                  'components': {'fixture': 'digest'}}}}
+                                        runtime=self.runtime, launcher=self.launcher,
+                                        version=self.package_version,
+                                        runtime_version=self.runtime_version,
+                                        inventory=self.inventory, inventory_digest=self.digest)
+        (self.generation / 'inventory.json').write_text(json.dumps(self.inventory))
+        self.policy = {'version': '26.917.9434.0',
+                       'runtime': '0.0.16/20260915001755-492f19756c31',
+                       'architectures': {'x64': {'sha256': '0' * 64}}}
         (self.root / 'runtime.lock.json').write_text(json.dumps({'platforms': {'windows': self.policy}}))
         (self.root / 'installation.json').write_text(json.dumps({
             'platform': 'windows', 'app': str(self.app), 'architecture': 'x64',
-            'package_version': '26.917.9434.0', 'runtime': 'runtime-fixture',
-            'sha256': 'msix-fixture'}))
+            'package_version': self.package_version, 'runtime': self.runtime_version,
+            'sha256': self.digest}))
 
     def test_uses_managed_app_and_original_windows_paths(self):
         with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected) as resolve:
             selected = paths(self.root)
         self.assertEqual(selected[:3], (self.app, self.resources, self.runtime))
-        resolve.assert_called_once_with(self.app, expected_version='26.917.9434.0',
-            expected_runtime='runtime-fixture', expected_hashes={'fixture': 'digest'})
+        resolve.assert_called_once_with(self.app, expected_version=self.package_version,
+            expected_runtime=self.runtime_version, expected_inventory=self.inventory)
         with patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture', 'Path': 'C:\\Windows'}, clear=True):
             env = environment(self.root, selected)
         self.assertEqual(env['CODEX_HOME'], 'C:\\fixture\\.codex')
@@ -51,7 +71,7 @@ class WindowsRuntimeTests(unittest.TestCase):
         self.assertEqual(env['CODEX_CLI_PATH'], str(self.resources / 'codex.exe'))
         self.assertEqual(env['NODE_REPL_NODE_MODULE_DIRS'], str(self.runtime / 'bin/node_modules'))
         self.assertEqual(env['PATH'], str(self.runtime / 'bin') + ';C:\\Windows')
-        self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], '26.917.9434.0')
+        self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], self.package_version)
 
     def test_runs_original_cua_launcher_with_inherited_stdio(self):
         result = subprocess.CompletedProcess([], 0)
@@ -162,6 +182,28 @@ class WindowsRuntimeTests(unittest.TestCase):
             descriptor.write_text(json.dumps(value))
             with self.assertRaisesRegex(ValueError, 'not the managed private generation'):
                 paths(self.root)
+
+    def test_refuses_missing_or_changed_managed_inventory(self):
+        inventory_path = self.generation / 'inventory.json'
+        inventory_path.unlink()
+        with self.assertRaisesRegex(ValueError, 'not the managed private generation'):
+            paths(self.root)
+
+        inventory_path.write_text(json.dumps({'.': {'type': 'directory'}}))
+        with self.assertRaisesRegex(ValueError, 'inventory does not match its descriptor'):
+            paths(self.root)
+
+    def test_requires_observed_metadata_and_inventory_digest(self):
+        descriptor = self.root / 'installation.json'
+        original = json.loads(descriptor.read_text())
+        for key, value in (('package_version', ''), ('runtime', ''), ('sha256', 'not-a-64-hex-digest')):
+            with self.subTest(key=key):
+                changed = dict(original)
+                changed[key] = value
+                descriptor.write_text(json.dumps(changed))
+                with self.assertRaisesRegex(ValueError, 'incomplete or unsupported'):
+                    paths(self.root)
+        descriptor.write_text(json.dumps(original))
 
     def test_setup_and_browser_dispatch(self):
         with patch('lcu.setup.main') as setup:
