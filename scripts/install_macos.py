@@ -72,11 +72,12 @@ def main(argv=None):
         for option in ('yes', 'check_desktop', 'chrome'):
             if getattr(args, option):
                 forwarded += ['--' + option.replace('_', '-')]
-        subprocess.run([str(runtime), 'setup', *forwarded], check=True)
-    print('macOS first use: in System Settings > Privacy & Security, allow Screen & System Audio Recording '
-          f'for {args.existing_app.resolve()} and Accessibility for Codex Computer Use.')
-    print('If the helper opens a separate ChatGPT Computer Use capture prompt, allow it. '
-          'Setup cannot grant OS permissions.')
+        result = subprocess.run([str(runtime), 'setup', *forwarded], check=False)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+    if args.runtime_only:
+        print('When you configure an agent interactively, LCU guides you through macOS privacy settings.')
+        print(f'You can review the guidance now with: {runtime} doctor')
 
 
 if __name__ == '__main__':

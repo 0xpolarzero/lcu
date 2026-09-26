@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { isolatedEnv } from './isolated-env.mjs';
 
 const fixture = new URL('./result-fixture.mjs', import.meta.url).pathname;
 const extension = new URL('../pi/index.ts', import.meta.url).pathname;
+const adapterPackage = new URL('../', import.meta.url).pathname;
 const node = process.execPath;
 const CASES = ['text', 'image', 'audio', 'error'];
 
@@ -92,7 +93,18 @@ async function run(caseName, evidenceRoot) {
       LCU_RESULT_LOG: resultLog,
       NODE_REPL_DISABLE_ANALYTICS: '1',
     });
-    const args = ['-p', '--mode', 'json', '--no-session', '--no-extensions', '-e', extension,
+    const packageInstall = process.env.PI_INSTALL_PACKAGE === '1';
+    if (packageInstall) {
+      const installed = spawnSync(process.env.PI_BIN, ['install', adapterPackage], {
+        cwd: project, env, encoding: 'utf8', timeout: 20_000,
+      });
+      assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
+      const settings = JSON.parse(readFileSync(join(agentDir, 'settings.json'), 'utf8'));
+      assert.ok((settings.packages ?? []).some(source => resolve(agentDir, source) === resolve(adapterPackage)),
+        JSON.stringify(settings));
+    }
+    const extensionArgs = packageInstall ? [] : ['--no-extensions', '-e', extension];
+    const args = ['-p', '--mode', 'json', '--no-session', ...extensionArgs,
       '--no-builtin-tools', '--no-skills', '--no-context-files', '--provider', 'fixture', '--model', 'scripted',
       `Call original js once with code lcu-result:${caseName}, then finish.`];
     const child = spawn(process.env.PI_BIN, args, { cwd: project, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -151,7 +163,8 @@ const evidenceRoot = process.env.LCU_RESULT_EVIDENCE_DIR ?? mkdtempSync(join(tmp
 mkdirSync(evidenceRoot, { recursive: true });
 
 for (const caseName of CASES) {
-  test(`installed Pi ${process.env.PI_VERSION ?? '0.73.0'} result delivery: ${caseName}`,
+  const mode = process.env.PI_INSTALL_PACKAGE === '1' ? 'installed package' : 'direct extension';
+  test(`installed Pi ${process.env.PI_VERSION ?? '0.73.0'} ${mode} result delivery: ${caseName}`,
     { skip: !process.env.PI_BIN, timeout: 45_000 }, async () => {
       const result = await run(caseName, evidenceRoot);
       const providerText = JSON.stringify(result.providerResult);

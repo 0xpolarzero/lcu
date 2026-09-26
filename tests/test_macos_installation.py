@@ -1,6 +1,8 @@
 """Exercise macOS selection without changing or executing an application."""
+import io
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -77,6 +79,23 @@ class MacInstallationTests(unittest.TestCase):
         self.assertEqual((self.prefix / 'current').resolve(), previous)
         self.assertEqual(list((self.prefix / 'releases').iterdir()), [previous])
         self.assertEqual((self.app / 'preserve').read_bytes(), b'original signed application')
+
+    def test_agent_setup_return_code_is_preserved_after_install(self):
+        account = SimpleNamespace(pw_name='alice')
+        completed = subprocess.CompletedProcess([], 7)
+        with patch('install_macos.setup.validate', return_value=(account, ['codex'])), \
+             patch('install_macos.install') as install, \
+             patch('install_macos.subprocess.run', return_value=completed) as run, \
+             patch('sys.stdout', io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                install_macos.main(['--prefix', str(self.prefix), '--existing-app', str(self.app),
+                                    '--agent', 'codex', '--yes'])
+        self.assertEqual(raised.exception.code, 7)
+        install.assert_called_once_with(self.prefix, self.app, account=account)
+        self.assertEqual(run.call_args.args[0], [str(self.prefix / 'current/bin/lcu'), 'setup',
+                         '--prefix', str(self.prefix), '--user', 'alice', '--scope', 'user',
+                         '--session', 'direct', '--agent', 'codex', '--yes'])
+        self.assertFalse(run.call_args.kwargs['check'])
 
     def test_bundle_rejects_the_other_platform(self):
         verify(self.source, 'arm64', 'darwin')

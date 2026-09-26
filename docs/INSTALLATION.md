@@ -9,7 +9,7 @@ Install ChatGPT in `/Applications/ChatGPT.app` first, or install it elsewhere an
 ~~~sh
 npm install -g @openai/codex@latest
 codex --version
-./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
+./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex
 ~~~
 
 This reuses the selected signed app in place and installs LCU under `~/.local/share/lcu`. If the app is missing, setup stops with a download link; it never installs it. The app must retain the official bundle and signing identity, supported Apple Silicon architecture, valid runtime manifest, required files, and recognized original Codex CLI/code-mode-host components used by LCU's runtime integration. This internal app layout does not select the Codex CLI that runs agent turns: setup checks the public `codex` executable on the selected account's `PATH`. LCU reports the app and runtime versions it reads from that app; it does not require version or component-hash entries in the repository lock file. The check does not promise compatibility with arbitrary future APIs or layouts. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only.
@@ -19,24 +19,22 @@ Use the public standalone Codex CLI on the account's normal `PATH` for setup and
 ~~~sh
 npm install -g @openai/codex@latest
 codex --version
-~/.local/share/lcu/bin/lcu setup --agent codex --yes
+~/.local/share/lcu/bin/lcu setup --agent codex
 codex
 ~~~
 
 Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
 
 ~~~sh
-./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent pi --yes
+./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent pi
 pi
 ~~~
 
-Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). The [Pi approval regression](verification/pi-approval-2026-09-26.md) verifies that dismissing a browser-origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist. Same-case text, PNG, WAV, and tool-error forwarding is tracked in the [adapter comparison](ADAPTERS.md#same-case-result-forwarding).
+Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). The [Pi approval regression](verification/pi-approval-2026-09-26.md) verifies that dismissing a browser-origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist. Same-case text, PNG, WAV, and tool-error forwarding is tracked in the [adapter comparison](ADAPTERS.md#same-case-result-forwarding).
 
-`--yes` suppresses LCU's setup confirmation; macOS permissions still require approval. The installer prints these steps, and the original runtime can show its own first-use onboarding and capture prompts. LCU does not inspect permission status or provide a guided permission/recheck flow. For native use, open System Settings > Privacy & Security:
+Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths, shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, and opens a pane only after you choose it. `lcu doctor` cannot read macOS privacy grants; it reports the original provider methods as available while keeping permission readiness unverified. The first verification is an approved call from the reconnected agent against a harmless window, such as a blank TextEdit document, asking LCU to return a screenshot.
 
-1. In **Screen & System Audio Recording**, allow **ChatGPT** (`/Applications/ChatGPT.app`).
-2. In **Accessibility**, allow **Codex Computer Use**. If it is absent, use **+** to select `/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/@oai/sky/Codex Computer Use.app`.
-3. If the helper opens a separate **ChatGPT Computer Use** screenshot or screen/audio capture prompt, allow it through the normal macOS UI.
+`--yes` is unattended setup: it skips desktop readiness and prints the exact `lcu doctor` command to run later from the desktop account. `--check-desktop` performs a bounded noninteractive check, never opens System Settings, and exits nonzero when this platform cannot verify readiness. The original runtime remains responsible for its normal approval and macOS prompts.
 
 Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
@@ -60,7 +58,7 @@ The default-prefix private copy, runtime-only installer, `--version`, and `docto
 Install the official ChatGPT desktop app yourself before LCU. The default Linux app path is `/usr/lib/chatgpt`; if your installation is elsewhere, pass `--existing-app /absolute/path`. LCU copies the selected app into a private managed generation under its prefix and leaves the original installation in place. Extract an architecture-matching thin LCU archive, then install as root for automatic Ubuntu libraries:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --runtime-only --yes
+sudo ./scripts/install.sh --user alice --runtime-only
 ~~~
 
 Replace `alice` with the existing desktop account. This uses `/usr/lib/chatgpt` and installs the LCU runtime without registering an agent. To select an app installed at another path, add `--existing-app /absolute/path` to the install command. Install or update the public standalone Codex CLI for that account, then run setup and Codex as the desktop account, not root:
@@ -68,7 +66,7 @@ Replace `alice` with the existing desktop account. This uses `/usr/lib/chatgpt` 
 ~~~sh
 npm install -g @openai/codex@latest
 codex --version
-/opt/lcu/current/bin/lcu setup --agent codex --yes
+/opt/lcu/current/bin/lcu setup --agent codex
 codex
 ~~~
 
@@ -85,25 +83,43 @@ The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Elec
 Use `--agent pi`, `codex`, or `claude-code` to select agents. Repeat `--agent` for several; `--agent all` selects all three, including agents not installed yet. `--agent auto` selects detected agents (their executable is on `PATH` or their usual config path exists). With no `--agent`, an interactive setup shows a chooser and marks detected agents, but waits for you to choose; it does not select them automatically. Noninteractive agent setup requires an explicit selection. Use `--runtime-only` to install LCU without registering an agent. The `claude` alias remains available. Install and authenticate each selected agent yourself; LCU does not install or authenticate agents. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references. Pi receives its native extension; Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export; additional integrations are open to contributions.
 
 ~~~sh
-/opt/lcu/current/bin/lcu setup --agent codex --agent claude-code --yes
+/opt/lcu/current/bin/lcu setup --agent codex --agent claude-code
 ./scripts/install.sh --list-agents
 ~~~
 
-For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex --yes as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and a compatible official app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
+Unattended Linux registration skips desktop readiness. Use it only when setup cannot run interactively, then run `doctor` from the active desktop account's session:
 
-The original host contract advertises model-facing js and js_reset, keeps turn_ended for lifecycle and restricts module-directory injection. Generic MCP consumers must honor the exported visibility, output and lifecycle contract. MCP registration alone cannot enforce all agent-host behavior.
+~~~sh
+/opt/lcu/current/bin/lcu setup --agent codex --yes
+~~~
 
-## Desktop and browser
-
-The default --session discover mode attaches to exactly one existing XFCE session owned by the account. Other X11 desktops can use --session direct when the agent backend already has DISPLAY, DBUS_SESSION_BUS_ADDRESS and, when needed, XAUTHORITY. Use `--check-desktop` to make a live window-list request after setup, or run:
+Later, from that account's active desktop session:
 
 ~~~sh
 /opt/lcu/current/bin/lcu doctor
 ~~~
 
-On macOS this first-use request can surface the original runtime's onboarding or system permission prompt. `doctor` checks that a window-list request works; it does not diagnose specific permission settings or walk you through a recheck.
+For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and a compatible official app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
 
-For Chrome, explicitly opt in when registering the agent, then reconnect it. For example, as the desktop account run `lcu setup --agent codex --chrome --yes`. The selected browser and extension must run under that same account. To refresh the original native-host registration, run:
+The original host contract advertises model-facing js and js_reset, keeps turn_ended for lifecycle and restricts module-directory injection. Generic MCP consumers must honor the exported visibility, output and lifecycle contract. MCP registration alone cannot enforce all agent-host behavior.
+
+## Desktop and browser
+
+The default --session discover mode attaches to exactly one existing XFCE session owned by the account. Other X11 desktops can use --session direct when the agent backend already has DISPLAY, DBUS_SESSION_BUS_ADDRESS and, when needed, XAUTHORITY. Use `--check-desktop` after setup to require a live, noninteractive readiness check. It never opens System Settings and exits nonzero when readiness is incomplete or unverifiable. You can also run:
+
+~~~sh
+/opt/lcu/current/bin/lcu doctor
+~~~
+
+Interactive setup launches the guided `lcu doctor` flow automatically after registration. `--yes` skips it; the command above can be run later from the active desktop account.
+
+On macOS, `doctor` safely checks original runtime metadata and names the selected app/helper entries from their bundle metadata. It does not inspect application content or determine whether Accessibility or screen-capture grants are enabled. Its **Open** choices are explicit, and its recheck repeats only the metadata check. Readiness remains unverified until the connected agent makes its first approved screenshot call against a harmless window, such as a blank TextEdit document. A nonzero macOS doctor result means the grant state could not be verified through the original CLI API.
+
+On Linux, `doctor` calls the original runtime's `list_windows` and `get_screenshot` methods. It reports only status and counts; LCU discards the returned image data locally. The original API may create its normal temporary capture files. A successful result verifies these two original runtime calls in the current desktop session, then asks you to verify an agent call.
+
+On Windows, the existing original window-list check remains available. `doctor` reports that screenshot and Windows permission readiness are unverified; a window list alone is not a screenshot-readiness claim. Across platforms, generic provider errors remain runtime/backend failures unless the original API gives a specific supported error.
+
+For Chrome, explicitly opt in when registering the agent, then reconnect it. For example, as the desktop account run `lcu setup --agent codex --chrome`. The selected browser and extension must run under that same account. To refresh the original native-host registration, run:
 
 ~~~sh
 /opt/lcu/current/bin/lcu browser install

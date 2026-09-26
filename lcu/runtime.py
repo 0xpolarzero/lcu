@@ -264,19 +264,20 @@ def main(root, argv):
                          'Run lcu browser install and enable the official Chrome extension.')
     chrome = argv.count('--chrome') == 1
     direct_args = [arg for arg in argv if arg != '--chrome']
+    doctor_args = direct_args[1:] if direct_args[:1] == ['doctor'] else None
     discovery_compat = direct_args == ['--mcp-discovery-compat']
-    if argv.count('--chrome') > 1 or direct_args not in ([], ['doctor'], ['--mcp-discovery-compat']):
+    if (argv.count('--chrome') > 1 or
+            (direct_args not in ([], ['--mcp-discovery-compat']) and doctor_args is None)):
         raise ValueError(USAGE)
     resolved = paths(root)
     app, resources, runtime, _ = resolved
     env = environment(root, resolved, chrome=chrome)
     windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
-    if direct_args == ['doctor']:
-        if not windows and resources.parent.name != 'Contents' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
-            raise ValueError('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. Use lcu-session or run inside the desktop session.')
-        script = 'import {handleRpc} from "@oai/sky/service"; const result = await handleRpc({type:"execute", method:"list_windows", args:[]}); console.log(JSON.stringify({windows:result}));'
-        subprocess.run([env['NODE_REPL_NODE_PATH'], '--input-type=module', '-e', script],
-                       cwd=runtime / ('bin' if windows else 'lib'), env=env, check=True, timeout=30)
+    if doctor_args is not None:
+        from .doctor import main as doctor
+        status = doctor(root, doctor_args, resolved=resolved, env=env)
+        if status:
+            raise SystemExit(status)
         return
     if windows:
         from .windows import _component

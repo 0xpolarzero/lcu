@@ -51,7 +51,7 @@ def build(output, package=None, *, target='linux', app=None):
                                 else shutil.ignore_patterns('*.cmd')))
         (release / 'lcu').mkdir()
         modules = ('__init__.py', 'app_layout.py', 'asar.py', 'runtime.py', 'setup.py',
-                         'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py',
+                         'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py', 'doctor.py',
                          'native_host.py', 'claude_visibility.py')
         if target != 'windows':
             modules += ('session.py',)
@@ -93,7 +93,7 @@ def build(output, package=None, *, target='linux', app=None):
         provision_agents(release, SOURCE / 'scripts/agent-tools', target=target,
                          mac_node=selected_node, adapters_source=SOURCE / 'adapters')
         # The installer selects and validates the matching app before registration.
-        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.codex_hooks'
+        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.doctor, lcu.codex_hooks'
         if target != 'windows':
             imports += ', lcu.session'
         subprocess.run([sys.executable, '-B', '-c', imports],

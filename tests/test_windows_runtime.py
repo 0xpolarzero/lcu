@@ -97,12 +97,16 @@ class WindowsRuntimeTests(unittest.TestCase):
         stop.assert_called_once_with('host')
 
     def test_doctor_uses_windows_sky_without_x11(self):
+        report = {'target': 'windows', 'windows': {'ok': True, 'count': 1},
+                  'screenshot': {'ok': False, 'unverified': True}}
+        result = subprocess.CompletedProcess([], 0, stdout=json.dumps(report) + '\n', stderr='')
         with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \
-             patch('lcu.runtime.subprocess.run') as run, \
+             patch('lcu.runtime.subprocess.run', return_value=result) as run, \
              patch.dict(os.environ, {'USERPROFILE': 'C:\\fixture'}, clear=True):
             main(self.root, ['doctor'])
         self.assertEqual(run.call_args.args[0][0], str(self.runtime / 'bin/node.exe'))
         self.assertEqual(run.call_args.kwargs['cwd'], self.runtime / 'bin')
+        self.assertEqual(run.call_args.kwargs['text'], True)
 
     def test_disposes_owned_host_when_original_mcp_fails(self):
         with patch('lcu.windows.validate_windows_app_tree', return_value=self.selected), \

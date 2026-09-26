@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
-import type { TSchema } from '@sinclair/typebox';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { TSchema } from 'typebox';
 import { createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse } from '../client.mjs';
 import { persistAudioContent } from '../audio-files.mjs';
 

@@ -626,7 +626,8 @@ def parser():
     p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
-    p.add_argument('--check-desktop', action='store_true', help='Also require a live desktop readiness check; omit while building images')
+    p.add_argument('--check-desktop', action='store_true',
+                   help='Require live desktop readiness after setup; never opens System Settings automatically')
     p.add_argument('--validate-only', action='store_true', help=argparse.SUPPRESS)
     return p
 
@@ -702,6 +703,41 @@ def choose_agents(home):
     if not names or any(name not in CLIENTS for name in names):
         raise ValueError('Choose supported agent IDs, or use --export for a custom client.')
     return names
+
+
+
+def desktop_readiness_mode(args, *, interactive):
+    if args.check_desktop:
+        return 'required'
+    if args.export:
+        return 'skip'
+    if args.yes or not interactive:
+        return 'deferred'
+    return 'guided'
+
+
+def desktop_readiness_request(args, *, interactive, desktop_command):
+    """Choose the post-registration doctor invocation and timeout."""
+    mode = desktop_readiness_mode(args, interactive=interactive)
+    if mode == 'skip':
+        return mode, None, None
+    doctor = [*desktop_command, 'doctor']
+    if mode == 'required':
+        return mode, [*doctor, '--non-interactive', '--require-ready'], 50
+    if mode == 'guided':
+        # A person may need as long as they like to read settings guidance.
+        return mode, doctor, None
+    return mode, doctor, None
+
+
+def run_desktop_doctor(command, *, timeout=None, runner=None):
+    """Run a doctor check with bounded time only when no human interaction is needed."""
+    if runner is None:
+        runner = subprocess.run
+    options = {'check': False}
+    if timeout is not None:
+        options['timeout'] = timeout
+    return runner(command, **options)
 
 
 def main(argv=None):
@@ -823,14 +859,37 @@ def main(argv=None):
             print('Chrome browser control not enabled; add it later with `lcu setup --agent AGENT --chrome`.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
-        if args.check_desktop:
-            print('Checking the live desktop...')
-            doctor = desktop_command + ['doctor']
-            subprocess.run(doctor, check=True, timeout=35)
-            print('Desktop readiness check passed. Tool and skill discovery inside the agent still needs its first connection.')
-        else:
-            print('Live desktop not checked (image builds need no running GUI). After starting the desktop, check with:')
-            doctor = desktop_command + ['doctor']
+        mode, doctor, doctor_timeout = desktop_readiness_request(
+            args, interactive=sys.stdin.isatty(), desktop_command=desktop_command)
+        if mode == 'required':
+            print('Checking live desktop readiness. This check will not open System Settings.')
+            try:
+                result = run_desktop_doctor(doctor, timeout=doctor_timeout)
+            except (OSError, subprocess.SubprocessError) as exc:
+                p.exit(2, 'Agent configuration is saved, but desktop readiness was not verified. '
+                       f'Check the runtime, then rerun lcu doctor.\nDetails: {exc}\n')
+            except KeyboardInterrupt:
+                p.exit(2, '\nAgent configuration is saved; the required desktop check was cancelled. '
+                       'Rerun lcu doctor to check readiness.\n')
+            if result.returncode:
+                p.exit(2, 'Agent configuration is saved, but desktop readiness was not verified. '
+                       'Review the status above, then rerun lcu doctor.\n')
+            print('Desktop readiness check passed. Tool discovery still needs the first agent connection.')
+        elif mode == 'guided':
+            print('Starting the guided desktop readiness check. Settings opens only if you choose a pane.')
+            try:
+                result = run_desktop_doctor(doctor, timeout=doctor_timeout)
+            except KeyboardInterrupt:
+                print('\nAgent configuration is saved. The guided check was cancelled; rerun lcu doctor when ready.')
+            except (OSError, subprocess.SubprocessError) as exc:
+                print(f'Agent configuration is saved, but the guided check could not finish: {exc}')
+                print('Reconnect your agent, then run lcu doctor to review desktop readiness.')
+            else:
+                if result.returncode:
+                    print('Agent configuration is saved, but desktop readiness remains unverified. '
+                          'Reconnect your agent and run lcu doctor after resolving the status above.')
+        elif mode == 'deferred':
+            print('Desktop readiness was not checked. Reconnect your agent, then run:')
             print('  ' + shlex.join(doctor))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         p.exit(1, f'Setup failed: {exc}\n')

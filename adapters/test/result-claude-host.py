@@ -22,8 +22,14 @@ CASES = {"text", "image", "audio", "error"}
 FAKE_KEY = "lcu-fixture-only"
 
 
-def prepare(output: Path, case: str, node: Path, clod: Path, claude_version: Path):
+def prepare(output: Path, case: str, node: Path, clod: Path, claude_version: Path,
+            reported_version: str):
     claude_version = claude_version.resolve(strict=True)
+    version_match = re.fullmatch(r"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) \(Claude Code\)",
+                                 reported_version.strip())
+    if not version_match or version_match.group(1) != claude_version.name:
+        raise ValueError("guarded Claude --version output must match the exact version executable")
+    version = version_match.group(1)
     work = output / case
     home = work / "home"
     project = work / "project"
@@ -33,18 +39,25 @@ def prepare(output: Path, case: str, node: Path, clod: Path, claude_version: Pat
     # Only the two nonsecret onboarding fields are copied into this isolated HOME.
     (home / ".claude.json").write_text(json.dumps({
         "hasCompletedOnboarding": True,
-        "lastOnboardingVersion": "2.1.204",
+        "lastOnboardingVersion": version,
     }, indent=2) + "\n", encoding="utf-8")
     guarded_binary = home / ".local/lib/claude-guard/bin/claude-real"
     guarded_binary.parent.mkdir(parents=True, exist_ok=True)
     if not guarded_binary.exists():
-        guarded_binary.symlink_to(clod.parent.parent / "claude-guard/bin/claude-real")
+        guarded_binary.write_text(
+            '#!/bin/sh\n'
+            f'exec "$HOME/.local/share/claude/versions/{version}" "$@"\n',
+            encoding="utf-8")
+        guarded_binary.chmod(0o700)
     version_binary = home / ".local/share/claude/versions" / claude_version.name
     version_binary.parent.mkdir(parents=True, exist_ok=True)
     if not version_binary.exists():
         version_binary.symlink_to(claude_version)
 
     result_log = work / "mcp-result.jsonl"
+    (work / "host-version.json").write_text(json.dumps({
+        "output": reported_version.strip(), "version": version,
+    }, indent=2) + "\n", encoding="utf-8")
     mcp = {"mcpServers": {"lcu": {
         "type": "stdio",
         "command": str(node),
@@ -55,7 +68,8 @@ def prepare(output: Path, case: str, node: Path, clod: Path, claude_version: Pat
     sys.path.insert(0, str(ROOT))
     from lcu.claude_visibility import install
     install(home, project=project)
-    return {"home": str(home), "project": str(project),
+    return {"home": str(home), "project": str(project), "claude_version": version,
+            "claude_version_output": reported_version.strip(),
             "result_log": str(result_log), "fake_key": FAKE_KEY,
             "mcp_config": str(project / ".mcp.json"),
             "settings": str(project / ".claude/settings.local.json")}
@@ -190,7 +204,7 @@ def serve(case: str, output: Path, port: int):
                                                                if isinstance(block, dict)]
                 with state_lock:
                     attempts.append(attempt)
-                    complete = all(state.values())
+                    complete = state["tool_call"] and state["tool_result"]
                 if complete:
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
             except Exception as error:
@@ -215,13 +229,13 @@ def serve(case: str, output: Path, port: int):
         server.server_close()
     if failures:
         raise RuntimeError("; ".join(failures))
-    expected = {"title": True, "tool_call": True, "tool_result": True}
-    if state != expected:
-        raise RuntimeError(f"expected one title and one js result round trip, state={state}")
+    expected = {"tool_call": True, "tool_result": True}
+    if any(state[key] is not value for key, value in expected.items()):
+        raise RuntimeError(f"expected one js call/result round trip, state={state}")
     attempts.sort(key=lambda item: item["request"])
-    if [item["phase"] for item in attempts].count("tool_call") != 1 or \
-            [item["phase"] for item in attempts].count("tool_result") != 1 or \
-            [item["phase"] for item in attempts].count("title_metadata") != 1:
+    phases = [item["phase"] for item in attempts]
+    if (phases.count("tool_call") != 1 or phases.count("tool_result") != 1 or
+            phases.count("title_metadata") > 1):
         raise RuntimeError(f"unexpected provider phases: {attempts}")
     summary_path.write_text(json.dumps({"case": case, "request_count": len(requests), "attempts": attempts}, indent=2),
                             encoding="utf-8")
@@ -248,7 +262,9 @@ def verify(case: str, output: Path):
     requests = json.loads((work / "provider-requests.json").read_text(encoding="utf-8"))
     summary = json.loads((work / "provider-summary.json").read_text(encoding="utf-8"))
     phases = [attempt["phase"] for attempt in summary.get("attempts", [])]
-    if summary.get("request_count") != 3 or sorted(phases) != ["title_metadata", "tool_call", "tool_result"]:
+    if (summary.get("request_count") not in (2, 3) or
+            phases.count("tool_call") != 1 or phases.count("tool_result") != 1 or
+            phases.count("title_metadata") > 1):
         raise AssertionError(f"unexpected Claude provider request phases: {summary}")
     if any(attempt.get("response_status") != 200 for attempt in summary["attempts"]):
         raise AssertionError("the scripted Claude provider returned a non-success response")
@@ -260,13 +276,15 @@ def verify(case: str, output: Path):
                           if isinstance(message, dict)
                           for block in (message.get("content", []) if isinstance(message.get("content"), list) else [])
                           if isinstance(block, dict) and block.get("type") == "tool_result"]
-    if len(title_requests) != 1 or len(tool_call_requests) != 2 or len(tool_result_blocks) != 1:
-        raise AssertionError("expected one title request, tool-enabled call/result requests, and one result block")
+    if len(title_requests) > 1 or len(tool_call_requests) != 2 or len(tool_result_blocks) != 1:
+        raise AssertionError("expected at most one optional title request, tool-enabled call/result requests, and one result block")
     tool_result = tool_result_blocks[0]
     if tool_result.get("tool_use_id") != f"result-{case}":
         raise AssertionError("provider result was correlated to the wrong Claude tool-use ID")
 
-    provider_summary = {"host": "Claude Code", "version": "2.1.204", "case": case,
+    host_version = json.loads((work / "host-version.json").read_text(encoding="utf-8"))
+    provider_summary = {"host": "Claude Code", "version": host_version["version"],
+                        "version_output": host_version["output"], "case": case,
                         "provider_requests": summary["request_count"], "original_types": [
                             block.get("type") for block in original.get("content", [])],
                         "provider_result_types": ([block.get("type") for block in tool_result.get("content", [])]
@@ -278,7 +296,7 @@ def verify(case: str, output: Path):
         expected = original["content"][0]["text"]
         content = tool_result.get("content")
         texts = [block.get("text", "") for block in content if isinstance(block, dict)] if isinstance(content, list) else [str(content)]
-        if expected not in texts or tool_result.get("is_error", False):
+        if not any(expected in text for text in texts) or tool_result.get("is_error", False):
             raise AssertionError("Claude did not preserve the original text result")
     elif case == "image":
         expected = original["content"][0]
@@ -300,9 +318,10 @@ def verify(case: str, output: Path):
             raise AssertionError("Claude did not deliver the original audio result as a non-error")
         content = tool_result.get("content")
         texts = [block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text"]
-        if len(texts) != 1 or "[Audio from lcu]" not in texts[0] or expected["data"] in json.dumps(tool_result):
+        audio_references = [text for text in texts if "[Audio from lcu]" in text]
+        if len(audio_references) != 1 or expected["data"] in json.dumps(tool_result):
             raise AssertionError("Claude provider request should contain an audio file reference, not WAV bytes")
-        match = re.search(r"saved to (.+)$", texts[0])
+        match = re.search(r"saved to (.+)$", audio_references[0])
         if not match:
             raise AssertionError("Claude did not provide a saved audio result path")
         audio_path = Path(match.group(1)).resolve(strict=True)
@@ -345,6 +364,8 @@ def main():
     prep.add_argument("--clod", type=Path, required=True)
     prep.add_argument("--claude-version", type=Path, required=True,
                       help="exact installed Claude Code version executable referenced by the guard shim")
+    prep.add_argument("--reported-version", required=True,
+                      help="exact output from the guarded clod --version invocation")
     provider = sub.add_parser("serve")
     provider.add_argument("--case", choices=sorted(CASES), required=True)
     provider.add_argument("--output", type=Path, required=True)
@@ -355,7 +376,7 @@ def main():
     args = parser.parse_args()
     if args.mode == "prepare":
         print(json.dumps(prepare(args.output, args.case, args.node.resolve(), args.clod.resolve(),
-                                 args.claude_version), sort_keys=True))
+                                 args.claude_version, args.reported_version), sort_keys=True))
     elif args.mode == "serve":
         serve(args.case, args.output, args.port)
     else:

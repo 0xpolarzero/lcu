@@ -27,7 +27,7 @@ Before the first CUA call, the host must load the generated full local LCU skill
 
 ## Same-case result forwarding
 
-The 2026-09-26 comparison below records Pi 0.73.0, two app-bundled Codex CLI pins, and Claude Code 2.1.204. It measures both host handling and what reaches the model provider. A locally saved audio file is not evidence that audio reached the provider. The latest public standalone Codex CLI has a separate current run in [Codex standalone CLI verification](verification/codex-standalone-cli-2026-09-27.md); this historical table remains tied to the versions it tested.
+The 2026-09-26 comparison below records Pi 0.73.0, two app-bundled Codex CLI pins, and Claude Code 2.1.204. It measures both host handling and what reaches the model provider. A locally saved audio file is not evidence that audio reached the provider. The latest public standalone Codex CLI has a separate current run in [Codex standalone CLI verification](verification/codex-standalone-cli-2026-09-27.md), and the current public Pi and Claude Code versions have a separate [latest standalone harness verification](verification/latest-standalone-harness-2026-09-27.md); this historical table remains tied to the versions it tested.
 
 | Original result | Pi 0.73.0 | Codex CLI (Mac `0.155.0-alpha.16.3`; Linux `0.155.0-alpha.9.2`) | Claude Code 2.1.204 |
 | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ The PNG and WAV hashes identify the shared original fixtures. Provider-facing er
 
 ## Pi extension
 
-Pi 0.73 uses its extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. The [Pi extension API](https://github.com/badlogic/pi-mono/blob/v0.73.0/packages/coding-agent/docs/extensions.md) documents its UI and tool-result types.
+Pi 0.73 uses its extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. The [Pi extension API](https://github.com/badlogic/pi-mono/blob/v0.73.0/packages/coding-agent/docs/extensions.md) documents its UI and tool-result types. The current public package is `@earendil-works/pi-coding-agent`; the latest host test also verifies that `pi install <adapter package>` registers the extension in an isolated agent directory before exercising result delivery.
 
 A model-driven Linux GTK task and an opt-in official Chrome-extension task are recorded in [Pi verification](verification/pi-generated-gtk-real-model-2026-09-24.md). The [approval scope test](verification/native-app-approval-scopes-2026-09-25.md) verifies response forwarding, not grant persistence across helper restart or revocation. The [dismissal regression](verification/pi-approval-2026-09-26.md) verifies that dismissing an origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist.
 
