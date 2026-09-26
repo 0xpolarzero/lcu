@@ -1,36 +1,89 @@
 # Installation
 
-Install the current official ChatGPT desktop app for LCU's original computer-use runtime, then install the public agent CLIs you plan to use. LCU never downloads or installs these tools. If ChatGPT is missing, [download it](https://chatgpt.com/download/) and install it first. The current delivery supports an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64 and Apple Silicon macOS. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. On macOS, LCU reuses the signed app in place; first-use permissions and an independent TextEdit save passed in a fresh guest ([verification](verification/macos-fresh-guest-2026-09-24.md)). The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
+Install LCU from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest), then register it in your harness. For source changes, see [Building from source](DEVELOPMENT.md#building-from-source).
 
-## macOS and Pi
+## If you are the installing agent
 
-Install ChatGPT in `/Applications/ChatGPT.app` first, or install it elsewhere and pass that path with `--existing-app`. Then build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, install or update the standalone Codex CLI, and run as the intended desktop account:
+1. Check the OS, architecture, desktop account, and current harness. Maintained adapters are `pi`, `codex`, and `claude-code`; select the user's harness explicitly. If it has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
+2. Check the prerequisites below. The official desktop app, Python, and selected harness must already be installed. If anything is missing, report the prerequisite and its installation link; LCU does not install or authenticate them.
+3. Download the matching archive and SHA-256 sidecar from the latest release, verify the checksum, and extract it. Follow the installation section for that platform from inside the extracted directory.
+4. For unattended setup, add `--yes` to the command that selects the harness. Preserve the user's sandbox and approval settings. Enable Chrome only if the user requested it.
+5. Report the installed path and tell the user to restart their harness and run the platform's `doctor` command from their desktop session. Installation and registration do not prove a desktop action worked; the user completes the first approved screenshot check.
+
+## Prerequisites
+
+- **An existing desktop:** Apple Silicon macOS, or Ubuntu 24.04-compatible glibc Linux on ARM64 or x86-64 with an X11 desktop and D-Bus session owned by the target account. Native Wayland and musl are unsupported; Windows is deferred.
+- **The official ChatGPT desktop app:** [install it first](https://chatgpt.com/download/). Default paths are `/Applications/ChatGPT.app` on macOS and `/usr/lib/chatgpt` on Linux. Use `--existing-app /absolute/path` for another location. LCU never downloads or installs the app and does not require ChatGPT sign-in.
+- **Python 3.12+** and the host's normal sandbox facilities.
+- **Your installed, authenticated harness:** Pi, Codex CLI, or Claude Code. Codex CLI must support `mcp_tool` lifecycle hooks; update the public standalone CLI if setup reports a parser error. See [harness prerequisites](ADAPTERS.md).
+
+LCU does not install a desktop or create a VM. Native computer use is the default; Chrome support is opt-in.
+
+## Download the release
+
+Choose the archive for the machine where LCU will run:
+
+| System | Archive suffix |
+| --- | --- |
+| Apple Silicon macOS | `darwin-arm64.tar.gz` |
+| Linux ARM64 | `linux-arm64.tar.gz` |
+| Linux x86-64 | `linux-x64.tar.gz` |
+
+Download that archive and its matching `.sha256` file from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest). Or run this from a terminal on the target machine; it selects the archive, checks its SHA-256, and opens the extracted directory:
 
 ~~~sh
-npm install -g @openai/codex@latest
-codex --version
-./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64) LCU_TARGET=darwin-arm64 ;;
+  Linux-aarch64|Linux-arm64) LCU_TARGET=linux-arm64 ;;
+  Linux-x86_64) LCU_TARGET=linux-x64 ;;
+  *) echo "Unsupported LCU platform" >&2; exit 1 ;;
+esac
+LCU_TAG=$(curl -fsSL https://api.github.com/repos/0xpolarzero/lcu/releases/latest |
+  python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])')
+LCU_ARCHIVE="lcu-${LCU_TAG#v}-${LCU_TARGET}.tar.gz"
+LCU_URL="https://github.com/0xpolarzero/lcu/releases/download/$LCU_TAG"
+mkdir -p lcu-release &&
+cd lcu-release &&
+curl -fLO "$LCU_URL/$LCU_ARCHIVE" &&
+curl -fLO "$LCU_URL/$LCU_ARCHIVE.sha256" &&
+if [ "$LCU_TARGET" = darwin-arm64 ]; then
+  shasum -a 256 -c "$LCU_ARCHIVE.sha256"
+else
+  sha256sum -c "$LCU_ARCHIVE.sha256"
+fi &&
+  tar -xzf "$LCU_ARCHIVE" &&
+  cd "${LCU_ARCHIVE%.tar.gz}"
 ~~~
 
-This reuses the selected signed app in place and installs LCU under `~/.local/share/lcu`. If the app is missing, setup stops with a download link; it never installs it. The app must retain the official bundle and signing identity, supported Apple Silicon architecture, valid runtime manifest, required files, and recognized original Codex CLI/code-mode-host components used by LCU's runtime integration. This internal app layout does not select the Codex CLI that runs agent turns: setup checks the public `codex` executable on the selected account's `PATH`. LCU reports the app and runtime versions it reads from that app; it does not require version or component-hash entries in the repository lock file. The check does not promise compatibility with arbitrary future APIs or layouts. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only.
+Continue below only after the checksum reports **OK**. Use the extracted archive's installer; GitHub's automatic source-code downloads are not installable bundles.
 
-Use the public standalone Codex CLI on the account's normal `PATH` for setup and interactive Codex sessions. If LCU reports that the CLI cannot load its `mcp_tool` lifecycle hooks, update it to the latest public release, then rerun setup. The 2026-09-27 contract run passed with standalone `codex-cli 0.157.1`; see [Codex CLI setup](ADAPTERS.md#codex-cli) and [the verification record](verification/codex-standalone-cli-2026-09-27.md).
+## macOS
+
+From the extracted release directory, run as the intended desktop account. Replace `codex` with `pi` or `claude-code` for your harness:
 
 ~~~sh
-npm install -g @openai/codex@latest
-codex --version
-~/.local/share/lcu/bin/lcu setup --agent codex
-codex
+./scripts/install.sh --agent codex
 ~~~
 
-Pi uses a native extension instead of requiring built-in MCP support. With Pi already installed, select it during LCU installation:
+Interactive installation registers the harness and guides you through desktop permissions. If an agent is running installation unattended, use `./scripts/install.sh --agent codex --yes`, then run this yourself from a desktop terminal:
 
 ~~~sh
-./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent pi
-pi
+~/.local/share/lcu/current/bin/lcu doctor
 ~~~
 
-Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). The [Pi approval regression](verification/pi-approval-2026-09-26.md) verifies that dismissing a browser-origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist. Same-case text, PNG, WAV, and tool-error forwarding is tracked in the [adapter comparison](ADAPTERS.md#same-case-result-forwarding).
+Restart your harness after setup. Ask it to use LCU to take a screenshot of a harmless window, such as a blank TextEdit document, and approve the request. This is the first check that macOS permissions allow an action.
+
+LCU installs under `~/.local/share/lcu` and reuses the signed app and native helper in place. It validates the official identity/signature, Apple Silicon architecture, runtime manifest, required files, and recognized original host layout, then reports the observed app/runtime versions. It does not select apps through a repository version or component-hash allowlist. Compatibility still depends on the installed app retaining the host APIs and layout LCU uses. First-use permissions and an independent TextEdit save passed in a fresh guest ([verification](verification/macos-fresh-guest-2026-09-24.md)).
+
+To add another harness later, run the installed command:
+
+~~~sh
+~/.local/share/lcu/current/bin/lcu setup --agent pi
+~~~
+
+Use the public standalone Codex CLI on the desktop account's normal `PATH`. If setup reports unsupported `mcp_tool` hooks, update it with `npm install -g @openai/codex@latest`, check `codex --version`, and rerun `~/.local/share/lcu/current/bin/lcu setup --agent codex`. See [Codex CLI setup](ADAPTERS.md#codex-cli) and [the verification record](verification/codex-standalone-cli-2026-09-27.md).
+
+Pi setup uses Pi's package installer to register the bundled native extension and installs the original local skill. See [Pi approval verification](verification/pi-approval-2026-09-26.md) and [result forwarding](ADAPTERS.md#same-case-result-forwarding).
 
 Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths, shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, and opens a pane only after you choose it. `lcu doctor` cannot read macOS privacy grants; it reports the original provider methods as available while keeping permission readiness unverified. The first verification is an approved call from the reconnected agent against a harmless window, such as a blank TextEdit document, asking LCU to return a screenshot.
 
@@ -38,39 +91,31 @@ Interactive `lcu setup` runs a guided desktop-readiness check after agent regist
 
 Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
-## Windows 11 x64 candidate (deferred from this delivery)
+## Linux
 
-Windows is deferred from the current LCU delivery. The candidate requires the official `OpenAI.Codex` Store app to already be installed and registered for the current Windows account; LCU does not download or install it. It targets Windows 11 x64 and validates the registered package identity, publisher, Store signature, architecture, and required host layout. Install Python 3.12 or newer, then extract the matching thin Windows ZIP and run from its extracted release directory in PowerShell:
-
-~~~powershell
-python .\scripts\install_windows.py --runtime-only
-& "$env:LOCALAPPDATA\LCU\lcu.cmd" --version
-~~~
-
-To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
-
-The installer reads the selected package version and CUA runtime, inventories the complete registered package, and copies it unchanged into a private generation identified by that source-derived inventory. It records the observed metadata and validates the inventory when reusing the copy; it does not compare the app with a repository version or component-hash allowlist. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host from the selected app under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
-
-The default-prefix private copy, runtime-only installer, `--version`, and `doctor` passed in a clean Windows 11 guest. The installed candidate also enumerated windows, captured a screenshot, and saved Unicode text to an existing Notepad file; an independent file read matched the expected bytes. A later installed candidate verified matching Stop/Interrupt cleanup, stale-turn isolation, and helper exit at MCP shutdown. Candidate f completed project-scoped native setup for Codex CLI, Claude Code, and Pi; the generated Windows skill and Pi files were verified. Its opt-in Chrome path passed a scripted original-MCP action through the official extension, including exact-origin approval and an independently verified save. No Windows real-model session or automatic Chrome per-turn cleanup test ran. The final Windows archive build and seal audit passed. See the [Windows guest record](verification/windows-source.md) for exact results.
-
-## Linux: install LCU with an existing app
-
-Install the official ChatGPT desktop app yourself before LCU. The default Linux app path is `/usr/lib/chatgpt`; if your installation is elsewhere, pass `--existing-app /absolute/path`. LCU copies the selected app into a private managed generation under its prefix and leaves the original installation in place. Extract an architecture-matching thin LCU archive, then install as root for automatic Ubuntu libraries:
+From the extracted release directory, run this in a terminal owned by the existing desktop account. It uses `/usr/lib/chatgpt`, installs Ubuntu system libraries, and installs the LCU runtime:
 
 ~~~sh
-sudo ./scripts/install.sh --user alice --runtime-only
+sudo ./scripts/install.sh --user "$(id -un)" --runtime-only
 ~~~
 
-Replace `alice` with the existing desktop account. This uses `/usr/lib/chatgpt` and installs the LCU runtime without registering an agent. To select an app installed at another path, add `--existing-app /absolute/path` to the install command. Install or update the public standalone Codex CLI for that account, then run setup and Codex as the desktop account, not root:
+For an app installed elsewhere, add `--existing-app /absolute/path`. LCU leaves that installation in place and keeps a private managed copy under `/opt/lcu`.
+
+Then, from a terminal inside the active X11 desktop session, register your harness as the desktop account, without `sudo`. Replace `codex` with `pi` or `claude-code`:
 
 ~~~sh
-npm install -g @openai/codex@latest
-codex --version
-/opt/lcu/current/bin/lcu setup --agent codex
-codex
+/opt/lcu/current/bin/lcu setup --agent codex --session direct
 ~~~
 
-The public Codex CLI `0.145.0` failed because its parser did not support `mcp_tool`; the current public `0.157.1` passed. Setup reports the selected executable, version, and parser error, then gives the official npm update command. See [Codex CLI setup](ADAPTERS.md#codex-cli). LCU no longer accepts `--app-package` as an app-acquisition route. If ChatGPT is not installed, download and install it yourself, then rerun LCU setup. For an existing app outside `/usr/lib/chatgpt`, use `--existing-app /absolute/path`. LCU validates the selected app and keeps a private managed copy; it does not replace or modify the original installation.
+Interactive setup includes the desktop-readiness check. If an agent in that desktop session is running setup unattended, add `--yes`, then run this yourself from your desktop terminal:
+
+~~~sh
+/opt/lcu/current/bin/lcu doctor
+~~~
+
+Restart your harness from the desktop session and ask it to use LCU to take a screenshot of a harmless window. Approve the request and check the returned image. For an agent outside the desktop session, the default discovery mode can attach to an existing XFCE session; see [Desktop and browser](#desktop-and-browser).
+
+If Codex setup reports unsupported `mcp_tool` hooks, update the public standalone CLI for that account with `npm install -g @openai/codex@latest`, check `codex --version`, and rerun setup. See [Codex CLI setup](ADAPTERS.md#codex-cli).
 
 The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT: the existing app is copied into a private managed generation under the LCU prefix, and LCU leaves the source installation in place.
 
@@ -105,7 +150,9 @@ The original host contract advertises model-facing js and js_reset, keeps turn_e
 
 ## Desktop and browser
 
-The default --session discover mode attaches to exactly one existing XFCE session owned by the account. Other X11 desktops can use --session direct when the agent backend already has DISPLAY, DBUS_SESSION_BUS_ADDRESS and, when needed, XAUTHORITY. Use `--check-desktop` after setup to require a live, noninteractive readiness check. It never opens System Settings and exits nonzero when readiness is incomplete or unverifiable. You can also run:
+On Linux, the default `--session discover` mode attaches to exactly one existing XFCE session owned by the account. Other X11 desktops use `--session direct` when the agent already has `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and, when needed, `XAUTHORITY`. Run setup and the agent from a terminal in that desktop session. macOS uses direct mode automatically.
+
+Pass `--check-desktop` to setup to require a noninteractive readiness check after registration. It never opens System Settings and exits nonzero when readiness is incomplete or unverifiable; agent registration remains saved. To repeat the interactive check, use the installed command (`~/.local/share/lcu/current/bin/lcu` on macOS). On Linux, run from the desktop session:
 
 ~~~sh
 /opt/lcu/current/bin/lcu doctor
@@ -143,3 +190,18 @@ Custom harnesses must deliver the original instructions and images, present site
 Reinstall with the same prefix. The installer keeps app generations under apps/, LCU generations under releases/, and atomically changes current only after validating the new release. Agent registrations point at current and should be reloaded after a switch. A failed setup can leave completed agent registrations even when another agent fails; its error lists which to retry. Old generations are retained so live processes do not lose their files.
 
 The installer accepts the legacy positional prefix. --offline prohibits installation network calls and requires preinstalled system libraries with --skip-system; model and browser services can still need network during use. --yes confirms a selected noninteractive setup. See --help for the complete option list and [verification](VERIFICATION.md) for exact tested outcomes.
+
+## Windows 11 x64 candidate (deferred from this delivery)
+
+Windows is deferred from the current LCU delivery. The candidate requires the official `OpenAI.Codex` Store app to already be installed and registered for the current Windows account; LCU does not download or install it. It targets Windows 11 x64 and validates the registered package identity, publisher, Store signature, architecture, and required host layout. Install Python 3.12 or newer, then extract the matching thin Windows ZIP and run from its extracted release directory in PowerShell:
+
+~~~powershell
+python .\scripts\install_windows.py --runtime-only
+& "$env:LOCALAPPDATA\LCU\lcu.cmd" --version
+~~~
+
+To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
+
+The installer reads the selected package version and CUA runtime, inventories the complete registered package, and copies it unchanged into a private generation identified by that source-derived inventory. It records the observed metadata and validates the inventory when reusing the copy; it does not compare the app with a repository version or component-hash allowlist. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host from the selected app under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
+
+The default-prefix private copy, runtime-only installer, `--version`, and `doctor` passed in a clean Windows 11 guest. The installed candidate also enumerated windows, captured a screenshot, and saved Unicode text to an existing Notepad file; an independent file read matched the expected bytes. A later installed candidate verified matching Stop/Interrupt cleanup, stale-turn isolation, and helper exit at MCP shutdown. Candidate f completed project-scoped native setup for Codex CLI, Claude Code, and Pi; the generated Windows skill and Pi files were verified. Its opt-in Chrome path passed a scripted original-MCP action through the official extension, including exact-origin approval and an independently verified save. No Windows real-model session or automatic Chrome per-turn cleanup test ran. The final Windows archive build and seal audit passed. See the [Windows guest record](verification/windows-source.md) for exact results.

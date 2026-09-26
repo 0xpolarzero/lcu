@@ -1,6 +1,6 @@
 # Harness adapters
 
-LCU keeps the original pinned CUA MCP server authoritative for instructions, execution, elicitation, policy, and lifecycle. It does not implement browser control, screenshots, accessibility, input, or JavaScript execution. The Pi client, Claude relay, and Codex relay use the official MCP SDK. The Codex relay passes original initialization instructions and public `js`/`js_reset` descriptors through, but intentionally omits `js_add_node_module_dir` and `turn_ended` from model-visible `tools/list`. It still forwards host calls to those original tools; the installed Codex Stop hook reaches `turn_ended` with the original session and turn IDs. This is an explicit visibility adaptation, not full `tools/list` parity.
+LCU keeps the selected installed app's original CUA MCP server authoritative for instructions, execution, elicitation, policy, and lifecycle. It does not implement browser control, screenshots, accessibility, input, or JavaScript execution. The Pi client, Claude relay, and Codex relay use the official MCP SDK. The Codex relay passes original initialization instructions and public `js`/`js_reset` descriptors through, but intentionally omits `js_add_node_module_dir` and `turn_ended` from model-visible `tools/list`. It still forwards host calls to those original tools; the installed Codex Stop hook reaches `turn_ended` with the original session and turn IDs. This is an explicit visibility adaptation, not full `tools/list` parity.
 
 ## Shared client contract
 
@@ -40,7 +40,7 @@ The PNG and WAV hashes identify the shared original fixtures. Provider-facing er
 
 ## Pi extension
 
-Pi 0.73 uses its extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. The [Pi extension API](https://github.com/badlogic/pi-mono/blob/v0.73.0/packages/coding-agent/docs/extensions.md) documents its UI and tool-result types. The current public package is `@earendil-works/pi-coding-agent`; the latest host test also verifies that `pi install <adapter package>` registers the extension in an isolated agent directory before exercising result delivery.
+The Pi adapter uses Pi's extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. Current package registration and result forwarding passed with Pi 0.87.1 from `@earendil-works/pi-coding-agent`; see [the standalone host record](verification/latest-standalone-harness-2026-09-27.md). Earlier desktop-task evidence below used Pi 0.73.0.
 
 A model-driven Linux GTK task and an opt-in official Chrome-extension task are recorded in [Pi verification](verification/pi-generated-gtk-real-model-2026-09-24.md). The [approval scope test](verification/native-app-approval-scopes-2026-09-25.md) verifies response forwarding, not grant persistence across helper restart or revocation. The [dismissal regression](verification/pi-approval-2026-09-26.md) verifies that dismissing an origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist.
 

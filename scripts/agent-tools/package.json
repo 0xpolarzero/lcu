@@ -2,7 +2,13 @@
   "name": "lcu-agent-installers",
   "version": "1.0.0",
   "private": true,
-  "description": "Install LCU tools and skills in coding agents.",
+  "description": "Upstream installers for registering LCU tools and skills in coding agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xpolarzero/lcu.git",
+    "directory": "scripts/agent-tools"
+  },
   "dependencies": {
     "skills": "1.7.0",
     "add-mcp": "2.4.0"

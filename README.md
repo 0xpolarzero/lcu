@@ -1,30 +1,74 @@
 # LCU
 
-LCU connects Pi, the standalone Codex CLI, and Claude Code to the original ChatGPT computer-use runtime. Install the current ChatGPT desktop app before installing LCU; LCU never downloads or installs the app. If it is missing, [download ChatGPT](https://chatgpt.com/download/) and install it first. Native computer use is the default; Chrome is opt-in and uses the original extension and site-approval flow. The original app supplies the `cua` API, instructions, policy, and platform helpers. Each selected agent's own public CLI runs as the host; LCU adapts its transport, identity, approval UI, and lifecycle wiring without replacing the original automation or policy layer.
+**Codex computer use, decoupled from the Codex agent.**
 
-## Linux quick start
+LCU exposes Codex's original computer-use runtime to your harness. The official ChatGPT desktop app must still be installed locally: it supplies the runtime and instructions, while LCU handles setup and harness integration.
 
-Extract an architecture-matching archive on an Ubuntu 24.04-compatible desktop, then install the runtime for the existing desktop account:
+## Quick start
 
-~~~sh
-sudo ./scripts/install.sh --user alice --runtime-only --yes
-~~~
+Copy this into your agent:
 
-Install or update the public standalone Codex CLI, then register and launch the ordinary `codex` command as that account. LCU checks that the selected CLI supports Codex MCP tool hooks:
+```text
+Install and configure LCU for this harness using the latest release.
+Follow https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md
+Check my OS, architecture, and prerequisites, then guide me through any required permissions.
+```
 
-~~~sh
-npm install -g @openai/codex@latest
-codex --version
-/opt/lcu/current/bin/lcu setup --agent codex --yes
-codex
-~~~
+Restart your harness after setup. Open a blank text-editor document and ask:
 
-Replace `alice` with the existing desktop account. Linux uses the existing app at `/usr/lib/chatgpt` by default; pass `--existing-app /absolute/path` to select another installed app. LCU makes a private managed copy and leaves the installed app in place. For Pi, Claude Code, macOS, and alternate app paths, follow the [installation guide](docs/INSTALLATION.md). Agent selection is explicit: `--agent all` configures Pi, Codex CLI, and Claude Code; `--agent auto` configures detected agents; omitting `--agent` opens an interactive chooser. Noninteractive agent setup requires an explicit selection; use `--runtime-only` to install without registering an agent.
+```text
+Use LCU to inspect the open text editor, type “Hello from LCU”, and show me a screenshot.
+```
 
-## Current verification
+Approve the app request and any operating-system prompts when they appear.
 
-The current delivery targets Linux ARM64 and x86-64 plus Apple Silicon macOS. Windows is deferred from this delivery. The same-case text, PNG, WAV, and tool-error comparison is documented in [parity status](docs/PARITY-STATUS.md) and [harness adapters](docs/ADAPTERS.md). The local `dist/<source-sha>/final/DELIVERY.md` records archive hashes and gate outcomes; older results apply only to their recorded source commits. Nothing has been published.
+## Features
 
-App selection checks supported platform and architecture, official identity and signatures where applicable, the runtime manifest, required files, and the recognized original host layout. LCU records the selected app and runtime versions; managed private copies are protected by an inventory derived from that selected source. It does not use repository app-version or component-hash allowlists. The current macOS check accepted signed ChatGPT `26.924.22138` with CUA runtime `0.0.24/20260924074400-f52ea85e2a98`; see [current-app verification](docs/verification/macos-current-app-2026-09-26.md). `runtime.lock.json` retains historical source metadata and a package checksum; LCU does not use these to download or select an app.
+- **Desktop apps:** read windows, click, type, and take screenshots.
+- **Chrome, when enabled:** read and control tabs through the official extension, with site approval.
+- **In your harness:** adapters are currently available for Pi, Codex CLI, and Claude Code. Other harnesses can integrate through the [shared JavaScript client](docs/ADAPTERS.md#shared-client-contract).
 
-LCU is MIT licensed. Thin archives contain LCU code and installation metadata, not OpenAI application binaries or copied upstream instructions. The installed official application keeps its original files, notices, and terms; see [dependency provenance](docs/PROVENANCE.md).
+## Requirements
+
+Install [the official ChatGPT desktop app](https://chatgpt.com/download/), Python 3.12+, and your harness first. LCU checks the installed app for compatibility and uses its original runtime. For Codex CLI, [update before setup](docs/ADAPTERS.md#codex-cli) to get the required hook support.
+
+| Platform | Requirements |
+| --- | --- |
+| Linux ARM64 or x86-64 | Ubuntu 24.04-compatible glibc system, an active X11 desktop, and D-Bus |
+| macOS on Apple Silicon | The signed ChatGPT app, with Accessibility and screen-recording permissions approved during first use |
+
+Windows 11 x64 remains a [candidate](docs/INSTALLATION.md#windows-11-x64-candidate-deferred-from-this-delivery). Intel Macs, native Wayland, and musl Linux are unsupported. See [verification and limits](docs/PARITY-STATUS.md) for tested behavior.
+
+## Install manually
+
+Download the archive and matching `.sha256` file from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest):
+
+| Platform | Archive |
+| --- | --- |
+| macOS on Apple Silicon | `lcu-<version>-darwin-arm64.tar.gz` |
+| Linux ARM64 | `lcu-<version>-linux-arm64.tar.gz` |
+| Linux x86-64 | `lcu-<version>-linux-x64.tar.gz` |
+
+Follow the [installation guide](docs/INSTALLATION.md) to verify the checksum, extract the archive, and register LCU in your harness. Setup offers an agent chooser and desktop-readiness guidance. Chrome is opt-in.
+
+For development, see [building from source](docs/DEVELOPMENT.md#building-from-source).
+
+## Enable Chrome
+
+Ask your agent:
+
+```text
+Enable Chrome control in my LCU setup using the installation guide:
+https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desktop-and-browser
+```
+
+Enable the official extension in your Chrome profile and restart your harness. Then ask it to use LCU to list Chrome tabs. Sites still require approval. Claude Code's Chrome support remains experimental because some interruptions do not trigger tab cleanup; see [adapter limitations](docs/ADAPTERS.md).
+
+## Documentation
+
+- [Installation](docs/INSTALLATION.md): downloads, harness setup, permissions, sessions, and upgrades.
+- [Harness adapters](docs/ADAPTERS.md): custom clients, approvals, lifecycle, and result handling.
+- [Verification](docs/PARITY-STATUS.md): tested behavior and remaining gaps.
+- [Development](docs/DEVELOPMENT.md): source builds and isolated desktop tests.
+
+LCU is [MIT licensed](LICENSE). Release archives contain LCU and third-party setup dependencies. The OpenAI app and its instructions come from your local installation and retain their own terms; see [dependency provenance](docs/PROVENANCE.md).

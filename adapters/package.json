@@ -2,6 +2,13 @@
   "name": "lcu-harness-adapters",
   "version": "0.1.0",
   "private": true,
+  "description": "Connect Pi, Codex CLI, and Claude Code to the installed OpenAI computer-use runtime.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xpolarzero/lcu.git",
+    "directory": "adapters"
+  },
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0"
