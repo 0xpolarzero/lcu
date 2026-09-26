@@ -85,7 +85,8 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
             if adapters_source is not None:
                 adapters = release / 'adapters'
                 adapters.mkdir()
-                for filename in ('package.json', 'package-lock.json', 'client.mjs', 'claude.mjs'):
+                for filename in ('package.json', 'package-lock.json', 'client.mjs', 'claude.mjs',
+                                 'audio-files.mjs', 'codex.mjs'):
                     shutil.copy2(adapters_source / filename, adapters / filename)
                 (adapters / 'pi').mkdir()
                 shutil.copy2(adapters_source / 'pi/index.ts', adapters / 'pi/index.ts')

@@ -33,6 +33,8 @@ class BuildPlatformTests(unittest.TestCase):
                 (release / 'adapters/pi').mkdir(parents=True)
                 (release / 'adapters/client.mjs').write_text('fixture')
                 (release / 'adapters/claude.mjs').write_text('fixture')
+                (release / 'adapters/audio-files.mjs').write_text('fixture')
+                (release / 'adapters/codex.mjs').write_text('fixture')
                 (release / 'adapters/pi/index.ts').write_text('fixture')
             with mock.patch.object(build_bundle, 'architecture', return_value='arm64'), \
                     mock.patch('lcu.platforms.resolve_installed_mac_app',
@@ -47,6 +49,8 @@ class BuildPlatformTests(unittest.TestCase):
                 self.assertIn(prefix + 'lcu/platforms.py', names)
                 self.assertIn(prefix + 'adapters/client.mjs', names)
                 self.assertIn(prefix + 'adapters/claude.mjs', names)
+                self.assertIn(prefix + 'adapters/audio-files.mjs', names)
+                self.assertIn(prefix + 'adapters/codex.mjs', names)
                 self.assertNotIn(prefix + 'app/Contents/Resources/cua_node/bin/node', names)
                 manifest = json.load(bundle.extractfile(prefix + 'bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('darwin', 'arm64'))
@@ -103,7 +107,11 @@ class BuildPlatformTests(unittest.TestCase):
                              '../../../app/Contents/Resources/cua_node/bin/node')
             self.assertTrue((release / 'adapters/client.mjs').is_file())
             self.assertTrue((release / 'adapters/claude.mjs').is_file())
+            self.assertTrue((release / 'adapters/audio-files.mjs').is_file())
+            self.assertTrue((release / 'adapters/codex.mjs').is_file())
             self.assertTrue((release / 'adapters/pi/index.ts').is_file())
+            sdk_package = release / 'adapters/node_modules/@modelcontextprotocol/sdk/package.json'
+            self.assertEqual(json.loads(sdk_package.read_text())['version'], '1.30.0')
             self.assertFalse((release / 'adapters/test').exists())
             adapter_ci = next(command for command, options in commands if 'ci' in command and
                               options['cwd'].name == 'adapters')

@@ -419,6 +419,13 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
             else:
                 mcp_command = [str(node), str(adapter), *command]
         if name == 'codex':
+            adapter = release_root / 'adapters/codex.mjs'
+            audio_helper = release_root / 'adapters/audio-files.mjs'
+            if not adapter.is_file() or not audio_helper.is_file():
+                mcp_setup_error = (f'Codex audio relay missing: {adapter} or {audio_helper}. '
+                                   'Reinstall LCU into this release prefix, then rerun setup.')
+            else:
+                mcp_command = [str(node), str(adapter), *command]
             from .codex_hooks import require_cli_hook_support
             try:
                 require_cli_hook_support(env)
@@ -529,6 +536,21 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
               '"$prefix/current/bin/lcu" "$@";; '
               '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
     portable_command = ['/bin/sh', '-c', launch, 'lcu-export', *(['--chrome'] if chrome else [])]
+    codex_launch = ('set -eu; case "$(uname -s)" in '
+                    'Darwin) default_prefix="$HOME/.local/share/lcu"; default_session=direct;; '
+                    'Linux) default_prefix=/opt/lcu; default_session=discover;; '
+                    '*) echo "Unsupported LCU platform" >&2; exit 2;; esac; '
+                    'prefix=${LCU_PREFIX:-$default_prefix}; '
+                    'case "$prefix" in /*) ;; *) echo "LCU_PREFIX must be absolute" >&2; exit 2;; esac; '
+                    'node="$prefix/current/agent-tools/node/bin/node"; '
+                    'adapter="$prefix/current/adapters/codex.mjs"; '
+                    'server="$prefix/current/bin/lcu"; '
+                    'case "${LCU_SESSION_MODE:-$default_session}" in '
+                    'direct) exec "$node" "$adapter" "$server" "$@";; '
+                    'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
+                    '"$node" "$adapter" "$server" "$@";; '
+                    '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
+    portable_codex_command = ['/bin/sh', '-c', codex_launch, 'lcu-export', *(['--chrome'] if chrome else [])]
     mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': portable_command[0],
                                  'args': portable_command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
@@ -556,14 +578,14 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
     changes.append(Change(destination / 'lcu-bootstrap.json', None,
                           (json.dumps(bootstrap_metadata, indent=2) + '\n').encode()))
     policy = host_policy(release_root)
-    codex = {'mcpServers': {'lcu': {**policy, 'command': portable_command[0],
-                                   'args': portable_command[1:]}}}
+    codex = {'mcpServers': {'lcu': {**policy, 'command': portable_codex_command[0],
+                                   'args': portable_codex_command[1:]}}}
     changes.append(Change(destination / 'codex.mcp.json', None, (json.dumps(codex, indent=2) + '\n').encode()))
     from .codex_hooks import export_files
     resources = installed_app_resources(release_root)
     original_plugins = resources / 'plugins/openai-bundled'
     changes += [Change(destination / name, None, data)
-                for name, data in export_files(portable_command, original_plugins).items()]
+                for name, data in export_files(portable_codex_command, original_plugins).items()]
     bootstrap = ("# LCU skill bootstrap\n\n"
                  "Install LCU and its selected application on this machine, then run "
                  "`lcu setup --export /new/path " + ("--chrome " if chrome else "") + "--yes` here and import that new export. "

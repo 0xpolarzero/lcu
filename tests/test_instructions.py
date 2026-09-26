@@ -182,6 +182,55 @@ class InstalledInstructionTests(unittest.TestCase):
                                 env=env, text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout, f'--user\n{pwd.getpwuid(os.getuid()).pw_name}\n--\n{bin_dir / "lcu"}\ndoctor\n')
 
+    def test_codex_export_routes_through_bundled_node_and_audio_relay(self):
+        destination = self.root / 'codex-export'
+        captured = {}
+        policy = {'enabled_tools': ['js', 'js_reset', 'turn_ended'],
+                  'omit_tools_from': ['code_mode', 'deferred'], 'startup_timeout_sec': 120,
+                  'tools': {'js': {'output_token_limit': 25000}}}
+
+        def export_files(command, _host_root):
+            captured['command'] = command
+            return {}
+
+        with patch('lcu.setup.host_policy', return_value=policy), \
+                patch('lcu.codex_hooks.export_files', side_effect=export_files):
+            export_bundle(destination, self.skill_source, ['/producer/private/lcu'], self.release)
+
+        config = json.loads((destination / 'codex.mcp.json').read_text())['mcpServers']['lcu']
+        self.assertEqual(config['command'], '/bin/sh')
+        self.assertEqual(config['args'][0], '-c')
+        self.assertIn('current/agent-tools/node/bin/node', config['args'][1])
+        self.assertIn('current/adapters/codex.mjs', config['args'][1])
+        self.assertIn('current/bin/lcu', config['args'][1])
+        self.assertEqual(config['enabled_tools'], policy['enabled_tools'])
+        self.assertEqual(config['omit_tools_from'], policy['omit_tools_from'])
+        self.assertEqual(captured['command'], [config['command'], *config['args']])
+        self.assertNotIn('/producer/private/lcu', '\n'.join(config['args']))
+
+        prefix = self.root / 'destination'
+        bin_dir = prefix / 'current/bin'
+        node = prefix / 'current/agent-tools/node/bin/node'
+        adapter = prefix / 'current/adapters/codex.mjs'
+        server = bin_dir / 'lcu'
+        session = bin_dir / 'lcu-session'
+        for path in (node, adapter, server, session):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        node.write_text('#!' + sys.executable + '\nimport sys\nprint("\\n".join(sys.argv[1:]))\n')
+        session.write_text('#!' + sys.executable + '\nimport sys\nprint("\\n".join(sys.argv[1:]))\n')
+        for path in (node, session):
+            path.chmod(0o755)
+        env = {**os.environ, 'LCU_PREFIX': str(prefix), 'LCU_SESSION_MODE': 'direct'}
+        result = subprocess.run([config['command'], *config['args'], '--check'],
+                                env=env, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout, f'{adapter}\n{server}\n--check\n')
+
+        env['LCU_SESSION_MODE'] = 'discover'
+        result = subprocess.run([config['command'], *config['args'], '--check'],
+                                env=env, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout, f'--user\n{pwd.getpwuid(os.getuid()).pw_name}\n--\n'
+                         f'{node}\n{adapter}\n{server}\n--check\n')
+
     def test_claude_setup_forwards_command_and_installs_host_visibility_hooks(self):
         tool_root = self.root / 'agent-tools'
         tool_root.mkdir()
@@ -269,6 +318,47 @@ class InstalledInstructionTests(unittest.TestCase):
         register('project', project_command, chrome=True)
         self.assertEqual(project_settings.read_bytes(), configured_project)
         self.assertEqual(user_settings.read_bytes(), configured_user)
+
+    def test_codex_setup_wraps_original_lcu_command_and_retains_host_policy(self):
+        tool_root = self.root / 'agent-tools'
+        tool_root.mkdir()
+        node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
+        adapter = self.release / 'adapters/codex.mjs'
+        helper = self.release / 'adapters/audio-files.mjs'
+        adapter.parent.mkdir(parents=True)
+        adapter.write_text('fixture relay')
+        helper.write_text('fixture helper')
+        original = ['/opt/lcu/current/bin/lcu', '--chrome', '--session=direct']
+        calls = []
+        policy = {'enabled_tools': ['js', 'js_reset', 'turn_ended'],
+                  'omit_tools_from': ['code_mode', 'deferred'], 'startup_timeout_sec': 120,
+                  'tools': {'js': {'output_token_limit': 25000}}}
+        config = self.home / '.codex/config.toml'
+        config.parent.mkdir(parents=True)
+
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == [str(skill_cli), 'add']:
+                return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
+            return SimpleNamespace(returncode=0, stdout=json.dumps({'path': str(config)}))
+
+        with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
+                patch('lcu.setup.generate_skill', return_value=self.skill_source), \
+                patch('lcu.setup.host_policy', return_value=policy), \
+                patch('lcu.setup.preflight_mcp'), \
+                patch('lcu.setup.subprocess.run', side_effect=run), \
+                patch('lcu.codex_hooks.require_cli_hook_support'), \
+                patch('lcu.codex_hooks.install_hooks') as install_hooks:
+            failures = configure(['codex'], self.home, self.skill_source, original,
+                                 tool_root, self.release, environ={'HOME': str(self.home)})
+
+        self.assertEqual(failures, [])
+        self.assertEqual(len(calls), 2)
+        mcp_call = next(argv for argv in calls if argv[1:3] == ['--input-type=module', '-e'])
+        self.assertEqual(json.loads(mcp_call[-2]), [str(node), str(adapter), *original])
+        self.assertEqual(json.loads(mcp_call[-1]), policy)
+        self.assertEqual(install_hooks.call_args.args[0], self.resources / 'codex')
+        self.assertEqual(install_hooks.call_args.args[1], config)
 
     def test_pi_registration_uses_original_skill_and_offline_local_package(self):
         self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi'})
