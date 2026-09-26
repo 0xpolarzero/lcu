@@ -1,4 +1,4 @@
-"""Extract the pinned original Windows pipe host into a private generation.
+"""Extract the unchanged original Windows pipe host into a private generation.
 
 Only the tiny launch entry is LCU code. The native host and its dependencies
 come unchanged from the installed application's verified app.asar.
@@ -6,87 +6,260 @@ come unchanged from the installed application's verified app.asar.
 
 from __future__ import annotations
 
-import hashlib
 import json
+import posixpath
 from pathlib import Path
 from queue import Empty, Queue
-import struct
+import re
 import subprocess
 from threading import Thread
 
+from .asar import list_asar_members, read_asar_members
 
-MAIN = '.vite/build/main-BR_2NHW6.js'
-MAIN_SHA256 = '1f2b91cf92fc023fb2fa41e1c1d03698fa6e37354ecd07dd0cebd21337607b08'
-HOST_START = 155346
-HOST_END = 165208
-HOST_SHA256 = '3dae7a2bb89573e78dff25715efaf44dadbe7a7376c9243987d18d43b5f05247'
-ORIGINAL_FILES = (
-    '.vite/build/rolldown-runtime-CPUxUITh.js',
-    '.vite/build/src-DldfpmrL.js',
-    '.vite/build/src-C9YLnbgY.js',
-    '.vite/build/logger-DkO6GWbX.js',
-    'node_modules/tslib/package.json',
-    'node_modules/tslib/tslib.js',
-)
-MARKER = b'// ORIGINAL_WINDOWS_PIPE_HOST'
+_MAIN_PATH = re.compile(r'^\.vite/build/main(?:-[^/]+)?\.js$')
+_BINDING = re.compile(r"(?<![\w$])([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*(['\"])([^'\"]+)\2\s*\)")
 
 
-def _digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open('rb') as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
+def _required_layout(detail: str):
+    raise ValueError(f'Required Windows host layout is unavailable: {detail}')
 
 
-def _asar_members(archive: Path, names: tuple[str, ...]) -> dict[str, bytes]:
-    with archive.open('rb') as stream:
-        preamble = stream.read(16)
-        if len(preamble) != 16:
-            raise ValueError('Pinned Windows app.asar header is truncated.')
-        size_payload, header_size, header_payload, json_size = struct.unpack('<4I', preamble)
-        data_offset = 8 + header_size
-        if (size_payload != 4 or header_payload != header_size - 4 or
-                json_size > header_payload - 4 or json_size > 64 * 1024 * 1024 or
-                data_offset > archive.stat().st_size):
-            raise ValueError('Pinned Windows app.asar header is invalid.')
-        header = json.loads(stream.read(json_size))
-        result = {}
-        for name in names:
-            node = header
-            try:
-                for part in name.split('/'):
-                    node = node['files'][part]
-                offset, size = int(node['offset']), node['size']
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f'Pinned Windows app.asar member is missing: {name}') from exc
-            if (node.get('unpacked') or 'link' in node or not isinstance(size, int) or
-                    isinstance(size, bool) or size < 0 or size > 8 * 1024 * 1024 or
-                    offset < 0 or data_offset + offset + size > archive.stat().st_size):
-                raise ValueError(f'Pinned Windows app.asar member is invalid: {name}')
-            stream.seek(data_offset + offset)
-            content = stream.read(size)
-            if len(content) != size:
-                raise ValueError(f'Pinned Windows app.asar member is truncated: {name}')
-            result[name] = content
-        return result
+def _skip_quoted(source: str, index: int, quote: str) -> int:
+    index += 1
+    while index < len(source):
+        if source[index] == '\\':
+            index += 2
+        elif source[index] == quote:
+            return index + 1
+        else:
+            index += 1
+    _required_layout('unterminated source string')
 
 
-def materialize_original_host(app: Path, destination: Path, *, expected_asar_sha256: str) -> Path:
-    """Write exact pinned app code plus a thin launch entry inside a managed generation."""
+def _function_body_end(source: str, opening: int) -> int:
+    """Find the Wre factory's end; skip strings, comments, and regex literals."""
+    depth = 1
+    index = opening + 1
+    modes = ['code']
+    interpolation_depths = []
+    while index < len(source):
+        mode = modes[-1]
+        char = source[index]
+        if mode == 'template':
+            if char == '\\':
+                index += 2
+            elif char == '`':
+                modes.pop()
+                index += 1
+            elif source.startswith('${', index):
+                depth += 1
+                interpolation_depths.append(depth)
+                modes.append('code')
+                index += 2
+            else:
+                index += 1
+            continue
+        if char in "'\"":
+            index = _skip_quoted(source, index, char)
+        elif char == '`':
+            modes.append('template')
+            index += 1
+        elif source.startswith('//', index):
+            newline = source.find('\n', index + 2)
+            index = len(source) if newline < 0 else newline + 1
+        elif source.startswith('/*', index):
+            end = source.find('*/', index + 2)
+            if end < 0:
+                _required_layout('unterminated source comment')
+            index = end + 2
+        elif char == '/' and _starts_regex(source, index):
+            index = _regex_end(source, index)
+        elif char == '{':
+            depth += 1
+            index += 1
+        elif char == '}':
+            prior = depth
+            depth -= 1
+            index += 1
+            if interpolation_depths and prior == interpolation_depths[-1]:
+                interpolation_depths.pop()
+                modes.pop()
+            elif depth == 0:
+                return index
+        else:
+            index += 1
+    _required_layout('unterminated Wre function')
+
+
+def _starts_regex(source: str, index: int) -> bool:
+    previous = index - 1
+    while previous >= 0 and source[previous].isspace():
+        previous -= 1
+    if previous >= 0 and source[previous] in '=(:,[!&|?;{}+-*%^~<>':
+        return True
+    word = re.search(r'([A-Za-z_$][\w$]*)\s*$', source[:index])
+    return bool(word and word.group(1) in ('return', 'throw', 'case', 'delete', 'void', 'typeof'))
+
+
+def _regex_end(source: str, index: int) -> int:
+    index += 1
+    in_class = False
+    escaped = False
+    while index < len(source) and source[index] not in '\r\n':
+        char = source[index]
+        if escaped:
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == '[':
+            in_class = True
+        elif char == ']':
+            in_class = False
+        elif char == '/' and not in_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index
+        index += 1
+    _required_layout('unterminated Wre regular expression')
+
+
+def _wre_source(source: bytes) -> bytes:
+    try:
+        text = source.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise ValueError('Required Windows host layout is unavailable: main source is not UTF-8.') from exc
+    matches = list(re.finditer(r'\bfunction\s+Wre\s*\(', text))
+    if len(matches) != 1:
+        _required_layout('expected one named Wre host factory')
+    match = matches[0]
+    index = match.end()
+    parens = 1
+    while index < len(text) and parens:
+        char = text[index]
+        if char in "'\"`":
+            index = _skip_quoted(text, index, char)
+        elif text.startswith('//', index):
+            newline = text.find('\n', index + 2)
+            index = len(text) if newline < 0 else newline + 1
+        elif text.startswith('/*', index):
+            end = text.find('*/', index + 2)
+            if end < 0:
+                _required_layout('unterminated function parameter comment')
+            index = end + 2
+        elif char == '(':
+            parens += 1
+            index += 1
+        elif char == ')':
+            parens -= 1
+            index += 1
+        else:
+            index += 1
+    while index < len(text) and text[index].isspace():
+        index += 1
+    if parens or index >= len(text) or text[index] != '{':
+        _required_layout('Wre is not a function declaration')
+    end = _function_body_end(text, index)
+    result = text[match.start():end].encode('utf-8')
+    if b'closeActiveTurn' not in result or b'nativePipeDirectory' not in result:
+        _required_layout('Wre no longer exposes the expected native-pipe and turn-cleanup interface')
+    return result
+
+
+def _referenced(name: str, source: bytes) -> bool:
+    try:
+        text = source.decode('utf-8')
+    except UnicodeDecodeError:
+        return False
+    return re.search(r'(?<![\w$])' + re.escape(name) + r'(?![\w$])', text) is not None
+
+
+def _direct_member(current: str, specifier: str, members: set[str]):
+    if specifier.startswith('node:'):
+        return None
+    if not specifier.startswith('.'):
+        _required_layout(f'unsupported non-relative original dependency {specifier!r}')
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(current), specifier))
+    if target not in members:
+        _required_layout(f'original dependency is missing: {target}')
+    return target
+
+
+def _host_imports(main: bytes, host: bytes) -> list[tuple[str, str]]:
+    bindings = {}
+    for match in _BINDING.finditer(main.decode('utf-8')):
+        name, specifier = match.group(1), match.group(3)
+        if not _referenced(name, host):
+            continue
+        if name in ('c', 'T', 'p', 'v', '_', 'R'):
+            continue
+        if name not in ('n', 'r'):
+            _required_layout(f'unsupported original import binding {name}')
+        previous = bindings.setdefault(name, specifier)
+        if previous != specifier:
+            _required_layout(f'ambiguous imported binding {name}')
+    for name in ('n', 'r'):
+        if _referenced(name, host) and name not in bindings:
+            _required_layout(f'original Wre import {name} is missing')
+    if not bindings:
+        _required_layout('no supported original module import supplies Wre')
+    return sorted(bindings.items())
+
+
+def _original_members(archive: Path) -> tuple[bytes, list[tuple[str, str]], dict[str, bytes]]:
+    members = set(list_asar_members(archive))
+    mains = sorted(name for name in members if _MAIN_PATH.fullmatch(name))
+    matches = []
+    for name in mains:
+        source = read_asar_members(archive, (name,))[name]
+        try:
+            host = _wre_source(source)
+        except ValueError as exc:
+            if str(exc).endswith('expected one named Wre host factory'):
+                continue
+            raise
+        matches.append((name, source, host))
+    if len(matches) != 1:
+        _required_layout('expected one main bundle with a unique Wre host factory')
+    name, main, host = matches[0]
+    bound_imports = _host_imports(main, host)
+    imports = []
+    names = []
+    for alias, specifier in bound_imports:
+        member = _direct_member(name, specifier, members)
+        if member is None:
+            imports.append((alias, specifier))
+        else:
+            imports.append((alias, './' + member))
+            names.append(member)
+    # Preserve the original host's small dependency families. Chunk hashes are
+    # discovered from this app; no transitive module graph or package resolver
+    # is inferred here.
+    names.extend(sorted(member for member in members
+                        if re.fullmatch(r'\.vite/build/(?:rolldown-runtime|src|logger)-[^/]+\.js', member)))
+    names.extend(('node_modules/tslib/package.json', 'node_modules/tslib/tslib.js'))
+    missing = [member for member in names if member not in members]
+    if missing:
+        _required_layout(f'original host dependency is missing: {missing[0]}')
+    contents = read_asar_members(archive, tuple(dict.fromkeys(names)))
+    return host, imports, contents
+
+
+def materialize_original_host(app: Path, destination: Path) -> Path:
+    """Extract the unique structurally compatible Wre host and exact dependencies."""
     archive = app / 'app/resources/app.asar'
-    if archive.is_symlink() or not archive.is_file() or _digest(archive) != expected_asar_sha256:
-        raise ValueError('Selected Windows app.asar does not match the official package pin.')
-    contents = _asar_members(archive, (MAIN, *ORIGINAL_FILES))
-    main = contents.pop(MAIN)
-    fragment = main[HOST_START:HOST_END]
-    if (hashlib.sha256(main).hexdigest() != MAIN_SHA256 or
-            hashlib.sha256(fragment).hexdigest() != HOST_SHA256):
-        raise ValueError('Pinned Windows native-pipe host source changed.')
+    if archive.is_symlink() or not archive.is_file():
+        _required_layout('app/resources/app.asar is missing or redirected')
+    fragment, imports, contents = _original_members(archive)
     template = Path(__file__).with_name('windows_host_entry.cjs').read_bytes()
-    if template.count(MARKER) != 1:
-        raise ValueError('Windows host entry marker is missing or ambiguous.')
-    entry = template.replace(MARKER, fragment)
+    imports_marker = b'// ORIGINAL_WINDOWS_HOST_IMPORTS'
+    host_marker = b'// ORIGINAL_WINDOWS_PIPE_HOST'
+    if template.count(imports_marker) != 1 or template.count(host_marker) != 1:
+        raise ValueError('Windows host entry markers are missing or ambiguous.')
+    import_source = '\n'.join(
+        f'const {name} = require({json.dumps(specifier)});' for name, specifier in imports
+    ).encode('utf-8')
+    entry = template.replace(imports_marker, import_source).replace(host_marker, fragment)
     destination.mkdir(parents=True, exist_ok=False)
     for name, content in contents.items():
         target = destination / name

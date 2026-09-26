@@ -2,6 +2,7 @@
 import json
 import ntpath
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -29,65 +30,103 @@ def paths(root):
         policy = lock.get('platforms', {}).get('darwin', {})
         entry = policy.get('architectures', {}).get(arch)
         if (not selected.is_absolute() or not entry or
-                selected.resolve() != app.resolve() or
-                descriptor.get('package_version') != policy.get('version') or
-                descriptor.get('runtime') != policy.get('runtime')):
-            raise ValueError('Selected application descriptor does not match the macOS lock and app link.')
+                selected.resolve() != app.resolve()):
+            raise ValueError('Selected application descriptor does not match the supported macOS app link.')
         from .platforms import resolve_installed_mac_app
-        resolved = resolve_installed_mac_app(selected,
-            expected_version=policy['version'], expected_runtime=policy['runtime'],
-            expected_hashes=entry['components'], arch=arch)
-        return resolved.app, resolved.resources, resolved.runtime, policy
+        resolved = resolve_installed_mac_app(selected, arch=arch)
+        return resolved.app, resolved.resources, resolved.runtime, {
+            'version': resolved.version, 'runtime': resolved.runtime_version}
     if target == 'windows':
         policy = lock.get('platforms', {}).get('windows', {})
         entry = policy.get('architectures', {}).get(arch)
+        version = descriptor.get('package_version')
+        runtime_version = descriptor.get('runtime')
+        inventory_digest = descriptor.get('sha256')
         if (not selected.is_absolute() or arch != 'x64' or not entry or
-                descriptor.get('package_version') != policy.get('version') or
-                descriptor.get('runtime') != policy.get('runtime') or
-                descriptor.get('sha256') != entry.get('sha256')):
-            raise ValueError('Selected application descriptor does not match the Windows lock.')
+                not isinstance(version, str) or not version or
+                not isinstance(runtime_version, str) or not runtime_version or
+                not isinstance(inventory_digest, str) or len(inventory_digest) != 64 or
+                any(char not in '0123456789abcdef' for char in inventory_digest)):
+            raise ValueError('Selected Windows application descriptor is incomplete or unsupported.')
         prefix = root.parent.parent
         apps = prefix / 'apps'
-        generation = apps / entry['sha256'][:16]
+        generation = apps / inventory_digest
         expected = generation / 'app'
+        inventory_path = generation / 'inventory.json'
         if (selected != expected or any(path.is_symlink() or path.is_junction()
-                                        for path in (apps, generation, selected))):
+                                        for path in (apps, generation, selected, inventory_path)) or
+                not inventory_path.is_file()):
             raise ValueError('Selected Windows application is not the managed private generation.')
-        from .windows import validate_windows_app_tree
+        from .windows import inventory_sha256, validate_windows_app_tree
+        try:
+            inventory = json.loads(inventory_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError('Managed Windows application inventory is invalid.') from exc
+        if inventory_sha256(inventory) != inventory_digest:
+            raise ValueError('Managed Windows application inventory does not match its descriptor.')
         resolved = validate_windows_app_tree(selected,
-            expected_version=policy['version'], expected_runtime=policy['runtime'],
-            expected_hashes=entry['components'])
+            expected_version=version, expected_runtime=runtime_version,
+            expected_inventory=inventory)
         if resolved.app != expected.resolve(strict=True):
             raise ValueError('Selected Windows application does not match the managed generation.')
-        return resolved.app, resolved.resources, resolved.runtime, policy
+        return resolved.app, resolved.resources, resolved.runtime, {
+            'version': resolved.version, 'runtime': resolved.runtime_version}
     if target != 'linux':
         raise ValueError(f'Unsupported installed application platform: {target}')
     if (not selected or selected.is_absolute() or
             (root / selected).resolve() != app.resolve() or
-            arch not in lock['architectures'] or
-            descriptor.get('package_version') != lock['version'] or
-            descriptor.get('sha256') != lock['architectures'][arch]['sha256']):
-        raise ValueError('Selected application descriptor does not match the LCU lock and app link.')
+            arch not in lock['architectures']):
+        raise ValueError('Selected application descriptor does not match the supported architecture and app link.')
+    version = descriptor.get('package_version')
+    runtime_version = descriptor.get('runtime')
+    tree_digest = descriptor.get('sha256')
+    if (not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.+:~_-]*', version) or
+            not isinstance(runtime_version, str) or not runtime_version.strip() or
+            not isinstance(tree_digest, str) or not re.fullmatch(r'[0-9a-f]{64}', tree_digest)):
+        raise ValueError('Selected Linux application descriptor is incomplete or unsupported.')
+    resolved_app = app.resolve(strict=True)
+    if len(resolved_app.parents) < 4:
+        raise ValueError('Selected Linux application is not under a managed generation.')
+    generation = resolved_app.parents[3]
+    apps = generation.parent
+    marker = generation / 'installed.json'
+    expected_generation = f'{version}-{arch}-{tree_digest[:16]}'
+    if (apps.name != 'apps' or generation.name != expected_generation or
+            any(path.is_symlink() for path in (apps, generation, marker)) or
+            not marker.is_file()):
+        raise ValueError('Selected Linux application is not the described managed generation.')
+    try:
+        installed = json.loads(marker.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError('Managed Linux application marker is invalid.') from exc
+    expected = {'package_version': version, 'runtime': runtime_version,
+                'architecture': arch, 'sha256': tree_digest,
+                'application': 'payload/usr/lib/chatgpt'}
+    if any(installed.get(key) != value for key, value in expected.items()):
+        raise ValueError('Managed Linux application identity does not match its release descriptor.')
     required = (
         runtime / 'bin/node', runtime / 'bin/node_repl',
         runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
-        resources / 'codex', resources / 'codex-code-mode-host',
         resources / 'plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
         resources / 'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json',
     )
+    from .app_layout import locate_codex_tools
+    tools = locate_codex_tools(resources)
+    required += (tools.cli, tools.code_mode_host)
     if not app.is_dir() or any(not path.is_file() for path in required):
         raise ValueError(f'Selected official application is incomplete: {app}. Rerun scripts/install.sh.')
-    if any(not os.access(path, os.X_OK) for path in required[:2] + required[3:5]):
+    if any(not os.access(path, os.X_OK) for path in
+           (runtime / 'bin/node', runtime / 'bin/node_repl', tools.cli, tools.code_mode_host)):
         raise ValueError(f'Selected official application has non-executable tools: {app}. Rerun scripts/install.sh.')
     manifest = json.loads((runtime / 'manifest.json').read_text())
     if (manifest.get('platform') != 'linux' or manifest.get('arch') != arch or
-            manifest.get('runtime_archive_version') != lock['runtime']):
-        raise ValueError('Selected application runtime does not match the LCU lock.')
-    return app, resources, runtime, lock
+            manifest.get('runtime_archive_version') != runtime_version):
+        raise ValueError('Selected application runtime does not match its release descriptor.')
+    return app, resources, runtime, {'version': version, 'runtime': runtime_version}
 
 
 def environment(root, resolved=None, *, chrome=False):
-    _, resources, runtime, lock = resolved or paths(root)
+    _, resources, runtime, metadata = resolved or paths(root)
     target = json.loads((root / 'installation.json').read_text()).get('platform', 'linux')
     windows = target == 'windows'
     path_api = ntpath if windows else os.path
@@ -95,7 +134,8 @@ def environment(root, resolved=None, *, chrome=False):
     module_dir = runtime / ('bin/node_modules' if windows else 'lib/node_modules')
     node = runtime / ('bin/node.exe' if windows else 'bin/node')
     node_repl = runtime / ('bin/node_repl.exe' if windows else 'bin/node_repl')
-    codex = resources / ('codex.exe' if windows else 'codex')
+    from .app_layout import locate_codex_tools
+    codex = locate_codex_tools(resources, windows=windows).cli
     env = dict(os.environ)
     # Original gM/nne selects and trusts CODEX_HOME verbatim, including an
     # explicitly empty value. This changes only the launched child environment.
@@ -145,7 +185,7 @@ def environment(root, resolved=None, *, chrome=False):
         flavor = env.get('BUILD_FLAVOR', '').strip()
         valid_flavors = ('dev', 'agent', 'nightly', 'internal-alpha', 'public-beta', 'prod')
         env.setdefault('BROWSER_USE_CODEX_APP_BUILD_FLAVOR', flavor if flavor in valid_flavors else 'prod')
-        env.setdefault('BROWSER_USE_CODEX_APP_VERSION', lock['version'])
+        env.setdefault('BROWSER_USE_CODEX_APP_VERSION', metadata['version'])
     env.setdefault('NODE_REPL_DISABLE_ANALYTICS', '1')
     # Original browser service switch: do not initialize account identity or
     # telemetry. The relay already supplies the local agent-header decision.
@@ -200,12 +240,14 @@ def main(root, argv):
     if argv[:1] == ['--version']:
         release_path = root / 'bundle.json'
         version = json.loads(release_path.read_text())['version'] if release_path.is_file() else 'source-checkout'
-        lock = json.loads((root / 'runtime.lock.json').read_text())
         descriptor_path = root / 'installation.json'
         descriptor = json.loads(descriptor_path.read_text()) if descriptor_path.is_file() else {}
         target = descriptor.get('platform', 'linux')
-        policy = lock.get('platforms', {}).get(target, lock)
-        print(f"lcu {version} (ChatGPT {target} {policy['version']}; CUA {policy['runtime']})")
+        if descriptor_path.is_file():
+            metadata = paths(root)[3]
+            print(f"lcu {version} (ChatGPT {target} {metadata['version']}; CUA {metadata['runtime']})")
+        else:
+            print(f'lcu {version} (ChatGPT {target} app not selected)')
         return
     if argv[:1] == ['setup']:
         from .setup import main as setup

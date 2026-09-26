@@ -1,7 +1,6 @@
 """Windows archive and stable-release selection are thin and platform specific."""
 
 import json
-import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -16,7 +15,8 @@ import build_bundle
 import install_windows
 import windows_launcher
 from bundle import architecture
-from lcu.windows import WINDOWS_REQUIRED_FILES
+from lcu.windows import (WINDOWS_REQUIRED_FILES, application_inventory,
+                         inventory_sha256)
 
 
 class WindowsBuildTests(unittest.TestCase):
@@ -94,6 +94,10 @@ class WindowsBuildTests(unittest.TestCase):
             official = base / 'official-app'
             official.mkdir()
             (official / 'notice.txt').write_text('original notice')
+            inventory = application_inventory(official)
+            selected = SimpleNamespace(app=official, version='27.100.1.0',
+                runtime_version='runtime-new', inventory=inventory,
+                inventory_digest=inventory_sha256(inventory))
             with mock.patch.object(install_windows, 'SOURCE', source), \
                  mock.patch.object(install_windows.platform, 'system', return_value='Windows'), \
                  mock.patch.object(install_windows.sys, 'version_info', (3, 13)), \
@@ -102,7 +106,7 @@ class WindowsBuildTests(unittest.TestCase):
                  mock.patch.object(install_windows, 'verify'), \
                  mock.patch.object(install_windows, 'checked_prefix', return_value=prefix), \
                  mock.patch.object(install_windows, 'resolve_installed_windows_app',
-                                   return_value=SimpleNamespace(app=official)), \
+                                   return_value=selected), \
                  mock.patch.object(install_windows, '_validated_copy'), \
                  mock.patch.object(install_windows, 'materialize_original_host'), \
                  mock.patch('lcu.runtime.paths', return_value=(base / 'official-app', None, None, {})):
@@ -119,7 +123,11 @@ class WindowsBuildTests(unittest.TestCase):
             (source / 'scripts').mkdir(parents=True)
             (source / 'scripts/windows_launcher.py').write_text('fixture')
             official = base / 'official-app'
-            hashes = {}
+            official.mkdir()
+            (official / 'AppxManifest.xml').write_text(
+                '<Package><Identity Name="OpenAI.Codex" '
+                'Publisher="CN=50BDFD77-8903-4850-9FFE-6E8522F64D5B" '
+                'Version="27.100.1.0" ProcessorArchitecture="x64"/></Package>')
             for relative in WINDOWS_REQUIRED_FILES:
                 file = official / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -128,11 +136,15 @@ class WindowsBuildTests(unittest.TestCase):
                     data = json.dumps({'platform': 'windows', 'arch': 'x64',
                         'runtime_archive_version': 'runtime-fixture'}).encode()
                 file.write_bytes(data)
-                hashes[relative] = hashlib.sha256(data).hexdigest()
             (official / 'app/resources/NOTICE.txt').write_text('original notice')
+            inventory = application_inventory(official)
+            selected = SimpleNamespace(app=official, version='27.100.1.0',
+                runtime_version='runtime-fixture', inventory=inventory,
+                inventory_digest=inventory_sha256(inventory))
             (source / 'runtime.lock.json').write_text(json.dumps({'platforms': {'windows': {
-                'version': '26.917.9434.0', 'runtime': 'runtime-fixture',
-                'architectures': {'x64': {'sha256': 'a' * 64, 'components': hashes}}}}}))
+                'version': '26.917.9434.0', 'runtime': 'old-runtime',
+                'architectures': {'x64': {'sha256': 'a' * 64,
+                    'components': {'app/resources/app.asar': 'b' * 64}}}}}}))
             prefix = base / 'installed'
             with mock.patch.object(install_windows, 'SOURCE', source), \
                  mock.patch.object(install_windows.platform, 'system', return_value='Windows'), \
@@ -141,7 +153,7 @@ class WindowsBuildTests(unittest.TestCase):
                  mock.patch.object(install_windows, 'verify'), \
                  mock.patch.object(install_windows, 'checked_prefix', return_value=prefix), \
                  mock.patch.object(install_windows, 'resolve_installed_windows_app',
-                                   return_value=SimpleNamespace(app=official)), \
+                                   return_value=selected), \
                  mock.patch('lcu.windows.platform.system', return_value='Windows'), \
                  mock.patch('lcu.windows.platform.machine', return_value='AMD64'), \
                  mock.patch.object(install_windows, 'materialize_original_host'), \
@@ -149,8 +161,12 @@ class WindowsBuildTests(unittest.TestCase):
                 install_windows.install(prefix)
                 descriptor = json.loads((prefix / 'current.json').read_text())
                 release = prefix / 'releases' / descriptor['release']
-                app = Path(json.loads((release / 'installation.json').read_text())['app'])
-                self.assertEqual(app.parent, prefix / 'apps' / ('a' * 16))
+                installed = json.loads((release / 'installation.json').read_text())
+                app = Path(installed['app'])
+                self.assertEqual(app.parent, prefix / 'apps' / selected.inventory_digest)
+                self.assertEqual((installed['package_version'], installed['runtime']),
+                                 ('27.100.1.0', 'runtime-fixture'))
+                self.assertEqual(json.loads((app.parent / 'inventory.json').read_text()), inventory)
                 self.assertEqual((app / 'app/resources/NOTICE.txt').read_text(), 'original notice')
                 self.assertEqual((official / 'app/resources/NOTICE.txt').read_text(), 'original notice')
                 install_windows.install(prefix)
@@ -182,10 +198,6 @@ class WindowsBuildTests(unittest.TestCase):
                 self.assertEqual((prefix / 'windows_launcher.py').read_bytes(), launcher_before)
                 self.assertEqual((prefix / 'lcu.cmd').read_bytes(), command_before)
                 (source / 'scripts/windows_launcher.py').write_text('fixture')
-                original_lock = (source / 'runtime.lock.json').read_text()
-                changed_lock = json.loads(original_lock)
-                changed_lock['platforms']['windows']['architectures']['x64']['sha256'] = 'b' * 64
-                (source / 'runtime.lock.json').write_text(json.dumps(changed_lock))
                 with mock.patch.object(install_windows, '_validated_copy',
                                        side_effect=ValueError('copied bytes changed')):
                     with self.assertRaisesRegex(ValueError, 'copied bytes changed'):
@@ -193,9 +205,8 @@ class WindowsBuildTests(unittest.TestCase):
                 self.assertEqual(list((prefix / 'apps').iterdir()), [app.parent])
                 self.assertEqual(json.loads((prefix / 'current.json').read_text()), descriptor)
                 self.assertEqual((app / 'app/resources/NOTICE.txt').read_text(), 'original notice')
-                (source / 'runtime.lock.json').write_text(original_lock)
                 (app / WINDOWS_REQUIRED_FILES[2]).write_text('tampered')
-                with self.assertRaisesRegex(ValueError, 'does not match pin'):
+                with self.assertRaisesRegex(ValueError, 'differs from selected source inventory'):
                     install_windows.install(prefix)
                 self.assertEqual(json.loads((prefix / 'current.json').read_text()), descriptor)
 

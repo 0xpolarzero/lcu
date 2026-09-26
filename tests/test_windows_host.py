@@ -1,4 +1,4 @@
-"""Pinned Windows host extraction from a disposable ASAR fixture."""
+"""Structurally selected Windows host extraction from disposable ASAR fixtures."""
 
 import hashlib
 import json
@@ -40,39 +40,68 @@ class WindowsHostTests(unittest.TestCase):
         self.app = self.base / 'original'
         self.archive = self.app / 'app/resources/app.asar'
         self.archive.parent.mkdir(parents=True)
-        self.main = b'function Wre() { return 1; }'
-        self.members = {windows_host.MAIN: self.main}
-        self.members.update({name: name.encode() for name in windows_host.ORIGINAL_FILES})
+        self.main_name = '.vite/build/main-current-hash.js'
+        self.host = (b'function Wre(options) { return {closeActiveTurn(){}, '
+                     b'nativePipeDirectory: options.nativePipeDirectory, '
+                     b'probe:n.value+":"+r.ok+":"+typeof T.default.createServer}; }')
+        self.main = (b"const n = require('./src-current-hash.js'); "
+                     b"const r = require('./logger-current-hash.js'); " + self.host)
+        self.members = {
+            self.main_name: self.main,
+            '.vite/build/src-current-hash.js': (
+                b"const dependency=require('./src-next-hash.js'); "
+                b'module.exports={value:dependency.value};'),
+            '.vite/build/src-next-hash.js': (
+                b"const tslib=require('../../node_modules/tslib/tslib.js'); "
+                b"module.exports={value:'original:'+tslib.marker};"),
+            '.vite/build/logger-current-hash.js': b"module.exports={ok:'logger'};",
+            '.vite/build/rolldown-runtime-next-hash.js': b'module.exports={};',
+            'node_modules/tslib/package.json': b'{"main":"tslib.js"}',
+            'node_modules/tslib/tslib.js': b"module.exports={marker:'tslib'};",
+        }
 
-    def _extract(self, expected):
-        with patch.multiple(windows_host, MAIN_SHA256=hashlib.sha256(self.main).hexdigest(),
-                            HOST_START=0, HOST_END=len(self.main),
-                            HOST_SHA256=hashlib.sha256(self.main).hexdigest()):
-            return windows_host.materialize_original_host(
-                self.app, self.base / 'derived', expected_asar_sha256=expected)
+    def _extract(self):
+        _asar(self.archive, self.members)
+        return windows_host.materialize_original_host(self.app, self.base / 'derived')
 
-    def test_extracts_original_bytes_and_entry_from_pinned_asar(self):
-        expected = _asar(self.archive, self.members)
-        entry = self._extract(expected)
-        self.assertIn(self.main, entry.read_bytes())
-        self.assertNotIn(windows_host.MARKER, entry.read_bytes())
-        for name in windows_host.ORIGINAL_FILES:
-            self.assertEqual((entry.parent / name).read_bytes(), self.members[name])
+    def test_extracts_unchanged_host_and_rebased_direct_import(self):
+        entry = self._extract()
+        self.assertIn(self.host, entry.read_bytes())
+        self.assertIn(b"const n = require(\"./.vite/build/src-current-hash.js\");", entry.read_bytes())
+        self.assertNotIn(b'ORIGINAL_WINDOWS_PIPE_HOST', entry.read_bytes())
+        for name, content in self.members.items():
+            if name == self.main_name:
+                continue
+            self.assertEqual((entry.parent / name).read_bytes(), content)
+        node = shutil.which('node')
+        if node:
+            probe = entry.parent / 'probe.cjs'
+            bootstrap = entry.read_text().split('\nasync function start()', 1)[0]
+            probe.write_text(bootstrap +
+                "\nprocess.stdout.write(Wre({nativePipeDirectory:'fixture'}).probe);\n")
+            resolved = subprocess.run([node, str(probe)], check=True, capture_output=True, text=True)
+            self.assertEqual(resolved.stdout, 'original:tslib:logger:function')
         self.assertTrue((entry.parent / 'windows-lifetime-host.cjs').is_file())
         self.assertTrue((entry.parent / 'windows-sky-service.mjs').is_file())
 
-    def test_rejects_changed_asar_before_writing_host(self):
-        expected = _asar(self.archive, self.members)
+    def test_does_not_require_a_repository_archive_hash(self):
+        self._extract()
         self.archive.write_bytes(self.archive.read_bytes() + b'tampered')
-        with self.assertRaisesRegex(ValueError, 'does not match'):
-            self._extract(expected)
-        self.assertFalse((self.base / 'derived').exists())
+        launcher = windows_host.materialize_original_host(self.app, self.base / 'derived-updated')
+        self.assertIn(self.host, launcher.read_bytes())
 
     def test_rejects_missing_source_member_before_writing_host(self):
-        self.members.pop(windows_host.ORIGINAL_FILES[-1])
-        expected = _asar(self.archive, self.members)
-        with self.assertRaisesRegex(ValueError, 'member is missing'):
-            self._extract(expected)
+        self.members.pop('.vite/build/logger-current-hash.js')
+        _asar(self.archive, self.members)
+        with self.assertRaisesRegex(ValueError, 'Required Windows host layout is unavailable'):
+            windows_host.materialize_original_host(self.app, self.base / 'derived')
+        self.assertFalse((self.base / 'derived').exists())
+
+    def test_rejects_ambiguous_host_layout(self):
+        self.members['.vite/build/main-another.js'] = self.main
+        _asar(self.archive, self.members)
+        with self.assertRaisesRegex(ValueError, 'unique Wre host factory'):
+            windows_host.materialize_original_host(self.app, self.base / 'derived')
         self.assertFalse((self.base / 'derived').exists())
 
     def test_host_ready_handshake_and_owned_child_disposal(self):

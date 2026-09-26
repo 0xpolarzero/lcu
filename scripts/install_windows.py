@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install thin LCU beside the current user's pinned official Windows MSIX."""
+"""Install thin LCU beside the current user's official Windows Store app."""
 
 import argparse
 import json
@@ -16,7 +16,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 
 from bundle import VERSION, architecture, verify
-from lcu.windows import resolve_installed_windows_app, validate_windows_app_tree
+from lcu.windows import (inventory_sha256, resolve_installed_windows_app,
+                         validate_windows_app_tree)
 from lcu.windows_host import materialize_original_host
 
 
@@ -52,14 +53,15 @@ def _regular_tree(root):
                 raise ValueError(f'Windows application contains a redirected path: {item}')
 
 
-def _generation(prefix, lock, entry):
-    return prefix / 'apps' / entry['sha256'][:16]
+def _generation(prefix, inventory_digest):
+    return prefix / 'apps' / inventory_digest
 
 
-def _validated_copy(app, lock, entry):
+def _validated_copy(app, selected):
     _regular_tree(app)
-    return validate_windows_app_tree(app, expected_version=lock['version'],
-        expected_runtime=lock['runtime'], expected_hashes=entry['components'])
+    return validate_windows_app_tree(app, expected_version=selected.version,
+        expected_runtime=selected.runtime_version,
+        expected_inventory=selected.inventory)
 
 
 def _atomic_bytes(path, data):
@@ -99,10 +101,14 @@ def install(prefix):
     verify(SOURCE, arch, 'windows')
     prefix = checked_prefix(prefix)
     lock = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['windows']
-    entry = lock['architectures']['x64']
+    if 'x64' not in lock.get('architectures', {}):
+        raise ValueError('This LCU archive does not include the Windows x64 runtime.')
     print('LCU: Verifying the registered official Windows application...', file=sys.stderr, flush=True)
-    selected = resolve_installed_windows_app(expected_version=lock['version'],
-        expected_runtime=lock['runtime'], expected_hashes=entry['components'])
+    selected = resolve_installed_windows_app()
+    inventory = dict(selected.inventory)
+    digest = inventory_sha256(inventory)
+    if digest != selected.inventory_digest:
+        raise ValueError('Selected Windows application inventory changed after validation.')
     # Keep the registered MSIX intact. Its protected WindowsApps directory does
     # not permit direct execution, so run an unchanged private copy instead.
     prefix.mkdir(parents=True, exist_ok=True)
@@ -111,11 +117,20 @@ def install(prefix):
     if _redirected(apps):
         raise ValueError(f'Refusing a redirected Windows app generation directory: {apps}')
     apps.mkdir(exist_ok=True)
-    generation = _generation(prefix, lock, entry)
+    generation = _generation(prefix, digest)
     if _redirected(generation):
         raise ValueError(f'Refusing a redirected Windows app generation: {generation}')
     if generation.exists():
-        _validated_copy(generation / 'app', lock, entry)
+        inventory_path = generation / 'inventory.json'
+        if _redirected(inventory_path) or not inventory_path.is_file():
+            raise ValueError('Managed Windows application inventory is missing or redirected.')
+        try:
+            recorded_inventory = json.loads(inventory_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError('Managed Windows application inventory is missing or invalid.') from exc
+        if recorded_inventory != inventory or inventory_sha256(recorded_inventory) != digest:
+            raise ValueError('Managed Windows application inventory differs from the selected Store app.')
+        _validated_copy(generation / 'app', selected)
     else:
         stage = apps / ('.' + uuid.uuid4().hex[:8])
         try:
@@ -124,7 +139,9 @@ def install(prefix):
             print('LCU: Copying the original application into the private runtime; this can take several minutes...',
                   file=sys.stderr, flush=True)
             shutil.copytree(_copy_path(selected.app), _copy_path(stage / 'app'), symlinks=True)
-            _validated_copy(stage / 'app', lock, entry)
+            _validated_copy(stage / 'app', selected)
+            (stage / 'inventory.json').write_text(json.dumps(
+                inventory, sort_keys=True, separators=(',', ':')) + '\n')
             os.replace(stage, generation)
         except BaseException:
             shutil.rmtree(_copy_path(stage), ignore_errors=True)
@@ -140,12 +157,11 @@ def install(prefix):
     try:
         shutil.copytree(SOURCE, release)
         verify(release, arch, 'windows')
-        materialize_original_host(generation / 'app', release / 'lcu-host',
-            expected_asar_sha256=entry['components']['app/resources/app.asar'])
+        materialize_original_host(generation / 'app', release / 'lcu-host')
         (release / 'installation.json').write_text(json.dumps({
             'platform': 'windows', 'architecture': 'x64', 'app': str(generation / 'app'),
-            'package_version': lock['version'], 'runtime': lock['runtime'],
-            'sha256': entry['sha256'],
+            'package_version': selected.version, 'runtime': selected.runtime_version,
+            'sha256': digest,
         }, indent=2) + '\n')
         from lcu.runtime import paths
         paths(release)
