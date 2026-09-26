@@ -16,6 +16,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 
 from bundle import VERSION, architecture, verify
+from lcu import setup
 from lcu.windows import (inventory_sha256, resolve_installed_windows_app,
                          validate_windows_app_tree)
 from lcu.windows_host import materialize_original_host
@@ -104,7 +105,13 @@ def install(prefix):
     if 'x64' not in lock.get('architectures', {}):
         raise ValueError('This LCU archive does not include the Windows x64 runtime.')
     print('LCU: Verifying the registered official Windows application...', file=sys.stderr, flush=True)
-    selected = resolve_installed_windows_app()
+    try:
+        selected = resolve_installed_windows_app()
+    except ValueError as exc:
+        if str(exc) == 'Install the official ChatGPT MSIX for this Windows account first.':
+            raise ValueError(setup.app_prerequisite_message() +
+                             ' The app must be installed for the currently signed-in account.') from exc
+        raise
     inventory = dict(selected.inventory)
     digest = inventory_sha256(inventory)
     if digest != selected.inventory_digest:

@@ -29,7 +29,7 @@ tests="$scratch/tests"
 dpkg-deb --extract "$package" "$scratch/upstream"
 tar -xzf "$archive" -C "$scratch"
 bundle="$scratch/$(basename -- "$archive" .tar.gz)"
-"$bundle/scripts/install.sh" --user "$(id -un)" --prefix "$scratch/installed" --runtime-only --skip-system --app-package "$package" --offline --yes
+"$bundle/scripts/install.sh" --user "$(id -un)" --prefix "$scratch/installed" --runtime-only --skip-system --existing-app "$scratch/upstream/usr/lib/chatgpt" --offline --yes
 export DIFFERENTIAL_UPSTREAM_RUNTIME="$scratch/upstream/usr/lib/chatgpt/resources/cua_node"
 python3 "$tests/native_pipe.py" "$scratch/installed/current" "$DIFFERENTIAL_UPSTREAM_RUNTIME" "$output/native-pipe.json"
 python3 "$tests/codex_home.py" "$scratch/installed/current" "$DIFFERENTIAL_UPSTREAM_RUNTIME" "$output/codex-home.json"

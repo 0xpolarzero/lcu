@@ -1,6 +1,6 @@
 # Development and validation
 
-LCU releases are thin platform/architecture-specific archives: Linux and macOS tarballs, plus a Windows ZIP. The official app is never part of an archive. Local app selection checks official identity/signature where applicable, supported architecture, runtime manifest, required files, and recognized host layout; it records the observed app and runtime versions instead of requiring repository app-version or component-hash allowlists. macOS uses the signed installed app in place. Linux accepts local packages/apps by package identity, architecture, structure, and managed-tree integrity; the default remote download still uses the URL and checksum in [runtime.lock.json](../runtime.lock.json). Windows selects the registered official Store app and records a source-derived inventory for its private copy. The lock file retains historical source metadata and the default Linux acquisition checksum, not a cross-platform compatibility gate.
+LCU releases are thin platform/architecture-specific archives: Linux and macOS tarballs, plus a Windows ZIP. The official app is never part of an archive and must already be installed before setup. Local app selection checks official identity/signature where applicable, supported architecture, runtime manifest, required files, and recognized host layout; it records the observed app and runtime versions instead of requiring repository app-version or component-hash allowlists. macOS uses the signed installed app in place. Linux selects an installed app by package identity, architecture, structure, and managed-tree integrity. The URL and checksums in [runtime.lock.json](../runtime.lock.json) are retained for separate development/test package inputs and do not authorize installer downloads. Windows selects the registered official Store app and records a source-derived inventory for its private copy.
 
 ## Build
 
@@ -10,7 +10,7 @@ Use Python 3.12+ on matching Linux ARM64 or x86-64:
 python3 scripts/build_bundle.py --output dist
 ~~~
 
-The builder creates a tarball and SHA-256 sidecar. It provisions the fixed third-party agent registration tools and links their Node executable to the application that setup selects later. It does not download or extract the OpenAI app. Build-time --package is retired; pass --app-package to scripts/install.sh on the target machine.
+The builder creates a tarball and SHA-256 sidecar. It provisions the fixed third-party agent registration tools and links their Node executable to the application that setup selects later. It does not download or extract the OpenAI app. Build-time `--package` is retired. Install the official app separately, then pass its installed Linux directory with `--existing-app PATH` only when it is outside `/usr/lib/chatgpt`.
 
 The Windows x64 ZIP is built with `python3 scripts/build_bundle.py --platform windows --output dist`. It contains no OpenAI payload. Direct execution from the protected WindowsApps tree returned Access denied, and the original sandboxed Node REPL could not spawn the native helper directly. The installer stages an intact copy of the registered Store-signed application, records and checks its source-derived inventory, and extracts the required original `Wre` pipe host outside that sandbox. It does not use the inspected package version or component hashes as compatibility gates. Installed candidates in a disposable Windows 11 guest initialized the original MCP, listed a live Notepad window, and saved exact Unicode text to an existing file with an independent byte oracle. A matching Stop and Interrupt each removed the native helper; a stale Stop left a newer turn's helper running, and MCP shutdown removed the final helper. These observations establish installed native action and lifetime behavior, not a Windows Chrome or model-driven task. The [live Windows record](verification/windows-source.md) gives the guest boundaries.
 
@@ -30,10 +30,12 @@ Before publishing, inspect the tar member list and unpacked tree. They must cont
 
 ## Install and exercise an isolated fixture
 
-Prepare a disposable Ubuntu 24.04-compatible Linux desktop and account, and use a verified local official .deb:
+Prepare a disposable Ubuntu 24.04-compatible Linux desktop and account. A test may use a verified local official .deb as input, but extract it into the disposable fixture before invoking LCU:
 
 ~~~sh
-./scripts/install.sh --prefix /absolute/test-prefix --user testuser --skip-system --app-package /absolute/chatgpt.deb --offline --runtime-only --yes
+mkdir -p /absolute/test-app-root
+dpkg-deb --extract /absolute/chatgpt.deb /absolute/test-app-root
+./scripts/install.sh --prefix /absolute/test-prefix --user testuser --skip-system --existing-app /absolute/test-app-root/usr/lib/chatgpt --offline --runtime-only --yes
 /absolute/test-prefix/current/bin/lcu doctor
 ~~~
 

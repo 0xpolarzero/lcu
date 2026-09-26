@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a thin LCU archive; the official app is provisioned during setup."""
+"""Build a thin LCU archive; setup requires an app already installed locally."""
 import argparse
 import hashlib
 import json
@@ -21,7 +21,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 
 def build(output, package=None, *, target='linux', app=None):
     if package is not None:
-        raise ValueError('The official app is acquired during installation. Pass --app-package to scripts/install.sh instead.')
+        raise ValueError('Build-time --package is retired. Install the official app separately before LCU setup.')
     # The Windows archive contains only platform-neutral LCU source and locked
     # JavaScript dependencies. Build it on a trusted development host; the
     # Windows installer validates the registered official MSIX in place.
@@ -128,7 +128,7 @@ def build(output, package=None, *, target='linux', app=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=SOURCE / 'dist')
-    parser.add_argument('--package', type=Path, help='Deprecated; use scripts/install.sh --app-package PATH')
+    parser.add_argument('--package', type=Path, help='Retired; install the official app separately before LCU setup')
     parser.add_argument('--platform', choices=('linux', 'darwin', 'windows'), default='linux')
     parser.add_argument('--app', type=Path, help='Pinned locally installed ChatGPT.app for a macOS build')
     args = parser.parse_args()

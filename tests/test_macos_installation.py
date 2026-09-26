@@ -58,6 +58,16 @@ class MacInstallationTests(unittest.TestCase):
                 install_macos.install(self.prefix, self.app)
         self.assertFalse(self.prefix.exists())
 
+    def test_missing_application_has_official_download_link_before_prefix_writes(self):
+        missing = self.base / 'missing.app'
+        with patch('install_macos.SOURCE', self.source), \
+             patch('install_macos.architecture', return_value='arm64'), \
+             patch('install_macos.resolve_installed_mac_app',
+                   side_effect=AssertionError('app validation reached')):
+            with self.assertRaisesRegex(ValueError, 'chatgpt.com/download/'):
+                install_macos.install(self.prefix, missing)
+        self.assertFalse(self.prefix.exists())
+
     def test_failed_validation_preserves_previous_selection(self):
         with patch('install.validate_release'):
             previous = self._install()

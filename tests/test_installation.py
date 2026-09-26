@@ -128,16 +128,39 @@ class InstallationTests(unittest.TestCase):
             _download({'source': source.as_uri()}, {'deb_arch': 'arm64', 'sha256': '0' * 64},
                       self.root / 'download')
 
-    def test_offline_app_install_requires_a_verified_local_source(self):
+    def test_missing_installed_app_fails_before_prefix_writes_or_download(self):
         prefix = self.root / 'lcu'
-        prefix.mkdir()
         lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
                 'source': 'https://invalid/{deb_arch}.deb',
                 'architectures': {'arm64': {'deb_arch': 'arm64', 'sha256': 'a' * 64}}}
         (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        with self.assertRaisesRegex(ValueError, '--offline requires'):
-            provision_app(prefix, 'arm64', offline=True, root=self.root)
-        self.assertEqual(list((prefix / 'apps').iterdir()), [])
+        missing = self.root / 'missing-chatgpt'
+        for operation in (preflight_app, provision_app):
+            with patch('installed_app.DEFAULT_APP_PATH', missing), \
+                 patch('installed_app._download', side_effect=AssertionError('network reached')):
+                with self.assertRaisesRegex(ValueError, 'chatgpt.com/download/'):
+                    operation(prefix, 'arm64', offline=True, root=self.root)
+            self.assertFalse(prefix.exists())
+
+    def test_missing_installed_app_fails_before_apt_or_prefix_writes(self):
+        prefix = self.root / 'lcu'
+        missing = self.root / 'missing-chatgpt'
+        with patch('installed_app.DEFAULT_APP_PATH', missing), \
+             patch('install.setup.validate', return_value=(None, [])), \
+             patch('install.architecture', return_value='arm64'), \
+             patch('install.verify'), \
+             patch('install.subprocess.run', side_effect=AssertionError('apt/network reached')):
+            with self.assertRaisesRegex(ValueError, 'chatgpt.com/download/'):
+                install_main(['--prefix', str(prefix), '--runtime-only', '--session', 'discover'])
+        self.assertFalse(prefix.exists())
+
+    def test_app_package_option_fails_with_existing_app_migration_before_writes(self):
+        prefix = self.root / 'lcu'
+        with patch('install.subprocess.run', side_effect=AssertionError('apt/network reached')):
+            with self.assertRaisesRegex(ValueError, r'--app-package cannot install.*--existing-app PATH'):
+                install_main(['--prefix', str(prefix), '--runtime-only', '--app-package',
+                              str(self.root / 'chatgpt.deb')])
+        self.assertFalse(prefix.exists())
 
     def test_validated_package_cache_is_reused_offline_and_corruption_fails_closed(self):
         prefix = self.root / 'lcu'
@@ -323,7 +346,7 @@ class InstallationTests(unittest.TestCase):
              patch('install.provision_app', return_value=provided), \
              patch('install.validate_release', side_effect=ValueError('runtime validation failed')):
             with self.assertRaisesRegex(ValueError, 'runtime validation failed'):
-                install(prefix)
+                install(prefix, existing_app=application)
         self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
         self.assertEqual(list((prefix / 'releases').iterdir()), [old])
         self.assertFalse(list(prefix.glob('.build-*')))
@@ -363,7 +386,7 @@ class InstallationTests(unittest.TestCase):
         def run_install():
             try:
                 start.wait(timeout=5)
-                install(prefix)
+                install(prefix, existing_app=application)
             except BaseException as exc:
                 errors.append(exc)
 
@@ -384,6 +407,8 @@ class InstallationTests(unittest.TestCase):
 
     def test_dependency_acquisition_failure_preserves_active_release(self):
         prefix = self.root / 'lcu'
+        existing_app = self.root / 'chatgpt'
+        existing_app.mkdir()
         old = prefix / 'releases/old'
         old.mkdir(parents=True)
         (old / 'data').write_text('previous version')
@@ -391,7 +416,8 @@ class InstallationTests(unittest.TestCase):
         (prefix / 'current').symlink_to('releases/old')
         failure = subprocess.CalledProcessError(100, ['apt-get', 'install'])
 
-        with patch('install.setup.validate', return_value=(None, [])), \
+        with patch('install.DEFAULT_APP_PATH', existing_app), \
+             patch('install.setup.validate', return_value=(None, [])), \
              patch('install.checked_prefix', return_value=prefix), \
              patch('install.architecture', return_value='arm64'), \
              patch('install.verify'), patch('install.preflight_app'), \
@@ -430,7 +456,7 @@ class InstallationTests(unittest.TestCase):
              patch('install.provision_app', return_value=provided), \
              patch('install.validate_release'):
             with self.assertRaisesRegex(ValueError, 'Unexpected .next path'):
-                install(prefix)
+                install(prefix, existing_app=application)
 
         self.assertEqual((prefix / 'current/data').read_text(), 'previous version')
         self.assertTrue((prefix / '.next').is_symlink())

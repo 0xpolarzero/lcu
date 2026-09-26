@@ -17,16 +17,18 @@ with open(sys.argv[1], 'rb') as stream:
 PY
 tar -xzf "$name" -C /opt
 bundle="/opt/${name%.tar.gz}"
+dpkg-deb --extract "$package" /tmp/lcu-offline-app
+app=/tmp/lcu-offline-app/usr/lib/chatgpt
 useradd --create-home lcutester
 "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
-  --runtime-only --skip-system --app-package "$package" --offline --yes
-# A bad package must not change the already selected release.
+  --runtime-only --skip-system --existing-app "$app" --offline --yes
+# A package input is rejected and cannot change the already selected release.
 selected=$(readlink -f /opt/lcu/current)
 printf 'corrupt package' >/tmp/corrupt-chatgpt.deb
 if "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
   --runtime-only --skip-system --app-package /tmp/corrupt-chatgpt.deb --offline --yes \
   >/tmp/lcu-install-failure.log 2>&1; then
-  echo 'Installer accepted a package with the wrong checksum' >&2
+  echo 'Installer accepted an application package instead of requiring an installed app' >&2
   exit 1
 fi
 test "$(readlink -f /opt/lcu/current)" = "$selected"
@@ -42,7 +44,7 @@ exit 100
 SH
 chmod +x /tmp/lcu-failing-apt/apt-get
 if PATH="/tmp/lcu-failing-apt:$PATH" "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
-  --runtime-only --app-package "$package" --yes \
+  --runtime-only --existing-app "$app" --yes \
   >/tmp/lcu-apt-failure.log 2>&1; then
   echo 'Installer selected a release after system-library acquisition failed' >&2
   exit 1
@@ -52,13 +54,13 @@ test "$(readlink -f /opt/lcu/current)" = "$selected"
 test -f "$selected/bin/lcu"
 
 # Exercise separate Python/installer processes racing on the same prefix. Both
-# reuse the managed application generation and verified package cache above.
+# reuse the managed copy of the already selected app above.
 "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
-  --runtime-only --skip-system --app-package "$package" --offline --yes \
+  --runtime-only --skip-system --existing-app "$app" --offline --yes \
   >/tmp/lcu-install-a.log 2>&1 &
 first=$!
 "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
-  --runtime-only --skip-system --app-package "$package" --offline --yes \
+  --runtime-only --skip-system --existing-app "$app" --offline --yes \
   >/tmp/lcu-install-b.log 2>&1 &
 second=$!
 status=0
@@ -95,9 +97,7 @@ generation = application.parents[3]
 installed = json.loads((generation / 'installed.json').read_text())
 for field in ('package_version', 'runtime', 'architecture', 'sha256'):
     assert descriptor[field] == installed[field], f'installation descriptor differs from managed marker: {field}'
-with Path(sys.argv[2]).open('rb') as package_file:
-    package_sha256 = hashlib.file_digest(package_file, 'sha256').hexdigest()
-assert installed['package_sha256'] == package_sha256
+assert installed['source'] == 'existing-app' and installed['package_sha256'] is None
 assert generation.name == f"{descriptor['package_version']}-{descriptor['architecture']}-{descriptor['sha256'][:16]}"
 actual = {}
 for path in sorted(release.rglob('*')):
@@ -123,7 +123,7 @@ PY
 test ! -e /opt/lcu/.next
 test -z "$(find /opt/lcu/releases -maxdepth 1 -name '.build-*' -print -quit)"
 test -z "$(find /opt/lcu/apps -maxdepth 1 -name '.app-stage-*' -print -quit)"
-test -z "$(find /opt/lcu/cache -maxdepth 1 \( -name '.*.stage' -o -name '.*.download' \) -print -quit)"
+test ! -e /opt/lcu/cache
 python3 -m unittest discover -s /src/tests -p 'test_*.py' -q
 python3 /src/tests/registration.py
 runuser -u lcutester -- dbus-run-session -- bash /src/tests/desktop.sh

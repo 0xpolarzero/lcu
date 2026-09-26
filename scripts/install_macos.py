@@ -22,6 +22,8 @@ def install(prefix, application, *, account=None):
     policy = json.loads((SOURCE / 'runtime.lock.json').read_text())['platforms']['darwin']
     if arch not in policy.get('architectures', {}):
         raise ValueError(f'This LCU release does not support macOS {arch}')
+    if not Path(application).expanduser().is_dir():
+        raise ValueError(setup.app_prerequisite_message(application, alternate_location=True))
     selected = resolve_installed_mac_app(application, arch=arch)
     # Validate before creating the prefix or changing the selected release.
     prefix.mkdir(parents=True, exist_ok=True)

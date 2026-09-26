@@ -15,7 +15,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 from lcu import setup
 from bundle import VERSION, architecture, verify
-from installed_app import preflight as preflight_app, provision as provision_app
+from installed_app import (DEFAULT_APP_PATH, preflight as preflight_app,
+                           provision as provision_app)
 
 
 # Ubuntu 24.04 names for the pinned official application's Depends, plus LCU's
@@ -78,10 +79,16 @@ def validate_release(release, account=None):
 
 def install(prefix, *, app_package=None, existing_app=None, offline=False, account=None):
     prefix = checked_prefix(prefix)
+    if app_package is not None:
+        raise ValueError('--app-package cannot install an app for you. ' +
+                         setup.app_prerequisite_message(alternate_location=True))
+    existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
+    if not existing_app.is_dir():
+        raise ValueError(setup.app_prerequisite_message(existing_app, alternate_location=True))
     arch = architecture()
     verify(SOURCE, arch)
     prefix.mkdir(parents=True, exist_ok=True)
-    application, generation = provision_app(prefix, arch, package=app_package,
+    application, generation = provision_app(prefix, arch, package=None,
                                            existing_app=existing_app, offline=offline, root=SOURCE,
                                            account=account)
     installed = json.loads((generation / 'installed.json').read_text())
@@ -131,13 +138,18 @@ def main(argv=None):
     parser.description = __doc__ + ' Requires Linux, Python 3.12+, X11 and D-Bus; apt system provisioning requires root.'
     parser.add_argument('--runtime-only', action='store_true', help='Install without registering an agent')
     parser.add_argument('--skip-system', action='store_true', help='Skip apt; system libraries must already exist')
-    parser.add_argument('--app-package', type=Path, help='Local ChatGPT .deb for this architecture')
-    parser.add_argument('--existing-app', type=Path, help='Use an existing compatible complete ChatGPT application directory')
+    parser.add_argument('--app-package', type=Path,
+                        help='Removed: install the app yourself; this option now fails')
+    parser.add_argument('--existing-app', type=Path,
+                        help='Use an already installed app outside the default /usr/lib/chatgpt location')
     parser.add_argument('--offline', action='store_true', help='Never use the network; requires --skip-system and preinstalled system libraries')
     args = parser.parse_args(argv)
     if args.list_agents:
         setup.main(['--list-agents'])
         return
+    if args.app_package is not None:
+        raise ValueError('--app-package cannot install an app for you. ' +
+                         setup.app_prerequisite_message(alternate_location=True))
     if args.offline and not args.skip_system:
         raise ValueError('--offline requires --skip-system; provision system libraries before an offline install')
     if sys.version_info < (3, 12):
@@ -145,6 +157,9 @@ def main(argv=None):
     arch = architecture()
     if legacy and not args.agent and not args.export:
         args.runtime_only = True
+    existing_app = Path(args.existing_app).expanduser() if args.existing_app is not None else DEFAULT_APP_PATH
+    if not existing_app.is_dir():
+        raise ValueError(setup.app_prerequisite_message(existing_app, alternate_location=True))
     account, names = setup.validate(args)
     prefix = checked_prefix(args.prefix)
     if args.runtime_only:
@@ -156,14 +171,14 @@ def main(argv=None):
         setup.installer_environment(Path(account.pw_dir), names, {} if os.getuid() == 0 and account.pw_uid else os.environ)
     # Refuse absent, corrupt, or wrong-architecture payloads before apt or any writes.
     verify(SOURCE, arch)
-    preflight_app(prefix, arch, package=args.app_package, existing_app=args.existing_app,
+    preflight_app(prefix, arch, package=None, existing_app=args.existing_app,
                   offline=args.offline, root=SOURCE, account=account)
     if not args.skip_system:
         if os.getuid() != 0 or not shutil.which('apt-get'):
             raise ValueError('Automatic system provisioning requires root and apt-get; otherwise provision dependencies and use --skip-system')
         subprocess.run(['apt-get', 'update'], check=True)
         subprocess.run(['apt-get', 'install', '-y', *SYSTEM_PACKAGES], check=True)
-    install(prefix, app_package=args.app_package, existing_app=args.existing_app,
+    install(prefix, app_package=None, existing_app=args.existing_app,
             offline=args.offline, account=account)
     print(f'LCU installed: {prefix}/current/bin/lcu')
     if not args.runtime_only:

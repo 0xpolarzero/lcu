@@ -27,6 +27,20 @@ from types import SimpleNamespace
 from .setup_clients import CLIENTS, ALIASES
 
 
+APP_DOWNLOAD_URL = 'https://chatgpt.com/download/'
+
+
+def app_prerequisite_message(location=None, *, alternate_location=False):
+    message = ('LCU requires the official ChatGPT desktop app, which includes Codex, to be installed first. '
+               'LCU does not download or install the app.')
+    if location is not None:
+        message += f' No app was found at {location}.'
+    message += f' Install it from {APP_DOWNLOAD_URL} and rerun LCU.'
+    if alternate_location:
+        message += ' If it is installed elsewhere, pass --existing-app PATH.'
+    return message
+
+
 CHROME_SKILL_ADDENDUM = """
 
 ## Chrome browser control

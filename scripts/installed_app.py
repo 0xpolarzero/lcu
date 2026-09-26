@@ -13,6 +13,10 @@ from urllib.request import Request, urlopen
 
 from lcu.app_layout import locate_codex_tools
 from lcu.asar import read_asar_members
+from lcu.setup import app_prerequisite_message
+
+
+DEFAULT_APP_PATH = Path('/usr/lib/chatgpt')
 
 
 def _sha256(path):
@@ -69,6 +73,10 @@ def _select(prefix, arch, lock, entry, *, package=None, existing_app=None,
             offline=False, account=None, execute=False):
     if package is not None and existing_app is not None:
         raise ValueError('Choose only one of --app-package and --existing-app')
+    if package is None:
+        existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
+        if not existing_app.is_dir():
+            raise ValueError(app_prerequisite_message(existing_app, alternate_location=True))
     if existing_app is not None:
         source_app = Path(existing_app).resolve(strict=True)
         manifest = _validate_app(source_app, arch, account=account, execute=execute)
@@ -411,6 +419,10 @@ def preflight(prefix, arch, *, package=None, existing_app=None, offline=False, r
     lock = _lock(root)
     entry = lock.get('architectures', {}).get(arch)
     prefix = Path(prefix)
+    if package is None:
+        existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
+        if not existing_app.is_dir():
+            raise ValueError(app_prerequisite_message(existing_app, alternate_location=True))
     prefix.mkdir(parents=True, exist_ok=True)
     _mark_prefix(prefix)
     with (prefix / '.lcu-install').open('a') as lock_file:
@@ -433,6 +445,10 @@ def provision(prefix, arch, *, package=None, existing_app=None, offline=False, r
     root = Path(root) if root else Path(__file__).resolve().parents[1]
     lock = _lock(root)
     entry = lock.get('architectures', {}).get(arch)
+    if package is None:
+        existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
+        if not existing_app.is_dir():
+            raise ValueError(app_prerequisite_message(existing_app, alternate_location=True))
     _mark_prefix(prefix)
     apps = prefix / 'apps'
     if apps.is_symlink():

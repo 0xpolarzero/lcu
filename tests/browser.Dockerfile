@@ -15,9 +15,10 @@ ENV HOME=/home/browser-test \
 RUN mkdir /home/browser-test/thin-release \
     && mkdir -p /home/browser-test/.cache/ms-playwright \
     && tar -xzf /home/browser-test/release.tar.gz --strip-components=1 -C /home/browser-test/thin-release \
+    && dpkg-deb --extract /home/browser-test/chatgpt.deb /home/browser-test/chatgpt-root \
     && python3 /home/browser-test/thin-release/scripts/install.py \
          --prefix "$LCU_BROWSER_PREFIX" --runtime-only --skip-system \
-         --app-package /home/browser-test/chatgpt.deb --offline \
+         --existing-app /home/browser-test/chatgpt-root/usr/lib/chatgpt --offline \
     && if [ "$BROWSER_KIND" = chromium ]; then \
          "$LCU_BROWSER_RELEASE/app/resources/cua_node/bin/node" \
            "$LCU_BROWSER_RELEASE/app/resources/cua_node/lib/node_modules/playwright/cli.js" install chromium; \
