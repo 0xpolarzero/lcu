@@ -44,8 +44,11 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
         assert config['model'] == 'fixture-model'
         assert config['mcp_servers']['unrelated']['command'] == 'fixture-command'
         registered = config['mcp_servers']['lcu']
-        assert registered['command'] == str(runtime)
-        assert registered.get('args', []) == (['--chrome'] if chrome else [])
+        expected_command = [str(tools_root / 'node/bin/node'),
+                            str(release / 'adapters/codex.mjs'), str(runtime),
+                            *(['--chrome'] if chrome else [])]
+        assert registered['command'] == expected_command[0]
+        assert registered.get('args', []) == expected_command[1:]
         for key, value in host_policy(release).items():
             assert registered[key] == value, key
 
