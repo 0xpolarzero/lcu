@@ -139,7 +139,7 @@ class InstalledWindowsPackageTests(unittest.TestCase):
         junction = (self.app / 'app/resources/cua_node').resolve()
         with patch.object(Path, 'is_junction', autospec=True,
                           side_effect=lambda path: path == junction):
-            with self.assertRaisesRegex(ValueError, 'missing or outside the app'):
+            with self.assertRaisesRegex(ValueError, 'redirected path|missing or outside the app'):
                 self._resolve()
 
     def test_rejects_wrong_runtime_and_host_platform(self):

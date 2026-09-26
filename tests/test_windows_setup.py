@@ -71,6 +71,8 @@ class WindowsSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             resources = base / 'app/resources'
+            codex_bin = resources / 'codex-cli/bin'
+            codex_bin.mkdir(parents=True)
             release = base / 'release'
             (release / 'adapters').mkdir(parents=True)
             (release / 'adapters/codex.mjs').write_text('fixture relay')
@@ -78,6 +80,11 @@ class WindowsSetupTests(unittest.TestCase):
             config = base / 'account/config.toml'
             config.parent.mkdir()
             for system, expected in (('win32', 'codex.exe'), ('linux', 'codex'), ('darwin', 'codex')):
+                original_cli = codex_bin / expected
+                original_host = codex_bin / ('codex-code-mode-host.exe' if system == 'win32'
+                                              else 'codex-code-mode-host')
+                original_cli.write_text('original Codex CLI')
+                original_host.write_text('original code-mode host')
                 def registered(argv, **_options):
                     output = ('[{"name":"lcu","status":"installed"}]' if ' add ' in f' {" ".join(map(str, argv))} '
                               else json.dumps({'path': str(config)}))
@@ -94,7 +101,7 @@ class WindowsSetupTests(unittest.TestCase):
                      mock.patch('lcu.codex_hooks.install_hooks') as hooks:
                     self.assertEqual(setup.configure(['codex'], config.parent, base / 'skill',
                         ['lcu'], base / 'tools', release), [])
-                    self.assertEqual(hooks.call_args.args[0], resources / expected)
+                    self.assertEqual(hooks.call_args.args[0], codex_bin / expected)
 
     def test_linux_discover_setup_keeps_version_probe_on_direct_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
