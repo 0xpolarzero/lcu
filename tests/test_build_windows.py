@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import build_bundle
 import install_windows
 import windows_launcher
-from bundle import architecture
+from bundle import VERSION, architecture
 from lcu.windows import (WINDOWS_REQUIRED_FILES, application_inventory,
                          inventory_sha256)
 
@@ -34,10 +34,10 @@ class WindowsBuildTests(unittest.TestCase):
                 (release / 'agent-tools/node_modules/skills/package.json').write_text('{}')
             with mock.patch.object(build_bundle, 'provision_agents', side_effect=fake_provision):
                 archive = build_bundle.build(output, target='windows')
-            self.assertEqual(archive.name, 'lcu-0.3.0-windows-x64.zip')
+            self.assertEqual(archive.name, f'lcu-{VERSION}-windows-x64.zip')
             with ZipFile(archive) as bundle:
                 names = set(bundle.namelist())
-                prefix = 'lcu-0.3.0-windows-x64/'
+                prefix = f'lcu-{VERSION}-windows-x64/'
                 for name in ('bin/lcu.cmd', 'lcu/windows.py', 'scripts/install_windows.py',
                              'scripts/windows_launcher.py', 'bundle.json',
                              'docs/verification/codex-interactive-2026-09-24.md'):

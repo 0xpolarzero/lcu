@@ -12,6 +12,7 @@ from unittest import mock
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 import build_bundle
+from bundle import VERSION
 from provision_agent_tools import provision
 
 
@@ -42,10 +43,10 @@ class BuildPlatformTests(unittest.TestCase):
                     mock.patch.object(build_bundle, 'provision_agents', side_effect=fake_provision):
                 archive = build_bundle.build(root / 'dist', target='darwin', app=app)
             resolve.assert_called_once_with(app, arch='arm64')
-            self.assertEqual(archive.name, 'lcu-0.3.0-darwin-arm64.tar.gz')
+            self.assertEqual(archive.name, f'lcu-{VERSION}-darwin-arm64.tar.gz')
             with tarfile.open(archive) as bundle:
                 names = {member.name for member in bundle}
-                prefix = 'lcu-0.3.0-darwin-arm64/'
+                prefix = f'lcu-{VERSION}-darwin-arm64/'
                 self.assertIn(prefix + 'scripts/install_macos.py', names)
                 self.assertIn(prefix + 'lcu/platforms.py', names)
                 self.assertIn(prefix + 'lcu/doctor.py', names)
@@ -73,10 +74,10 @@ class BuildPlatformTests(unittest.TestCase):
             with mock.patch.object(build_bundle, 'architecture', return_value='x64'), \
                     mock.patch.object(build_bundle, 'provision_agents') as agent_tools:
                 archive = build_bundle.build(root / 'dist')
-            self.assertEqual(archive.name, 'lcu-0.3.0-linux-x64.tar.gz')
+            self.assertEqual(archive.name, f'lcu-{VERSION}-linux-x64.tar.gz')
             self.assertEqual(agent_tools.call_args.kwargs['target'], 'linux')
             with tarfile.open(archive) as bundle:
-                manifest = json.load(bundle.extractfile('lcu-0.3.0-linux-x64/bundle.json'))
+                manifest = json.load(bundle.extractfile(f'lcu-{VERSION}-linux-x64/bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('linux', 'x64'))
 
     def test_macos_provision_reuses_selected_node_and_packages_only_adapter_runtime(self):
