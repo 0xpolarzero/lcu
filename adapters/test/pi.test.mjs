@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import piExtension from '../pi/index.ts';
 
 const fixture = new URL('./mcp-fixture.mjs', import.meta.url).pathname;
@@ -16,6 +16,7 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
   process.env.LCU_FIXTURE_LOG = log;
   const handlers = new Map();
   const tools = new Map();
+  let audioDirectory;
   const pi = {
     on(event, handler) { handlers.set(event, handler); },
     registerTool(tool) { tools.set(tool.name, tool); },
@@ -37,8 +38,14 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
     assert.equal(handlers.has('turn_end'), false);
     const second = await tools.get('js').execute('2', { code: 'second' }, undefined, undefined, ctx);
     assert.equal(second.content[0].text, 'second');
-    await assert.rejects(tools.get('js').execute('3', { code: 'audio' }, undefined, undefined, ctx),
-      /cannot represent original CUA audio content/);
+    const audio = await tools.get('js').execute('3', { code: 'audio' }, undefined, undefined, ctx);
+    assert.equal('isError' in audio, false);
+    assert.match(audio.content[0].text, /original MIME type: audio\/wav/);
+    const audioPath = /saved to (.+)$/.exec(audio.content[0].text)?.[1];
+    assert.ok(audioPath);
+    assert.equal(isAbsolute(audioPath), true);
+    assert.deepEqual(readFileSync(audioPath), Buffer.from('AAAA', 'base64'));
+    audioDirectory = dirname(audioPath);
     let entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(entries.some(entry => entry.name === 'turn_ended'), false);
     assert.equal(entries[0].meta['x-codex-turn-metadata'].session_id, 'pi-real-session');
@@ -56,6 +63,7 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
     await handlers.get('session_shutdown')();
   } finally {
     await handlers.get('session_shutdown')?.();
+    if (audioDirectory) rmSync(audioDirectory, { recursive: true, force: true });
     if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
     else process.env.LCU_MCP_COMMAND = oldCommand;
     if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;

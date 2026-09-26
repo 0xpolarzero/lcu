@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI, ExtensionContext } from '@mariozechner/pi-coding-agent';
 import type { TSchema } from '@sinclair/typebox';
 import { createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse } from '../client.mjs';
+import { persistAudioContent } from '../audio-files.mjs';
 
 type OriginalContent = { type: string; text?: string; data?: string; mimeType?: string };
 
@@ -61,7 +62,7 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
           const result = await current.call(name, args, {
             ...active, model: ctx.model?.id, signal,
           });
-          return piContent(result);
+          return piContent(await persistAudioContent(result));
         },
       });
     }
