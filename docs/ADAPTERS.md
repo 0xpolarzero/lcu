@@ -27,7 +27,7 @@ Before the first CUA call, the host must load the generated full local LCU skill
 
 ## Same-case result forwarding
 
-The current comparison sends the same original MCP fixtures through Pi 0.73.0, the two app-bundled Codex CLI pins, and Claude Code 2.1.204. It measures both host handling and what reaches the model provider. A locally saved audio file is not evidence that audio reached the provider.
+The 2026-09-26 comparison below records Pi 0.73.0, two app-bundled Codex CLI pins, and Claude Code 2.1.204. It measures both host handling and what reaches the model provider. A locally saved audio file is not evidence that audio reached the provider. The latest public standalone Codex CLI has a separate current run in [Codex standalone CLI verification](verification/codex-standalone-cli-2026-09-27.md); this historical table remains tied to the versions it tested.
 
 | Original result | Pi 0.73.0 | Codex CLI (Mac `0.155.0-alpha.16.3`; Linux `0.155.0-alpha.9.2`) | Claude Code 2.1.204 |
 | --- | --- | --- | --- |
@@ -46,14 +46,17 @@ A model-driven Linux GTK task and an opt-in official Chrome-extension task are r
 
 ## Codex CLI
 
-Codex CLI registration checks the installed executable for the original `mcp_tool` lifecycle-hook support. Setup does not select or replace the Codex executable. It registers the bundled Node runtime, the LCU official-SDK relay, and the selected original LCU command. The relay forwards the original public descriptors and result content; it saves returned audio blocks locally and gives the model an absolute path and original MIME type. Keep `turn_ended` and `js_add_node_module_dir` hidden from model discovery. Codex's trusted Stop, Interrupt, and SubagentStop hooks can still call the hidden original `turn_ended` tool through the relay. Use the tested app-bundled CLI explicitly on `PATH` for both setup and launch; on Linux:
+LCU uses the public standalone Codex CLI found as `codex` on the selected account's `PATH`. Install or update it through the official package, check the command that will run, then register and launch that same command:
 
 ```sh
-PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
-PATH="/opt/lcu/current/app/resources:$PATH" codex
+npm install -g @openai/codex@latest
+command -v codex
+codex --version
+/opt/lcu/current/bin/lcu setup --agent codex --yes
+codex
 ```
 
-The tested bundled versions are `0.155.0-alpha.16.3` on macOS and `0.155.0-alpha.9.2` on Linux. The ordinary `0.145.0` CLI failed the hook parser check; these results do not establish a minimum stable public version. The [interactive run](verification/codex-interactive-2026-09-24.md) records native GTK and Chrome actions, exact site approval, and Stop/Interrupt cleanup. The [native approval probe](verification/codex-native-approval-2026-09-25.md) verifies response serialization, not a Codex CLI grant cache.
+LCU checks the actual `codex` on `PATH` for the native MCP tool hook type. The installed `0.145.0` public CLI failed that check because its parser rejected `mcp_tool`; the latest public `0.157.1` CLI passed the real tool/result and Stop cleanup fixture. If setup reports an unsupported hook type, update the standalone CLI and rerun setup. The official hooks API supports MCP tool handlers on an existing connection and exposes the Stop, Interrupt, and SubagentStop events used by LCU. LCU keeps `turn_ended` and `js_add_node_module_dir` hidden from model discovery while forwarding Stop cleanup through the original MCP server. The app remains the source for the original CUA runtime and plugin metadata; app-provided components used internally do not replace the public CLI running the Codex session. See the [latest CLI evidence](verification/codex-standalone-cli-2026-09-27.md), the [historical interactive run](verification/codex-interactive-2026-09-24.md), and the [native approval probe](verification/codex-native-approval-2026-09-25.md).
 
 ## Claude Code adapter
 

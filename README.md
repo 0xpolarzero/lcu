@@ -1,6 +1,6 @@
 # LCU
 
-LCU connects Pi, Codex CLI, and Claude Code to the official ChatGPT computer-use runtime. Install the current ChatGPT desktop app with Codex before installing LCU; LCU never downloads or installs the app. If it is missing, [download ChatGPT](https://chatgpt.com/download/) and install it first. Native computer use is the default; Chrome is opt-in and uses the original extension and site-approval flow. The original runtime owns the `cua` API, instructions, policy, and platform helpers. LCU handles installation and adapts host transport, identity, approval UI, and lifecycle wiring; it adds no replacement automation or policy layer.
+LCU connects Pi, the standalone Codex CLI, and Claude Code to the original ChatGPT computer-use runtime. Install the current ChatGPT desktop app before installing LCU; LCU never downloads or installs the app. If it is missing, [download ChatGPT](https://chatgpt.com/download/) and install it first. Native computer use is the default; Chrome is opt-in and uses the original extension and site-approval flow. The original app supplies the `cua` API, instructions, policy, and platform helpers. Each selected agent's own public CLI runs as the host; LCU adapts its transport, identity, approval UI, and lifecycle wiring without replacing the original automation or policy layer.
 
 ## Linux quick start
 
@@ -10,11 +10,13 @@ Extract an architecture-matching archive on an Ubuntu 24.04-compatible desktop, 
 sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-Register and launch the app-bundled Codex CLI as that account, with the same CLI on `PATH` for both commands:
+Install or update the public standalone Codex CLI, then register and launch the ordinary `codex` command as that account. LCU checks that the selected CLI supports Codex MCP tool hooks:
 
 ~~~sh
-PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
-PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" codex
+npm install -g @openai/codex@latest
+codex --version
+/opt/lcu/current/bin/lcu setup --agent codex --yes
+codex
 ~~~
 
 Replace `alice` with the existing desktop account. Linux uses the existing app at `/usr/lib/chatgpt` by default; pass `--existing-app /absolute/path` to select another installed app. LCU makes a private managed copy and leaves the installed app in place. For Pi, Claude Code, macOS, and alternate app paths, follow the [installation guide](docs/INSTALLATION.md). Agent selection is explicit: `--agent all` configures Pi, Codex CLI, and Claude Code; `--agent auto` configures detected agents; omitting `--agent` opens an interactive chooser. Noninteractive agent setup requires an explicit selection; use `--runtime-only` to install without registering an agent.

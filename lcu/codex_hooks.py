@@ -80,9 +80,14 @@ def require_cli_hook_support(env):
         except (OSError, subprocess.SubprocessError) as exc:
             raise ValueError(f'Cannot check installed Codex CLI hook support: {exc}') from exc
         if result.returncode:
+            detail = ' '.join((result.stderr or result.stdout).split())
+            if detail:
+                detail = f' Codex reported: {detail[-1000:]}. '
             raise ValueError(f'Installed Codex CLI {executable} ({version or "unknown version"}) '
-                             'cannot load the original MCP lifecycle hooks. '
-                             'Update Codex CLI to a build supporting mcp_tool hooks, then rerun lcu setup.')
+                             'cannot load the original MCP lifecycle hooks.' + detail + ' '
+                             'Update this standalone Codex CLI to the latest public release with MCP tool hook '
+                             'support (official npm package: `npm install -g @openai/codex@latest`), then rerun '
+                             '`lcu setup --agent codex`.')
 
 
 def install_hooks(cli, config_path, cwd, env, host_root):

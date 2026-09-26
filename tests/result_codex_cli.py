@@ -1,4 +1,4 @@
-"""Run the same synthetic MCP result cases through the installed Codex CLI.
+"""Run the same synthetic MCP result cases through a public standalone Codex CLI.
 
 The MCP server uses the official SDK. The model endpoint is a scripted provider
 bound to loopback; no account key, real model, desktop, or browser is involved.
@@ -131,8 +131,24 @@ def assert_delivery(case, records, requests, tool_result, codex_events):
     return summary
 
 
-def original_mcp_policy(cli: Path):
-    resources = cli.parent
+def reported_cli_version(cli: Path):
+    with tempfile.TemporaryDirectory(prefix="lcu-codex-version-") as temporary:
+        env = {key: os.environ[key] for key in
+               ("PATH", "LANG", "LC_ALL", "TMPDIR", "SystemRoot", "SYSTEMROOT", "PATHEXT")
+               if key in os.environ}
+        env.update(HOME=temporary, CODEX_HOME=temporary, TMPDIR=temporary)
+        result = subprocess.run([str(cli), "--version"], cwd=temporary, env=env,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=15)
+        version = result.stdout.strip()
+        if result.returncode or not version:
+            raise AssertionError(f"Codex CLI version probe failed: {result.stderr[-1000:]}")
+        return version
+
+
+def original_mcp_policy(app_resources: Path):
+    """Read fixture policy from original app resources, independent of the CLI under test."""
+    resources = app_resources
     descriptor = resources / "plugins/openai-bundled/plugins/unified-computer-use/.mcp.json"
     config = json.loads(descriptor.read_text(encoding="utf-8"))
     policy = config["mcpServers"]["cua_repl"]
@@ -142,7 +158,7 @@ def original_mcp_policy(cli: Path):
     return policy
 
 
-def run_case(cli: Path, node: str, output: Path, case: str, version: str):
+def run_case(cli: Path, app_resources: Path, node: str, output: Path, case: str, version: str):
     work = output / case
     home, codex_home, project = work / "home", work / "home/.codex", work / "project"
     home.mkdir(parents=True)
@@ -199,7 +215,7 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
-    policy = original_mcp_policy(cli)
+    policy = original_mcp_policy(app_resources)
     config = [
         'approval_policy = "on-request"',
         'sandbox_mode = "read-only"',
@@ -244,7 +260,7 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
     }
-    host_root = cli.parent / "plugins/openai-bundled"
+    host_root = app_resources / "plugins/openai-bundled"
     install_hooks(cli, codex_home / "config.toml", project, env, host_root)
     command = [str(cli), "--strict-config", "-a", "on-request", "-c", 'model_provider="fixture"',
                "-c", 'model="fixture"', "exec", "--ephemeral", "--skip-git-repo-check", "--json",
@@ -288,22 +304,30 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cli", type=Path, required=True, help="exact installed Codex CLI executable")
+    parser.add_argument("--cli", type=Path, required=True, help="exact public Codex CLI executable under test")
+    parser.add_argument("--app-resources", type=Path, required=True,
+                        help="original app Contents/Resources used only for CUA fixture policy and hooks")
     parser.add_argument("--node", default=shutil.which("node"), help="Node.js executable used by the official SDK fixture")
     parser.add_argument("--output", type=Path, default=None, help="private evidence directory")
-    parser.add_argument("--version", required=True, help="exact Codex CLI version reported by this pinned app/package")
+    parser.add_argument("--version", default=None, help="optional expected output from `codex --version`")
     args = parser.parse_args()
     cli = args.cli.expanduser().resolve(strict=True)
+    app_resources = args.app_resources.expanduser().resolve(strict=True)
+    if not app_resources.is_dir():
+        parser.error(f"--app-resources must be a directory: {app_resources}")
     node = str(Path(args.node).expanduser().resolve(strict=True)) if args.node else None
     if not node:
         parser.error("node must be on PATH or supplied with --node")
+    version = reported_cli_version(cli)
+    if args.version and args.version != version:
+        parser.error(f"Codex CLI reports {version!r}, not expected {args.version!r}")
     output = args.output or Path(tempfile.mkdtemp(prefix="lcu-result-codex-"))
     output.mkdir(parents=True, exist_ok=True)
     summary = []
     for case in CASES:
-        result = run_case(cli, node, output, case, args.version)
+        result = run_case(cli, app_resources, node, output, case, version)
         summary.append(result)
-        print(json.dumps({**result["delivery"], "version": args.version,
+        print(json.dumps({**result["delivery"], "version": version,
                           "evidence": str(output / case), "requests": 2}, sort_keys=True), flush=True)
     (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

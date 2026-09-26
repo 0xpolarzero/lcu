@@ -30,8 +30,11 @@ class CodexCliCapabilityTests(unittest.TestCase):
 
         with patch('lcu.codex_hooks.shutil.which', return_value='/fixture/bin/codex'), \
              patch('lcu.codex_hooks.subprocess.run', side_effect=run):
-            with self.assertRaisesRegex(ValueError, r'/fixture/bin/codex \(codex-cli 0\.145\.0\)'):
+            with self.assertRaisesRegex(ValueError, r'/fixture/bin/codex \(codex-cli 0\.145\.0\)') as failure:
                 require_cli_hook_support({'PATH': '/fixture/bin', 'OPENAI_API_KEY': 'never-forward'})
+        self.assertIn('npm install -g @openai/codex@latest', str(failure.exception))
+        self.assertIn('lcu setup --agent codex', str(failure.exception))
+        self.assertIn('unknown variant mcp_tool', str(failure.exception))
         self.assertEqual(len(calls), 2)
 
     def test_windows_systemroot_survives_isolated_probe(self):
