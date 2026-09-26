@@ -84,11 +84,10 @@ def install(prefix, *, app_package=None, existing_app=None, offline=False, accou
     application, generation = provision_app(prefix, arch, package=app_package,
                                            existing_app=existing_app, offline=offline, root=SOURCE,
                                            account=account)
-    lock_data = json.loads((SOURCE / 'runtime.lock.json').read_text())
-    return select_release(prefix, arch, application, {
-        'package_version': lock_data['version'], 'architecture': arch,
-        'sha256': lock_data['architectures'][arch]['sha256'],
-    }, account=account)
+    installed = json.loads((generation / 'installed.json').read_text())
+    descriptor = {key: installed[key] for key in
+                  ('package_version', 'runtime', 'architecture', 'sha256')}
+    return select_release(prefix, arch, application, descriptor, account=account)
 
 
 def select_release(prefix, arch, application, descriptor, *, account=None,
@@ -132,7 +131,7 @@ def main(argv=None):
     parser.description = __doc__ + ' Requires Linux, Python 3.12+, X11 and D-Bus; apt system provisioning requires root.'
     parser.add_argument('--runtime-only', action='store_true', help='Install without registering an agent')
     parser.add_argument('--skip-system', action='store_true', help='Skip apt; system libraries must already exist')
-    parser.add_argument('--app-package', type=Path, help='Local official pinned ChatGPT .deb')
+    parser.add_argument('--app-package', type=Path, help='Local ChatGPT .deb for this architecture')
     parser.add_argument('--existing-app', type=Path, help='Use an existing compatible complete ChatGPT application directory')
     parser.add_argument('--offline', action='store_true', help='Never use the network; requires --skip-system and preinstalled system libraries')
     args = parser.parse_args(argv)

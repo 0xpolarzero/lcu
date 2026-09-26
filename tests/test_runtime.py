@@ -16,8 +16,15 @@ from lcu.browser import install
 class UpstreamRuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        resources = self.root / 'app/resources'
+        base = Path(self.temporary.name)
+        self.root = base / 'releases/release'
+        self.root.mkdir(parents=True)
+        version = '26.924.22138'
+        runtime_version = 'fixture-runtime-new'
+        tree_digest = 'a' * 64
+        generation = base / 'apps' / f'{version}-arm64-{tree_digest[:16]}'
+        actual_app = generation / 'payload/usr/lib/chatgpt'
+        resources = actual_app / 'resources'
         runtime = resources / 'cua_node'
         for relative in (
             'bin/node', 'bin/node_repl',
@@ -37,15 +44,20 @@ class UpstreamRuntimeTests(unittest.TestCase):
             path.write_text('fixture')
             path.chmod(0o755)
         (runtime / 'manifest.json').write_text(json.dumps({
-            'platform': 'linux', 'arch': 'arm64', 'runtime_archive_version': 'fixture-runtime',
+            'platform': 'linux', 'arch': 'arm64', 'runtime_archive_version': runtime_version,
         }))
+        (generation / 'installed.json').write_text(json.dumps({
+            'package_version': version, 'runtime': runtime_version, 'architecture': 'arm64',
+            'sha256': tree_digest, 'application': 'payload/usr/lib/chatgpt',
+        }))
+        (self.root / 'app').symlink_to(os.path.relpath(actual_app, self.root), target_is_directory=True)
         (self.root / 'runtime.lock.json').write_text(json.dumps({
             'runtime': 'fixture-runtime', 'version': '26.915.31945',
             'architectures': {'arm64': {'sha256': 'fixture-digest'}},
         }))
         (self.root / 'installation.json').write_text(json.dumps({
-            'app': 'app', 'architecture': 'arm64', 'package_version': '26.915.31945',
-            'sha256': 'fixture-digest',
+            'app': 'app', 'architecture': 'arm64', 'package_version': version,
+            'runtime': runtime_version, 'sha256': tree_digest,
         }))
 
     def tearDown(self):
@@ -61,7 +73,7 @@ class UpstreamRuntimeTests(unittest.TestCase):
         self.assertEqual(env['NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS'], '1000')
         self.assertEqual(env['BROWSER_USE_TINYSKY_ENABLED'], '1')
         self.assertEqual(env['BROWSER_USE_CODEX_APP_BUILD_FLAVOR'], 'prod')
-        self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], '26.915.31945')
+        self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], '26.924.22138')
         self.assertEqual(env['BROWSER_USE_DISABLE_AMBIENT_NETWORK'], '1')
 
     def test_caller_configuration_and_policies_survive(self):
@@ -142,7 +154,8 @@ class UpstreamRuntimeTests(unittest.TestCase):
         output = io.StringIO()
         with patch('sys.stdout', output), patch('lcu.runtime.os.execve') as execute:
             main(self.root, ['--chrome', '--version'])
-        self.assertIn('ChatGPT linux 26.915.31945', output.getvalue())
+        self.assertIn('ChatGPT linux 26.924.22138', output.getvalue())
+        self.assertIn('CUA fixture-runtime-new', output.getvalue())
         execute.assert_not_called()
 
     def test_explicit_surface_override_takes_precedence_over_chrome_flag(self):
@@ -203,6 +216,15 @@ class UpstreamRuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'descriptor does not match'):
                 main(self.root, [])
         execute.assert_not_called()
+
+    def test_selected_linux_metadata_must_match_managed_marker_and_manifest(self):
+        marker = self.root / 'app'
+        resolved_marker = marker.resolve().parents[3] / 'installed.json'
+        data = json.loads(resolved_marker.read_text())
+        data['runtime'] = 'another-runtime'
+        resolved_marker.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'identity does not match'):
+            environment(self.root)
 
     def test_removed_embedded_browser_flag_has_migration_error(self):
         with self.assertRaisesRegex(ValueError, 'lcu browser install'):

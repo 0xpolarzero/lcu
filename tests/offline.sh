@@ -68,8 +68,8 @@ if [[ $status -ne 0 ]]; then
   cat /tmp/lcu-install-a.log /tmp/lcu-install-b.log >&2
   exit "$status"
 fi
-python3 - /opt/lcu <<'PY'
-import hashlib, json, os, platform, stat
+python3 - /opt/lcu /package.deb <<'PY'
+import hashlib, json, os, platform, stat, subprocess
 from pathlib import Path
 import sys
 sys.path.insert(0, '/src/scripts')
@@ -85,6 +85,20 @@ assert manifest['architecture'] == architecture()
 descriptor = json.loads((release / 'installation.json').read_text())
 application = (release / descriptor['app']).resolve(strict=True)
 assert application.is_dir()
+package_version = subprocess.run(
+    ['dpkg-deb', '-f', sys.argv[2], 'Version'], check=True,
+    capture_output=True, text=True).stdout.strip()
+assert descriptor['package_version'] == package_version, 'selected app version differs from the local DEB'
+runtime_manifest = json.loads((application / 'resources/cua_node/manifest.json').read_text())
+assert descriptor['runtime'] == runtime_manifest['runtime_archive_version'], 'selected runtime metadata differs from the app'
+generation = application.parents[3]
+installed = json.loads((generation / 'installed.json').read_text())
+for field in ('package_version', 'runtime', 'architecture', 'sha256'):
+    assert descriptor[field] == installed[field], f'installation descriptor differs from managed marker: {field}'
+with Path(sys.argv[2]).open('rb') as package_file:
+    package_sha256 = hashlib.file_digest(package_file, 'sha256').hexdigest()
+assert installed['package_sha256'] == package_sha256
+assert generation.name == f"{descriptor['package_version']}-{descriptor['architecture']}-{descriptor['sha256'][:16]}"
 actual = {}
 for path in sorted(release.rglob('*')):
     relative = path.relative_to(release).as_posix()
@@ -104,6 +118,7 @@ for path in sorted(release.rglob('*')):
         raise AssertionError(f'unsupported release entry: {relative}')
 assert actual == manifest['files'], 'selected release does not match its bundle manifest'
 assert (application / 'resources/cua_node/manifest.json').is_file()
+print(f"Selected ChatGPT {descriptor['package_version']}; CUA {descriptor['runtime']}; generation {generation.name}")
 PY
 test ! -e /opt/lcu/.next
 test -z "$(find /opt/lcu/releases -maxdepth 1 -name '.build-*' -print -quit)"
