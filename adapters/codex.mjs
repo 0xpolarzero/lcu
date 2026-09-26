@@ -9,7 +9,6 @@ import {
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { persistAudioContent } from './audio-files.mjs';
-import { pathToFileURL } from 'node:url';
 
 const HOST_ONLY_TOOLS = new Set(['js_add_node_module_dir', 'turn_ended']);
 
@@ -148,7 +147,7 @@ export async function runCodexBridge({ command, args = [], cwd, env } = {}) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   const [command, ...args] = process.argv.slice(2);
   runCodexBridge({ command, args }).catch(error => {
     report('Codex MCP relay failed', error);

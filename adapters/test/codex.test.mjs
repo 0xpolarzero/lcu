@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,7 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   assert.fail(`Condition did not become true within ${timeoutMs} ms`);
 }
 
-async function connectCodexRelay() {
+async function connectCodexRelay(relayPath = relay) {
   const directory = mkdtempSync(join(tmpdir(), 'lcu-codex-relay-test-'));
   const logPath = join(directory, 'fixture.jsonl');
   const env = {
@@ -62,7 +62,7 @@ async function connectCodexRelay() {
   };
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [relay, process.execPath, fixture],
+    args: [relayPath, process.execPath, fixture],
     env,
     stderr: 'pipe',
   });
@@ -124,6 +124,30 @@ async function connectCodexRelay() {
     get stderr() { return stderr; },
   };
 }
+
+test('Codex relay starts through the installed current symlink', { timeout: 10_000 }, async () => {
+  const install = mkdtempSync(join(tmpdir(), 'lcu-codex-current-symlink-test-'));
+  const release = join(install, 'releases', '0.3.0');
+  const adapters = join(release, 'adapters');
+  mkdirSync(adapters, { recursive: true });
+  copyFileSync(relay, join(adapters, 'codex.mjs'));
+  copyFileSync(fileURLToPath(new URL('../audio-files.mjs', import.meta.url)), join(adapters, 'audio-files.mjs'));
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(adapters, 'node_modules'),
+    process.platform === 'win32' ? 'junction' : 'dir');
+  symlinkSync(release, join(install, 'current'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  let bridge;
+  try {
+    bridge = await connectCodexRelay(join(install, 'current', 'adapters', 'codex.mjs'));
+    assert.equal(bridge.client.getServerVersion().name, 'lcu-codex-contract-fixture');
+    assert.deepEqual((await bridge.client.listTools()).tools.map(tool => tool.name), ['js', 'js_reset']);
+    const result = await bridge.client.callTool({ name: 'js', arguments: { code: 'current-symlink' } });
+    assert.equal(result.content[0].text, 'Synthetic result: current-symlink');
+  } finally {
+    await bridge?.close();
+    rmSync(install, { recursive: true, force: true });
+  }
+});
 
 test('Codex relay preserves MCP contracts and changes only returned audio blocks', { timeout: 20_000 }, async () => {
   const bridge = await connectCodexRelay();
