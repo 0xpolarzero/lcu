@@ -22,4 +22,6 @@ The probe never opens either URL automatically. macOS permission readiness remai
 
 ## Validation
 
-The live selected-app metadata probe returned `target: mac`, `list_apps`, and `get_app_state`, while leaving permission state unverified. The focused readiness, Windows runtime, macOS installer/runtime, platform-build, and general runtime suites passed 57/57 tests. A live Linux doctor probe in the disposable ARM64 desktop image is pending.
+The live selected-app metadata probe returned `target: mac`, `list_apps`, and `get_app_state`, while leaving permission state unverified. The focused readiness, Windows runtime, macOS installer/runtime, platform-build, and general runtime suites passed 57/57 tests.
+
+The original Linux doctor check also passed in the existing `lcu-verification:arm64` image, with no image build. The disposable Ubuntu 24.04.5/aarch64 guest used official ChatGPT 26.915.31945 and CUA 0.0.16/20260915001755-492f19756c31, verified against the runtime lock. In a fresh `lcutester` D-Bus session with disposable Xvfb/Openbox and GTK/X11 fixtures, `lcu doctor --non-interactive --require-ready` reported four windows and one screenshot, discarded the returned image data, and exited 0. The container ran with `--network none`, read-only source/package/script mounts, and `--rm`.
