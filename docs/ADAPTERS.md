@@ -1,6 +1,6 @@
 # Harness adapters
 
-LCU keeps the original pinned CUA MCP server authoritative. It preserves original tool descriptors, initialization instructions, execution, elicitation, and policy. It does not implement browser control, screenshots, accessibility, input, or JavaScript execution. The shared Pi client and Claude relay use the official MCP SDK; Codex CLI connects to the selected original server directly.
+LCU keeps the original pinned CUA MCP server authoritative for instructions, execution, elicitation, policy, and lifecycle. It does not implement browser control, screenshots, accessibility, input, or JavaScript execution. The Pi client, Claude relay, and Codex relay use the official MCP SDK. The Codex relay passes original initialization instructions and public `js`/`js_reset` descriptors through, but intentionally omits `js_add_node_module_dir` and `turn_ended` from model-visible `tools/list`. It still forwards host calls to those original tools; the installed Codex Stop hook reaches `turn_ended` with the original session and turn IDs. This is an explicit visibility adaptation, not full `tools/list` parity.
 
 ## Shared client contract
 
@@ -33,7 +33,7 @@ The current comparison sends the same original MCP fixtures through Pi 0.73.0, t
 | --- | --- | --- | --- |
 | Plain text | Exact text preserved | Exact text preserved on both pinned CLIs | Exact text preserved |
 | PNG image | Exact bytes preserved | Exact bytes preserved on both pinned CLIs (`036db0272ba76df7711c9cf4257808effcb0fc3c9e02f9e5d0007060cd497ed5`) | Exact bytes preserved (`036db0272ba76df7711c9cf4257808effcb0fc3c9e02f9e5d0007060cd497ed5`) |
-| WAV audio | Pi returned `Pi cannot represent original CUA audio content`; WAV was not forwarded | The fixture model/provider returned `<audio content omitted because you do not support audio input>` on both pinned CLIs; this is a fixture/configuration result, not an adapter audio rejection | WAV was saved locally byte-for-byte (`9d3f06e364a9665a7cd302327f3a84799952d7def702d590a2cdbecd71bab515`); provider received only a text path/summary, not audio bytes |
+| WAV audio | Exact WAV bytes saved to an absolute local path and returned as `Audio result (original MIME type: audio/wav) saved to <path>`; the provider received the path, not WAV bytes. Saved SHA-256 matches `9d3f06e364a9665a7cd302327f3a84799952d7def702d590a2cdbecd71bab515`. | The Codex relay saved exact WAV bytes to an absolute local path and returned the same MIME/path reference on both pinned CLIs. The provider received the path, not WAV bytes; saved SHA-256 matches `9d3f06e364a9665a7cd302327f3a84799952d7def702d590a2cdbecd71bab515`. | WAV was saved locally byte-for-byte (`9d3f06e364a9665a7cd302327f3a84799952d7def702d590a2cdbecd71bab515`); provider received only a text path/summary, not audio bytes |
 | MCP `isError` | Original error text reached the provider; Pi host marked an error, while the provider message had no separate error flag | Original error text reached the provider; host marked `mcp_tool_call` failed, while provider output had no separate error flag | Original error text and native `is_error=true` preserved |
 
 The PNG and WAV hashes identify the shared original fixtures. Provider-facing error representation differs by harness: Pi and Codex carry error text without a separate provider API flag, while Claude preserves its native error field. Exact pinned inputs are recorded in [runtime input evidence](verification/runtime-input-restoration-2026-09-26.md); the run evidence is in [harness results](verification/harness-results-2026-09-26.md).
@@ -46,7 +46,7 @@ A model-driven Linux GTK task and an opt-in official Chrome-extension task are r
 
 ## Codex CLI
 
-Codex CLI registration checks the installed executable for the original `mcp_tool` lifecycle-hook support. Setup does not select or replace the Codex executable. Use the tested app-bundled CLI explicitly on `PATH` for both setup and launch; on Linux:
+Codex CLI registration checks the installed executable for the original `mcp_tool` lifecycle-hook support. Setup does not select or replace the Codex executable. It registers the bundled Node runtime, the LCU official-SDK relay, and the selected original LCU command. The relay forwards the original public descriptors and result content; it saves returned audio blocks locally and gives the model an absolute path and original MIME type. Keep `turn_ended` and `js_add_node_module_dir` hidden from model discovery. Codex's trusted Stop, Interrupt, and SubagentStop hooks can still call the hidden original `turn_ended` tool through the relay. Use the tested app-bundled CLI explicitly on `PATH` for both setup and launch; on Linux:
 
 ```sh
 PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes

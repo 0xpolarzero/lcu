@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { isolatedEnv } from './isolated-env.mjs';
 
 const fixture = new URL('./result-fixture.mjs', import.meta.url).pathname;
@@ -31,6 +31,16 @@ function dataUrls(value, found = []) {
 
 function toolMessages(request) {
   return request.messages.filter(message => message.role === 'tool');
+}
+
+function textContents(value) {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(textContents);
+  if (value && typeof value === 'object') {
+    if (typeof value.text === 'string') return [value.text];
+    return Object.values(value).flatMap(textContents);
+  }
+  return [];
 }
 
 async function run(caseName, evidenceRoot) {
@@ -156,10 +166,18 @@ for (const caseName of CASES) {
         assert.equal(result.execution.isError, false);
       }
       if (caseName === 'audio') {
-        assert.match(providerText, /cannot represent original CUA audio content/i);
+        const originalAudio = result.original.content[0];
+        const referenceText = textContents(result.providerResult.content).find(text =>
+          /original MIME type:/i.test(text) && /saved to/i.test(text));
+        assert.ok(referenceText, JSON.stringify(result.providerResult));
+        const mimeType = referenceText.match(/original MIME type: ([^)]+)/i)?.[1];
+        const savedPath = referenceText.match(/saved to\s+(.+?)(?=\s+\(original MIME type:|\s*$)/i)?.[1];
+        assert.equal(mimeType, originalAudio.mimeType);
+        assert.ok(savedPath && isAbsolute(savedPath), String(savedPath));
+        assert.deepEqual(readFileSync(savedPath), Buffer.from(originalAudio.data, 'base64'));
+        assert.ok(!providerText.includes(originalAudio.data));
         assert.equal(result.original.content[0].type, 'audio');
-        assert.equal(result.execution.isError, true);
-        assert.ok(!providerText.includes(result.original.content[0].data));
+        assert.equal(result.execution.isError, false);
       }
       if (caseName === 'error') {
         assert.match(providerText, /LCU_RESULT_FIXTURE_ERROR_20260926/);

@@ -71,14 +71,16 @@ const definitions = [
   { name: 'js_reset', description: 'Original reset description.', inputSchema: {
     type: 'object', properties: {}, additionalProperties: false,
   } },
-  { name: 'js_add_node_module_dir', description: 'Original host-only module path registration.', inputSchema: {
-    type: 'object', properties: { path: { type: 'string' } }, required: ['path'],
-  } },
-  { name: 'turn_ended', description: 'Original host-only lifecycle cleanup.', inputSchema: {
+  { name: 'js_add_node_module_dir', description: 'Add an absolute `node_modules` directory for package imports. The directory remains available after `js_reset`.', inputSchema: {
+    type: 'object', properties: { path: { type: 'string', minLength: 1,
+      description: 'Absolute path to a node_modules directory to add to Node package resolution.' } },
+    required: ['path'], additionalProperties: false,
+  }, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
+  { name: 'turn_ended', description: 'Notify trusted libraries that a Codex turn ended. Repeated notifications for the same session and turn are ignored.', inputSchema: {
     type: 'object', properties: {
-      hook_event_name: { type: 'string' }, session_id: { type: 'string' }, turn_id: { type: 'string' },
-    }, required: ['hook_event_name', 'session_id', 'turn_id'],
-  } },
+      hook_event_name: { type: 'string', minLength: 1 }, session_id: { type: 'string', minLength: 1 }, turn_id: { type: 'string', minLength: 1 },
+    }, required: ['hook_event_name', 'session_id', 'turn_id'], additionalProperties: false,
+  }, annotations: { idempotentHint: true }, _meta: { ui: { visibility: [] } } },
 ];
 
 const server = new Server({ name: 'original-cua-result-fixture', version: '1' }, {

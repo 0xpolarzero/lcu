@@ -9,14 +9,20 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lcu.codex_hooks import install_hooks
+
+ADAPTER = ROOT / "adapters/codex.mjs"
 FIXTURE = ROOT / "adapters/test/result-fixture.mjs"
 CASES = ("text", "image", "audio", "error")
 
@@ -94,13 +100,27 @@ def assert_delivery(case, records, requests, tool_result, codex_events):
         summary["provider_sha256"] = hashlib.sha256(provider_bytes).hexdigest()
     elif case == "audio":
         expected = original["content"][0]
-        marker = "<audio content omitted because you do not support audio input>"
-        if not payload or expected.get("type") != "audio" or marker not in texts or \
-                expected["data"] in json.dumps(tool_result) or host_status != "completed":
-            raise AssertionError("Codex audio fixture did not produce the observed omission marker")
+        references = []
+        for text in texts:
+            mime_match = re.search(r"original MIME type: ([^)]+)", text, re.IGNORECASE)
+            path_match = re.search(r"saved to\s+(.+?)(?=\s+\(original MIME type:|\s*$)", text, re.IGNORECASE)
+            if mime_match and path_match:
+                references.append((mime_match.group(1), path_match.group(1)))
+        if not payload or expected.get("type") != "audio" or len(references) != 1 or host_status != "completed":
+            raise AssertionError("Codex audio fixture did not produce exactly one successful file reference")
+        mime_type, saved_path = references[0]
+        saved = Path(saved_path)
+        if not saved.is_absolute() or mime_type != expected.get("mimeType"):
+            raise AssertionError("Codex audio reference was not absolute or changed the original MIME type")
+        expected_bytes = base64.b64decode(expected["data"])
+        saved_bytes = saved.read_bytes()
+        if saved_bytes != expected_bytes or expected["data"] in json.dumps(tool_result):
+            raise AssertionError("Codex saved audio bytes differ from the original or exposed bytes to the provider")
         summary["original_sha256"] = payload["sha256"]
+        summary["saved_sha256"] = hashlib.sha256(saved_bytes).hexdigest()
+        summary["saved_path"] = str(saved)
         summary["provider_received_audio_bytes"] = False
-        summary["omission_marker"] = marker
+        summary["provider_file_reference"] = saved_path
     else:
         expected = original["content"][0]["text"]
         if not original.get("isError") or host_status != "failed" or expected not in texts:
@@ -109,6 +129,17 @@ def assert_delivery(case, records, requests, tool_result, codex_events):
             raise AssertionError("Codex unexpectedly encoded an explicit error flag in function_call_output")
 
     return summary
+
+
+def original_mcp_policy(cli: Path):
+    resources = cli.parent
+    descriptor = resources / "plugins/openai-bundled/plugins/unified-computer-use/.mcp.json"
+    config = json.loads(descriptor.read_text(encoding="utf-8"))
+    policy = config["mcpServers"]["cua_repl"]
+    if policy.get("enabled_tools") != ["js", "js_reset", "turn_ended"] or \
+            policy.get("omit_tools_from") != ["code_mode", "deferred"]:
+        raise AssertionError(f"Pinned original Codex MCP policy changed: {descriptor}")
+    return policy
 
 
 def run_case(cli: Path, node: str, output: Path, case: str, version: str):
@@ -131,8 +162,21 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
                 index = len(requests)
                 if index == 1:
                     server = next(tool for tool in body.get("tools", []) if tool.get("name") == "mcp__lcu")
-                    if not any(tool.get("name") == "js" for tool in server.get("tools", [])):
-                        raise AssertionError(f"Codex model request omitted original js: {server}")
+                    public_tools = server.get("tools", [])
+                    if [tool.get("name") for tool in public_tools] != ["js", "js_reset"]:
+                        raise AssertionError(f"Codex exposed the wrong public LCU tool inventory: {server}")
+                    if server.get("description") != "Original CUA initialization guide. Preserve this text exactly.":
+                        raise AssertionError("Codex changed the original MCP initialization instructions")
+                    expected_public_tools = [
+                        {"name": "js", "description": "Original JS description.", "parameters": {
+                            "type": "object", "properties": {"code": {"type": "string"}, "title": {"type": "string"}},
+                            "required": ["code"], "additionalProperties": False}},
+                        {"name": "js_reset", "description": "Original reset description.", "parameters": {
+                            "type": "object", "properties": {}, "additionalProperties": False}},
+                    ]
+                    for actual, expected in zip(public_tools, expected_public_tools, strict=True):
+                        if any(actual.get(key) != value for key, value in expected.items()):
+                            raise AssertionError(f"Codex changed original {expected['name']} descriptor: {actual}")
                     item = {"id": f"fixture-call-{case}", "type": "function_call", "call_id": f"fixture-{case}",
                             "name": "js", "namespace": "mcp__lcu",
                             "arguments": json.dumps({"code": f"lcu-result:{case}"})}
@@ -155,6 +199,7 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
+    policy = original_mcp_policy(cli)
     config = [
         'approval_policy = "on-request"',
         'sandbox_mode = "read-only"',
@@ -167,9 +212,12 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
         "[mcp_servers.lcu]",
         "required = true",
         f"command = {quote(node)}",
-        f"args = [{quote(FIXTURE)}]",
-        'enabled_tools = ["js", "js_reset"]',
-        "startup_timeout_sec = 10",
+        f"args = [{quote(ADAPTER)}, {quote(node)}, {quote(FIXTURE)}]",
+    ]
+    for key in ("enabled_tools", "omit_tools_from", "startup_timeout_sec"):
+        if key in policy:
+            config.append(f"{key} = {json.dumps(policy[key])}")
+    config += [
         "",
         "[mcp_servers.lcu.tools.js]",
         'approval_mode = "approve"',
@@ -196,6 +244,8 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
         "LC_ALL": "C.UTF-8",
         "NO_COLOR": "1",
     }
+    host_root = cli.parent / "plugins/openai-bundled"
+    install_hooks(cli, codex_home / "config.toml", project, env, host_root)
     command = [str(cli), "--strict-config", "-a", "on-request", "-c", 'model_provider="fixture"',
                "-c", 'model="fixture"', "exec", "--ephemeral", "--skip-git-repo-check", "--json",
                "-C", str(project), f"Call original LCU js once with code lcu-result:{case}, then finish."]
@@ -210,9 +260,23 @@ def run_case(cli: Path, node: str, output: Path, case: str, version: str):
         if len(requests) != 2:
             raise AssertionError(f"Expected a tool request and result request, received {len(requests)}")
         records = [json.loads(line) for line in result_log.read_text(encoding="utf-8").splitlines()]
+        js_calls = [item for item in records if item.get("kind") == "call" and item.get("name") == "js"]
+        cleanup_calls = [item for item in records if item.get("kind") == "call" and item.get("name") == "turn_ended"]
+        if len(js_calls) != 1 or len(cleanup_calls) != 1:
+            raise AssertionError(f"Expected one original js call and one hidden Stop cleanup call; got {records}")
+        metadata = js_calls[0].get("meta", {}).get("x-codex-turn-metadata", {})
+        expected_session = metadata.get("thread_id") if metadata.get("thread_source") == "subagent" else metadata.get("session_id")
+        cleanup = cleanup_calls[0].get("args", {})
+        if cleanup != {"hook_event_name": "Stop", "session_id": expected_session,
+                       "turn_id": metadata.get("turn_id")}:
+            raise AssertionError(f"Codex did not forward the exact hidden Stop hook call: {cleanup}; metadata={metadata}")
         tool_result = next(item for item in requests[1].get("input", [])
                             if item.get("type") == "function_call_output" and item.get("call_id") == f"fixture-{case}")
         delivery = assert_delivery(case, records, requests, tool_result, result.stdout)
+        namespace = next(item for item in requests[0]["tools"] if item.get("name") == "mcp__lcu")
+        delivery["model_visible_tools"] = [item["name"] for item in namespace["tools"]]
+        delivery["original_enabled_tools"] = policy["enabled_tools"]
+        delivery["hidden_stop_cleanup"] = cleanup
         return {"case": case, "work": str(work), "requests": requests, "records": records,
                 "tool_result": tool_result, "codex_events": result.stdout, "delivery": delivery,
                 "version": version}
