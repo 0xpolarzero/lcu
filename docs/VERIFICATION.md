@@ -1,6 +1,6 @@
 # Verification
 
-The historical results below describe v0.2.1 only. The installed-app migration has separate [current status](PARITY-STATUS.md). Passing earlier subset tests does not validate the thin archive, relocated application, or authenticated Chrome actions.
+The historical results below describe v0.2.1 only. The installed-app migration has separate [current status](PARITY-STATUS.md); the current macOS app-selection and MCP check is recorded [here](verification/macos-current-app-2026-09-26.md). Passing earlier subset tests does not validate the thin archive, relocated application, or authenticated Chrome actions.
 
 # Historical v0.2.1 verification: 2026-09-22
 

@@ -7,11 +7,11 @@ LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop
 Build the Darwin archive using [development instructions](DEVELOPMENT.md), extract it, and run as the intended desktop account:
 
 ~~~sh
-PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" \
+PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin:/Applications/ChatGPT.app/Contents/Resources:$PATH" \
   ./scripts/install.sh --existing-app /Applications/ChatGPT.app --agent codex --yes
 ~~~
 
-This uses the pinned signed app 26.917.62051 in place and installs LCU under `~/.local/share/lcu`. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader. An app update causes validation to reject it until reviewed version/hash pins are available. Apple Silicon is the only pinned macOS architecture.
+This uses the selected signed app in place and installs LCU under `~/.local/share/lcu`. The app must retain the official bundle and signing identity, supported Apple Silicon architecture, valid runtime manifest, required files, and a recognized original Codex CLI/code-mode-host pair. LCU reports the app and runtime versions it reads from that app; it does not require version or component-hash entries in the repository lock file. The check does not promise compatibility with arbitrary future APIs or layouts. Select another supported MCP agent with `--agent`, or use `--runtime-only` to defer agent setup. This command configures native computer use only. There is no macOS app downloader.
 
 The `PATH` prefix selects the app-bundled Codex CLI that passed LCU's lifecycle-hook check. Use that same executable when launching Codex; see [Codex CLI setup](ADAPTERS.md#codex-cli).
 
@@ -34,7 +34,7 @@ Chrome mode also requires the official browser extension and site approval. For 
 
 ## Windows 11 x64 candidate
 
-Install the [pinned official `OpenAI.Codex` 26.917.9434.0 Store MSIX](https://persistent.oaistatic.com/codex-app-prod/releases/26.917.9434.0/ChatGPT-x64.msix) for the current Windows account, and install Python 3.12 or newer. Extract the matching thin Windows ZIP, then run from its extracted release directory in PowerShell:
+Install the official `OpenAI.Codex` Store app for the current Windows account, and install Python 3.12 or newer. The current Windows candidate targets Windows 11 x64 and validates the registered package identity, publisher, Store signature, architecture, and required host layout. This change does not add a Windows update test or expand Windows support claims. Extract the matching thin Windows ZIP, then run from its extracted release directory in PowerShell:
 
 ~~~powershell
 python .\scripts\install_windows.py --runtime-only
@@ -43,7 +43,7 @@ python .\scripts\install_windows.py --runtime-only
 
 To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
 
-The installer verifies the Store registration and pinned files, then copies the complete original package unchanged into `%LOCALAPPDATA%\LCU\apps\<package-hash>\app`. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
+The installer reads the selected package version and CUA runtime, inventories the complete registered package, and copies it unchanged into a private generation identified by that source-derived inventory. It records the observed metadata and validates the inventory when reusing the copy; it does not compare the app with a repository version or component-hash allowlist. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host from the selected app under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
 
 The default-prefix private copy, runtime-only installer, `--version`, and `doctor` passed in a clean Windows 11 guest. The installed candidate also enumerated windows, captured a screenshot, and saved Unicode text to an existing Notepad file; an independent file read matched the expected bytes. A later installed candidate verified matching Stop/Interrupt cleanup, stale-turn isolation, and helper exit at MCP shutdown. Candidate f completed project-scoped native setup for Codex CLI, Claude Code, and Pi; the generated Windows skill and Pi files were verified. Its opt-in Chrome path passed a scripted original-MCP action through the official extension, including exact-origin approval and an independently verified save. No Windows real-model session or automatic Chrome per-turn cleanup test ran. The final Windows archive build and seal audit passed. See the [Windows guest record](verification/windows-source.md) for exact results.
 
@@ -55,11 +55,11 @@ Extract an architecture-matching thin LCU archive. Install as root for automatic
 sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-Replace `alice` with the existing desktop account. This installs the pinned application and LCU runtime without registering an agent. Run Codex setup and launch as that desktop account, not root, using the tested app-bundled CLI on `PATH`:
+Replace `alice` with the existing desktop account. This selects a compatible official application and installs the LCU runtime without registering an agent. Run Codex setup and launch as that desktop account, not root, using the tested app-bundled CLI on `PATH`:
 
 ~~~sh
-PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
-PATH="/opt/lcu/current/app/resources:$PATH" codex
+PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
+PATH="/opt/lcu/current/app/resources/codex-cli/bin:/opt/lcu/current/app/resources:$PATH" codex
 ~~~
 
 The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the app-bundled CLI passes. See [Codex CLI setup](ADAPTERS.md#codex-cli). For a local official package and no acquisition network:
@@ -68,9 +68,9 @@ The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the app-bundl
 sudo ./scripts/install.sh --user alice --runtime-only --app-package /absolute/chatgpt.deb --offline --skip-system --yes
 ~~~
 
-An exact compatible existing application can be supplied with --existing-app /absolute/usr/lib/chatgpt. Every file, link, and directory is compared with a verified architecture-matching official package before it is copied. The installer does not modify the source installation. A previously verified managed generation is reused on later LCU installs only when its complete inventory matches. An offline existing-app install needs a valid cached official package for this comparison. If the cache or installed generation is corrupt, setup fails closed and leaves the selected release unchanged.
+A locally supplied official Debian package can be selected with `--app-package /absolute/chatgpt.deb`. LCU checks its `chatgpt` package identity, version syntax, architecture, required files, and recognized host layout, then records an inventory of the selected tree. An already installed app can be supplied with `--existing-app /absolute/usr/lib/chatgpt`; LCU reads its version from app metadata or verifies the exact dpkg-owned executable path and architecture, checks required structure, and inventories the tree. Neither local-selection path compares against the lock file’s app-version or component-hash values, and `--existing-app` does not require a cached baseline package. LCU does not modify the source installation. A managed generation is reused only when its complete recorded inventory matches; corruption fails closed and leaves the selected release unchanged.
 
-The default managed prefix is /opt/lcu. Use --prefix /absolute/dedicated/path for another location. A user-owned prefix needs system libraries preinstalled and --skip-system. Strict --offline also requires --skip-system. A package download uses the fixed official URL and verifies its SHA-256 before extraction. The official package is not installed through apt: its post-install script would add an OpenAI apt source/key and load an AppArmor profile. LCU does not run that script. This is a private managed application installation, not a system package-manager installation.
+The default managed prefix is /opt/lcu. Use --prefix /absolute/dedicated/path for another location. A user-owned prefix needs system libraries preinstalled and --skip-system. Strict --offline also requires --skip-system. The default remote package download uses the fixed official URL and verifies its SHA-256 before extraction. This lock-file checksum validates acquisition of that default package; it does not restrict the version of a locally supplied package or installed app. The official package is not installed through apt: its post-install script would add an OpenAI apt source/key and load an AppArmor profile. LCU does not run that script. This is a private managed application installation, not a system package-manager installation.
 
 System library installation is a separate apt operation and cannot be rolled back as a single transaction with the LCU selection. Failed app validation or release selection leaves the previous current symlink in place. Existing running processes may still hold old generations; do not remove old app or LCU generations until they have exited.
 
@@ -85,7 +85,7 @@ PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --age
 ./scripts/install.sh --list-agents
 ~~~
 
-For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex --yes as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and its pinned app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
+For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex --yes as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and a compatible official app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
 
 The original host contract advertises model-facing js and js_reset, keeps turn_ended for lifecycle and restricts module-directory injection. Generic MCP consumers must honor the exported visibility, output and lifecycle contract. MCP registration alone cannot enforce all agent-host behavior.
 
@@ -108,7 +108,7 @@ The official ChatGPT extension is how the original runtime reads and controls ex
 
 `browser install` invokes the original plugin's native-host installer from a user-local copy, then points the account's host manifest at LCU's relay. This command alone does not enable Chrome in an MCP process; direct clients must start `lcu --chrome`. It does not install or enable the Web Store extension. The relay locally enables the official extension's `x-browser-agent` label so Chrome actions do not require Codex sign-in. Sites can see that label; it is not a login credential. Enable the official extension in the intended Chrome profile using [OpenAI's extension setup instructions](https://learn.chatgpt.com/docs/chrome-extension). `browser status` uses the original diagnostics to report whether the extension is enabled and the connector points to this LCU installation; it changes nothing and does not claim a live connection. Complete the check by asking your agent to use LCU to list Chrome tabs.
 
-[Google's Linux installation guide](https://support.google.com/chrome/answer/95346?hl=en) lists x86-64 and ARM64 Chrome packages. Chrome uses its user configuration for [native messaging host discovery](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging); a custom `--user-data-dir` profile must have access to the installed host manifest. Browser/extension compatibility with this pinned app remains a live test requirement. LCU does not select or change the default browser, browser profile, extension permissions, sign-in or site approvals. Do not use --browser-host, --with-browser-host, or lcu browser serve/protocol; they were IAB-only and now return migration errors.
+[Google's Linux installation guide](https://support.google.com/chrome/answer/95346?hl=en) lists x86-64 and ARM64 Chrome packages. Chrome uses its user configuration for [native messaging host discovery](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging); a custom `--user-data-dir` profile must have access to the installed host manifest. Browser and extension compatibility with the selected app remains a live test requirement. LCU does not select or change the default browser, browser profile, extension permissions, sign-in or site approvals. Do not use --browser-host, --with-browser-host, or lcu browser serve/protocol; they were IAB-only and now return migration errors.
 
 The native-host manifest belongs to the Linux account, so other apps using this same extension and browser account also reach LCU's relay. The official extension stores the header-on decision in its Chrome profile after an agent session. Installing or removing the relay therefore does not automatically restore the original account-specific header decision in that profile.
 
