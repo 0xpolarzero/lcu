@@ -1,73 +1,28 @@
 # LCU
 
-LCU launches the original computer-use runtime from a pinned official ChatGPT application. It preserves the original `cua` API, tool descriptions, schemas and platform instructions. Linux and Windows use verified private installations; macOS reuses the signed locally installed app in place. Thin LCU archives contain adapters and installer metadata, without OpenAI application files. The maintained harness integrations are Pi, Codex CLI and Claude Code; other harnesses can use the shared client or contribute an adapter.
+LCU connects Pi, Codex CLI, and Claude Code to the pinned official ChatGPT computer-use runtime. Native computer use is the default; Chrome is opt-in and uses the original extension and site-approval flow. The original runtime owns the `cua` API, instructions, policy, and platform helpers. LCU handles installation and adapts host transport, identity, approval UI, and lifecycle wiring; it adds no replacement automation or policy layer.
 
-**Status:** the current Linux ARM64/x86-64 and Apple Silicon macOS thin archives were rebuilt from `f1f5a0c` with the Claude relay's installed-`current` startup fix. Both Linux archives passed offline gates; the macOS archive passed seal audits and a runtime-only install using the pinned app. See the [current delivery record](docs/verification/final-three-delivery-relay-startup-fix-2026-09-25.md) and [parity status](docs/PARITY-STATUS.md). This delivery contains no Windows archive and nothing has been published.
+## Linux quick start
 
-The [Pi adapter](docs/ADAPTERS.md) passed model-driven Linux native GTK and opt-in Chrome-extension tasks, including automatic temporary-tab cleanup. A compatible interactive Codex CLI also completed native and Chrome tasks, including site approval and temporary-tab cleanup. On the corrected shipped artifact, guarded Claude Code 2.1.204 created a temporary loopback Chrome tab and normal `Stop` cleanup closed it while preserving existing tabs. Active-call Esc dispatched matching original `Interrupt` cleanup, but cleanup waited for active JavaScript to finish; a direct original-runtime comparison reproduced the same delay. Esc while waiting for model output emits no hook or MCP cancellation. A native AppKit save succeeded through an earlier relay overlay, but was not repeated on the corrected archive. See the [Claude relay evidence](docs/verification/claude-relay-2026-09-25.md), [current delivery record](docs/verification/final-three-delivery-relay-startup-fix-2026-09-25.md), and [parity status](docs/PARITY-STATUS.md).
-
-On Apple Silicon macOS, a [fresh guest check](docs/verification/macos-fresh-guest-2026-09-24.md) passed cold helper startup and first-use permissions, then independently verified the exact bytes of a native TextEdit save. An earlier [live TextEdit flow](docs/verification/macos-live-2026-09-24.md) passed typing, screenshots and saving, and a [separate opt-in Chrome action](docs/verification/chrome-opt-in-2026-09-24.md) passed through the official extension. The close-shortcut defect was also reproduced in the original runtime. In a disposable Windows 11 guest, installed x64 candidates passed native screenshot, typing, existing-file save, helper lifecycle, project-scoped agent registration, and an opt-in Chrome action through the official extension. The Windows Chrome check used scripted original MCP calls; Windows real-model use remains unverified. See the [parity record](docs/PARITY-STATUS.md). MCP remains the original runtime's internal transport; Pi uses its native extension API through the small shared MCP client.
-
-## Requirements
-
-Linux requires Ubuntu 24.04-compatible glibc on ARM64 or x86-64, Python 3.12 or newer, and an existing X11 desktop and D-Bus session owned by the target account. macOS requires Apple Silicon, Python 3.12 or newer, and the pinned signed `/Applications/ChatGPT.app` 26.917.62051. Windows 11 x64 requires Python 3.12 or newer and the pinned official `OpenAI.Codex` 26.917.9434.0 Store MSIX registered for the current account; see the [Windows installation steps](docs/INSTALLATION.md#windows-11-x64-candidate). Each platform uses its own application binaries. An app update requires reviewed pins before LCU will launch it.
-
-The fixed dependency is ChatGPT Linux 26.915.31945 with CUA runtime 0.0.16/20260915001755-492f19756c31. [runtime.lock.json](runtime.lock.json) pins the official package URLs, hashes and critical files. Setup verifies the package before extraction. A hash checks integrity; it is not a package signature.
-
-## Install
-
-Build the thin archive on matching Linux first; see [development](docs/DEVELOPMENT.md). On the target desktop machine, extract it and run:
+Extract an architecture-matching archive on an Ubuntu 24.04-compatible desktop, then install the runtime for the existing desktop account:
 
 ~~~sh
 sudo ./scripts/install.sh --user alice --runtime-only --yes
 ~~~
 
-Replace `alice` with the existing desktop account. This installs the pinned official package and LCU runtime under the managed prefix without registering an agent. Then, as that desktop account (not root), register and launch the tested app-bundled Codex CLI:
+Register and launch the app-bundled Codex CLI as that account, with the same CLI on `PATH` for both commands:
 
 ~~~sh
 PATH="/opt/lcu/current/app/resources:$PATH" /opt/lcu/current/bin/lcu setup --agent codex --yes
 PATH="/opt/lcu/current/app/resources:$PATH" codex
 ~~~
 
-The ordinary Codex CLI `0.145.0` fails LCU's lifecycle-hook check; the pinned app-bundled CLI shown here passes. For details, see [Codex CLI setup](docs/ADAPTERS.md#codex-cli). To use an already downloaded pinned package without acquisition network access:
+Replace `alice` with the existing desktop account. For Pi, Claude Code, and offline package selection, follow the [installation guide](docs/INSTALLATION.md). See [macOS installation](docs/INSTALLATION.md#macos-and-pi); it reuses the pinned signed app in place and does not download or replace the app.
 
-~~~sh
-sudo ./scripts/install.sh --user alice --runtime-only --app-package /absolute/chatgpt.deb --offline --skip-system --yes
-~~~
+## Current verification
 
-Use --skip-system only when the required Ubuntu libraries are already installed. It does not skip app acquisition. For a user-owned prefix after system dependencies are in place, add --prefix and --skip-system. The installer does not change an existing system ChatGPT installation or add OpenAI's apt repository. See the [installation guide](docs/INSTALLATION.md) for agent choices, desktop sessions, rollback and failure states.
+The current delivery targets Linux ARM64 and x86-64 plus Apple Silicon macOS. Windows is deferred from this delivery. The same-case text, PNG, WAV, and tool-error comparison is documented in [parity status](docs/PARITY-STATUS.md) and [harness adapters](docs/ADAPTERS.md). The local `dist/<source-sha>/final/DELIVERY.md` records archive hashes and gate outcomes; older results apply only to their recorded source commits. Nothing has been published.
 
-## Use
+The exact pinned Linux and macOS inputs are documented in [runtime input evidence](docs/verification/runtime-input-restoration-2026-09-26.md). The Linux app pin is ChatGPT `26.915.31945`; the signed macOS app pin is `26.917.62051`. Both contain CUA runtime `0.0.16/20260915001755-492f19756c31`. The lock file records package and component hashes. An app update requires reviewed pins before LCU will launch it.
 
-For macOS installation and Pi launch commands, see [installation](docs/INSTALLATION.md#macos-and-pi). Setup can run without prompts using explicit choices and `--yes`. macOS Screen Recording/Accessibility and unresolved browser site approvals remain the original provider's permission boundaries; `--yes` does not grant them.
-
-Codex CLI must accept the original `mcp_tool` lifecycle hooks. Setup checks an installed CLI before changing its configuration. The tested bundled binaries are `/Applications/ChatGPT.app/Contents/Resources/codex` (`0.155.0-alpha.16.3`) on macOS and `/opt/lcu/current/app/resources/codex` (`0.155.0-alpha.9.2`) on both pinned Linux packages. The ordinary `0.145.0` CLI failed this check; no minimum public stable version has been established. Use the tested executable explicitly on `PATH` when registering and launching Codex; setup does not change your `PATH` or switch executables. See [adapter details](docs/ADAPTERS.md#codex-cli).
-
-After setup, reconnect the agent and ask it to inspect the existing desktop. The default runtime enables native computer use and does not install or connect the Chrome extension. The generated user-local LCU skill links byte-identical original platform guidance; Chrome references are selected only for Chrome mode. The original provider supplies dynamic instructions and capability checks during use.
-
-An agent starts with one documented call:
-
-~~~javascript
-await cua.getState();
-~~~
-
-On Linux it can then select an observed window by its ID:
-
-~~~javascript
-let app = await cua.getApp({ windowId: 123 });
-~~~
-
-The ID is an example; use a real observed ID. Screenshots, accessibility, mouse and keyboard actions, clipboard, audio paths and reset remain in the original runtime. The desktop must already be running.
-
-To opt into Chrome, configure the agent with `lcu setup --agent codex --chrome --yes` and reconnect it. A direct MCP client must launch `lcu --chrome`. Chrome setup configures the original native host for that desktop account; to refresh its registration, run:
-
-~~~sh
-/opt/lcu/current/bin/lcu browser install
-/opt/lcu/current/bin/lcu browser status
-~~~
-
-Use your intended Chrome profile; LCU does not require a new one. Install and enable the [official ChatGPT browser extension](https://learn.chatgpt.com/docs/chrome-extension) in the selected Chrome profile. `browser install` configures the native host but does not install or enable that extension. LCU does not sign in, choose a personal profile, grant site permissions, or substitute another browser. Its local native-host relay enables the official extension's `x-browser-agent` request label. The original runtime's ambient-network switch disables account identity and telemetry initialization. Site approvals remain active. The MCP client must still approve the requested site. The user and agent can view the same browser through the existing desktop viewer.
-
-For Chrome mode, `lcu browser status` reports extension and connector configuration; it does not claim a live browser connection. Native-only setup has no extension requirement or browser-status warning. After Chrome setup, ask the configured agent to use LCU to list Chrome tabs. [Harness adapters](docs/ADAPTERS.md) describes instruction delivery, permissions, screenshots and task cleanup, including the limitations of each maintained integration.
-
-LCU's code is [MIT licensed](LICENSE). The installed official application retains its original files, notices and terms. LCU is an independent project.
+LCU is MIT licensed. Thin archives contain LCU code and installation metadata, not OpenAI application binaries or copied upstream instructions. The installed official application keeps its original files, notices, and terms; see [dependency provenance](docs/PROVENANCE.md).

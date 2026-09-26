@@ -1,6 +1,6 @@
 # Installation
 
-LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64. The macOS Apple Silicon path reuses a signed local app; live TextEdit and opt-in Chrome actions passed, while cold helper startup and first-time OS permissions remain unverified. Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
+LCU's verified Linux target is an existing Ubuntu 24.04-compatible glibc desktop on ARM64 or x86-64. The Apple Silicon macOS path reuses the signed local app; a fresh guest passed cold helper startup, first-use OS permissions, and an independent TextEdit save. Earlier live TextEdit and opt-in Chrome actions also passed. See [fresh-guest evidence](verification/macos-fresh-guest-2026-09-24.md), [live native evidence](verification/macos-live-2026-09-24.md), and [Chrome evidence](verification/chrome-opt-in-2026-09-24.md). Linux requires an existing X11 desktop and D-Bus session owned by the target account; native Wayland and musl are unsupported. Python 3.12 or newer and the host's normal sandbox facilities are required. The default installation enables native computer use only and does not install a Chrome native host or change a browser profile. LCU does not install a desktop, create a VM, or sign into ChatGPT.
 
 ## macOS and Pi
 
@@ -22,7 +22,7 @@ Pi uses a native extension instead of requiring built-in MCP support. With Pi al
 pi
 ~~~
 
-Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). Pi's text/image results and empty-form approvals are supported; audio/resource results and nonempty approval forms remain explicit adapter limitations.
+Setup installs the original local native skill and uses Pi's package installer to register the bundled extension. To add Pi to an existing LCU installation, run `lcu setup --agent pi --yes`. Linux uses the same command. Add `--chrome` to setup only when you also want the original Chrome extension path configured for that account. The adapter selects the managed runtime; custom callers can still override it as described in [adapters](ADAPTERS.md). The [Pi approval regression](verification/pi-approval-2026-09-26.md) verifies that dismissing a browser-origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist. Same-case text, PNG, WAV, and tool-error forwarding is tracked in the [adapter comparison](ADAPTERS.md#same-case-result-forwarding).
 
 `--yes` suppresses LCU's setup confirmation; macOS permissions still require approval. For native use, open System Settings > Privacy & Security:
 
