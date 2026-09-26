@@ -110,9 +110,9 @@ async function bindContext(client, {
 }
 
 async function callWithContext(client, name, args, {
-  sessionId = 'session-test', turnId = 'prompt-test', toolUseId, callerMeta = {}, signal,
+  sessionId = 'session-test', turnId = 'prompt-test', toolUseId, agentId, callerMeta = {}, signal,
 }) {
-  await bindContext(client, { sessionId, turnId, toolUseId });
+  await bindContext(client, { sessionId, turnId, toolUseId, agentId });
   return client.callTool({ name, arguments: args, _meta: {
     'claudecode/toolUseId': toolUseId,
     ...callerMeta,
@@ -134,7 +134,7 @@ async function assertOriginalProtocol(bridge) {
 
   const context = {
     session_id: 'session-smoke', turn_id: 'prompt-smoke',
-    tool_use_id: 'tool-use-smoke', agent_id: 'agent-smoke',
+    tool_use_id: 'tool-use-smoke',
   };
   const bind = await bridge.client.callTool({ name: 'set_turn_context', arguments: context });
   assert.equal(bind.content[0].text, 'Turn context bound.');
@@ -248,6 +248,85 @@ test('Claude relay preserves original results/errors and isolates parallel and s
     assert.match(stale.content[0].text, /Missing exact Claude PreToolUse identity/);
     assert.equal(bridge.logs().filter(entry => entry.type === 'tool-call' &&
       entry.args.code === 'stale-must-not-run').length, 0);
+  } finally {
+    await bridge.close();
+  }
+});
+
+
+test('Claude relay isolates overlapping child identities and makes SubagentStop cleanup idempotent', async () => {
+  const bridge = await connectRelay();
+  try {
+    const sessionId = 'shared-host-session';
+    const turnId = 'shared-prompt';
+    const initial = [
+      { toolUseId: 'parent-active', code: 'parent-active' },
+      { toolUseId: 'child-a-active', code: 'child-a-active', agentId: 'agent-a' },
+      { toolUseId: 'child-b-active', code: 'child-b-active', agentId: 'agent-b' },
+    ];
+    for (const identity of initial) {
+      await bindContext(bridge.client, { sessionId, turnId, ...identity });
+    }
+    const results = await Promise.all(initial.map(identity => bridge.client.callTool({
+      name: 'js', arguments: { code: identity.code },
+      _meta: { 'claudecode/toolUseId': identity.toolUseId },
+    })));
+    assert.ok(results.every(result => !result.isError));
+
+    const forwarded = Object.fromEntries(bridge.logs()
+      .filter(entry => entry.type === 'tool-call' && initial.some(item => item.code === entry.args.code))
+      .map(entry => [entry.args.code, entry.meta['x-codex-turn-metadata']]));
+    assert.deepEqual(forwarded, {
+      'parent-active': { session_id: sessionId, turn_id: turnId },
+      'child-a-active': { session_id: 'agent-a', turn_id: turnId },
+      'child-b-active': { session_id: 'agent-b', turn_id: turnId },
+    });
+
+    const pending = [
+      { toolUseId: 'parent-pending', code: 'parent-pending' },
+      { toolUseId: 'child-a-pending', code: 'child-a-pending', agentId: 'agent-a' },
+      { toolUseId: 'child-b-pending', code: 'child-b-pending', agentId: 'agent-b' },
+    ];
+    for (const identity of pending) {
+      await bindContext(bridge.client, { sessionId, turnId, ...identity });
+    }
+
+    const childAStop = { hook_event_name: 'SubagentStop', session_id: 'agent-a', turn_id: turnId };
+    const childACleanup = await bridge.client.callTool({ name: 'turn_ended', arguments: childAStop });
+    assert.ok(!childACleanup.isError);
+
+    const duplicateCleanup = await bridge.client.callTool({ name: 'turn_ended', arguments: childAStop });
+    assert.equal(duplicateCleanup.content[0].text, 'Turn already ended.');
+    assert.equal(bridge.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.hook_event_name === 'SubagentStop' && entry.args.session_id === 'agent-a').length, 1);
+
+    const staleChild = await bridge.client.callTool({ name: 'js', arguments: { code: 'child-a-stale' },
+      _meta: { 'claudecode/toolUseId': 'child-a-pending' } });
+    assert.equal(staleChild.isError, true);
+    assert.match(staleChild.content[0].text, /Missing exact Claude PreToolUse identity/);
+    assert.equal(bridge.logs().filter(entry => entry.type === 'tool-call' &&
+      entry.args.code === 'child-a-stale').length, 0);
+
+    const parentStop = await bridge.client.callTool({ name: 'turn_ended', arguments: {
+      hook_event_name: 'Stop', session_id: sessionId, turn_id: turnId,
+    } });
+    assert.ok(!parentStop.isError);
+    const staleParent = await bridge.client.callTool({ name: 'js', arguments: { code: 'parent-stale' },
+      _meta: { 'claudecode/toolUseId': 'parent-pending' } });
+    assert.equal(staleParent.isError, true);
+    assert.match(staleParent.content[0].text, /Missing exact Claude PreToolUse identity/);
+    assert.equal(bridge.logs().filter(entry => entry.type === 'tool-call' &&
+      entry.args.code === 'parent-stale').length, 0);
+
+    const childB = await bridge.client.callTool({ name: 'js', arguments: { code: 'child-b-pending' },
+      _meta: { 'claudecode/toolUseId': 'child-b-pending' } });
+    assert.ok(!childB.isError);
+    const childBStop = await bridge.client.callTool({ name: 'turn_ended', arguments: {
+      hook_event_name: 'SubagentStop', session_id: 'agent-b', turn_id: turnId,
+    } });
+    assert.ok(!childBStop.isError);
+    assert.equal(bridge.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.hook_event_name === 'SubagentStop').length, 2);
   } finally {
     await bridge.close();
   }

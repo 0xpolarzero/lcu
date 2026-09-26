@@ -123,7 +123,7 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
 
   async function turnEnded(sessionId, turnId, event) {
     if (!nonEmptyString(sessionId) || !nonEmptyString(turnId) ||
-        !['Stop', 'Interrupt'].includes(event)) {
+        !['Stop', 'Interrupt', 'SubagentStop'].includes(event)) {
       throw new Error('Claude lifecycle cleanup requires an exact session, prompt, and supported event');
     }
     const key = turnKey(sessionId, turnId);
@@ -189,6 +189,8 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
       const { name, arguments: toolArgs = {}, _meta } = request.params;
       if (name === CONTEXT_TOOL) {
         const context = requireTurnContext(toolArgs);
+        // Match Claude's child cleanup identity while preserving the shared prompt ID.
+        if (context.agentId) context.sessionId = context.agentId;
         const previous = contexts.get(context.toolUseId);
         if (previous && (previous.sessionId !== context.sessionId || previous.turnId !== context.turnId ||
             previous.agentId !== context.agentId)) {

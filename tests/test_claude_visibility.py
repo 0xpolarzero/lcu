@@ -40,6 +40,14 @@ class ClaudeVisibilityTests(unittest.TestCase):
                            if hook.get('tool') == 'turn_ended']
         self.assertEqual(len(failure_cleanup), 1)
         self.assertEqual(failure_cleanup[0]['input']['hook_event_name'], 'Interrupt')
+        subagent_cleanup = [hook for group in data['hooks']['SubagentStop'] for hook in group['hooks']
+                            if hook.get('tool') == 'turn_ended']
+        self.assertEqual(len(subagent_cleanup), 1)
+        self.assertEqual(subagent_cleanup[0]['input'], {
+            'hook_event_name': 'SubagentStop',
+            'session_id': '${agent_id}',
+            'turn_id': '${prompt_id}',
+        })
         first = path.read_bytes()
         install(self.home)
         self.assertEqual(path.read_bytes(), first)

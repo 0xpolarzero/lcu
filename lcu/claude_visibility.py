@@ -51,6 +51,18 @@ def _install_lifecycle_hooks(settings):
                 },
             }],
         },
+        'SubagentStop': {
+            'hooks': [{
+                'type': 'mcp_tool',
+                'server': 'lcu',
+                'tool': 'turn_ended',
+                'input': {
+                    'hook_event_name': 'SubagentStop',
+                    'session_id': '${agent_id}',
+                    'turn_id': '${prompt_id}',
+                },
+            }],
+        },
     }
     for event, group in groups.items():
         event_groups = hooks.setdefault(event, [])
