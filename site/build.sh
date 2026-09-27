@@ -1,6 +1,6 @@
 #!/bin/sh
-# Copies the showreel, its poster and the icon from docs/assets into site/media.
-# The Pages workflow runs this before upload; run it locally before previewing.
+# Copies the showreel and its poster from docs/assets into site/media.
+# Run before previewing or deploying (the Vercel deploy uploads site/ as-is).
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$root/site/media"
