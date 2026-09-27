@@ -1,8 +1,8 @@
 # LCU
 
-**Codex computer use, decoupled from the Codex agent.**
+**Codex computer use, decoupled from the Codex app.**
 
-LCU exposes Codex's original computer-use runtime to your harness. The official ChatGPT desktop app must still be installed locally: it supplies the runtime and instructions, while LCU handles setup and harness integration.
+LCU exposes Codex's original computer-use runtime to your harness without requiring Codex authentication. The official ChatGPT desktop app must still be installed locally: it supplies the runtime and instructions, while LCU handles setup and harness integration.
 
 ## Quick start
 
@@ -13,14 +13,6 @@ Install and configure LCU for this harness using the latest release.
 Follow https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md
 Check my OS, architecture, and prerequisites, then guide me through any required permissions.
 ```
-
-Restart your harness after setup. Open a blank text-editor document and ask:
-
-```text
-Use LCU to inspect the open text editor, type “Hello from LCU”, and show me a screenshot.
-```
-
-Approve the app request and any operating-system prompts when they appear.
 
 ## Features
 
