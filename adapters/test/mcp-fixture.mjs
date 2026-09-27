@@ -6,6 +6,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 const server = new Server({ name: 'original-cua-contract-fixture', version: '1' },
   { capabilities: { tools: {} }, instructions: 'Original CUA initialization guide.' });
 const record = value => process.env.LCU_FIXTURE_LOG && appendFileSync(process.env.LCU_FIXTURE_LOG, `${JSON.stringify(value)}\n`);
+const failedCleanupSessions = new Set();
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
   { name: 'js', description: 'Original JS description.', inputSchema: {
     type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
@@ -21,6 +22,11 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   record({ name, args, meta: _meta });
   if (name === 'turn_ended' && args?.session_id === 'fail-session') {
     return { isError: true, content: [{ type: 'text', text: 'cleanup failed' }] };
+  }
+  if (name === 'turn_ended' && args?.session_id === 'fail-once-session' &&
+      !failedCleanupSessions.has(args.session_id)) {
+    failedCleanupSessions.add(args.session_id);
+    return { isError: true, content: [{ type: 'text', text: 'cleanup failed once' }] };
   }
   if (name === 'js' && ['approval', 'approval-other', 'approval-form', 'approval-native',
     'approval-native-session-only', 'pi-origin-approval', 'pi-origin-lookalike',

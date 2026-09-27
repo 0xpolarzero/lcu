@@ -49,6 +49,8 @@ class BuildPlatformTests(unittest.TestCase):
                 prefix = f'lcu-{VERSION}-darwin-arm64/'
                 self.assertIn(prefix + 'scripts/install_macos.py', names)
                 self.assertIn(prefix + 'lcu/platforms.py', names)
+                self.assertIn(prefix + 'lcu/macos_host.py', names)
+                self.assertIn(prefix + 'lcu/macos_sky_service.mjs', names)
                 self.assertIn(prefix + 'lcu/doctor.py', names)
                 self.assertIn(prefix + 'lcu/app_layout.py', names)
                 self.assertIn(prefix + 'lcu/asar.py', names)

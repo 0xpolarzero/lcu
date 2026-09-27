@@ -44,6 +44,8 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
   let bridge: ReturnType<typeof createCuaClient> | undefined;
   let pending: Promise<ReturnType<typeof createCuaClient>> | undefined;
   let active: { sessionId: string; turnId: string } | undefined;
+  let pendingCleanup: { turn: { sessionId: string; turnId: string }; event: 'Stop' | 'Interrupt' } | undefined;
+  let cleanupInFlight: Promise<void> | undefined;
   let approvalContext: ExtensionContext | undefined;
 
   function registerTools(client: ReturnType<typeof createCuaClient>) {
@@ -109,15 +111,29 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
     return pending;
   }
 
-  async function finish(event: 'Stop' | 'Interrupt') {
-    const turn = active;
+  async function finish(event: 'Stop' | 'Interrupt', reconnect = true) {
+    if (active) pendingCleanup = { turn: active, event };
     active = undefined;
-    if (turn && bridge) await bridge.turnEnded({ ...turn, event });
+    if (cleanupInFlight) return cleanupInFlight;
+    const cleanup = pendingCleanup;
+    if (!cleanup) return;
+    const attempt = (async () => {
+      const client = bridge ?? (reconnect ? await connected() : undefined);
+      if (!client) return;
+      await client.turnEnded({ ...cleanup.turn, event: cleanup.event });
+      if (pendingCleanup === cleanup) pendingCleanup = undefined;
+    })();
+    cleanupInFlight = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (cleanupInFlight === attempt) cleanupInFlight = undefined;
+    }
   }
 
   async function leaveSession() {
     try {
-      await finish('Interrupt');
+      await finish('Interrupt', false);
     } finally {
       await bridge?.close();
       bridge = undefined;
@@ -131,6 +147,9 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
     return { systemPrompt: `${event.systemPrompt}\n\n${client.instructions}` };
   });
   pi.on('agent_start', async (_event, ctx) => {
+    // A failed turn_ended must succeed before Pi starts another turn. Keep the
+    // old turn's identifiers so cleanup can be retried without enabling its tools.
+    await finish('Interrupt');
     active = { sessionId: ctx.sessionManager.getSessionId(), turnId: randomUUID() };
     approvalContext = ctx;
   });

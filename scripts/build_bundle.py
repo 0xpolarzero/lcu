@@ -59,6 +59,8 @@ def build(output, package=None, *, target='linux', app=None):
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
         if target == 'darwin':
             shutil.copy2(SOURCE / 'lcu/platforms.py', release / 'lcu/platforms.py')
+            shutil.copy2(SOURCE / 'lcu/macos_host.py', release / 'lcu/macos_host.py')
+            shutil.copy2(SOURCE / 'lcu/macos_sky_service.mjs', release / 'lcu/macos_sky_service.mjs')
         elif target == 'windows':
             shutil.copy2(SOURCE / 'lcu/windows.py', release / 'lcu/windows.py')
             shutil.copy2(SOURCE / 'lcu/windows_host.py', release / 'lcu/windows_host.py')

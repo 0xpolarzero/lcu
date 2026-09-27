@@ -229,6 +229,34 @@ def reply_to_server_discover(source, destination):
     destination.flush()
 
 
+def _configure_macos_lifecycle(root, runtime, env):
+    """Keep original Sky behavior and add only its turn-ended host hook."""
+    surfaces = {surface.strip() for surface in env.get('CUA_REPL_ENABLED_SURFACES', '').split(',')}
+    if 'computer' not in surfaces:
+        return None
+    wrapper = root / 'lcu/macos_sky_service.mjs'
+    raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
+    supplied = json.loads(raw_services) if raw_services is not None else None
+    if raw_services is None:
+        supplied = {}
+        if 'browser' in surfaces:
+            supplied['browser'] = '@oai/browser-desktop/service'
+        supplied['sky'] = '@oai/sky/service'
+    if not isinstance(supplied, dict) or any(not isinstance(key, str) or not isinstance(value, str)
+                                             for key, value in supplied.items()):
+        raise ValueError('NODE_REPL_TRUSTED_SERVICES must be a JSON string map.')
+    if supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
+        raise ValueError('A custom Sky trusted-service override conflicts with macOS native cleanup.')
+    services = dict(supplied)
+    services['sky'] = str(wrapper)
+    env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(services)
+    env['NODE_REPL_TRUSTED_CODE_PATHS'] = os.pathsep.join(dict.fromkeys(
+        [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(os.pathsep))]))
+    env['LCU_MAC_SKY_SERVICE_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js')
+    client = Path(env['SKY_CUA_SERVICE_PATH']) / 'Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient'
+    return client
+
+
 def main(root, argv):
     # Agent registrations place --chrome before generic executable probes.
     if argv[:1] == ['--chrome'] and argv[1:] in (['--help'], ['-h'], ['--version']):
@@ -328,4 +356,17 @@ def main(root, argv):
         finally:
             stop_original_host(host)
         raise SystemExit(status)
+    macos = json.loads((root / 'installation.json').read_text()).get('platform') == 'darwin'
+    if macos:
+        client = _configure_macos_lifecycle(root, runtime, env)
+        if client is not None:
+            from .macos_host import start_original_host, stop_original_host
+            host, temporary, address = start_original_host(
+                python=Path(sys.executable), client=client, entry=root / 'lcu/macos_host.py', env=env)
+            env['LCU_MAC_LIFETIME_SOCKET'] = address
+            try:
+                status = subprocess.run(command, env=env, check=False).returncode
+            finally:
+                stop_original_host(host, temporary)
+            raise SystemExit(status)
     os.execve(runtime / 'bin/node', command, env)

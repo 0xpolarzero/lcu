@@ -156,20 +156,119 @@ test('Pi forwards only the native app approval persistence scope selected in its
   }
 });
 
-test('Pi closes its MCP connection after a reported cleanup failure', async () => {
+test('Pi retains failed turn cleanup, blocks ended-turn tools, and retries before a new turn', async () => {
   const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-cleanup-'));
+  const log = join(directory, 'mcp.jsonl');
   process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
   const handlers = new Map();
-  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool() {} };
+  const tools = new Map();
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
   const ctx = { sessionManager: { getSessionId: () => 'fail-session' }, hasUI: false };
   try {
     piExtension(pi);
     await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
     await handlers.get('agent_start')({}, ctx);
+    await assert.rejects(handlers.get('agent_end')({
+      messages: [{ role: 'assistant', stopReason: 'stop' }],
+    }, ctx), /cleanup failed/);
+    await assert.rejects(tools.get('js').execute('after-end', { code: 'late' }, undefined, undefined, ctx),
+      /active Pi agent turn/);
+
+    // A new turn cannot become active until the previous cleanup succeeds.
+    await assert.rejects(handlers.get('agent_start')({}, ctx), /cleanup failed/);
+    let entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    let cleanups = entries.filter(entry => entry.name === 'turn_ended');
+    assert.equal(cleanups.length, 2);
+    assert.ok(cleanups.every(entry => entry.args.hook_event_name === 'Stop'));
+    assert.ok(cleanups.every(entry => entry.args.session_id === 'fail-session'));
+    assert.equal(new Set(cleanups.map(entry => entry.args.turn_id)).size, 1);
+
+    // Shutdown also retries the retained cleanup before closing the connection.
     await assert.rejects(handlers.get('session_shutdown')(), /cleanup failed/);
-    await handlers.get('session_shutdown')();
+    entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    cleanups = entries.filter(entry => entry.name === 'turn_ended');
+    assert.equal(cleanups.length, 3);
   } finally {
+    await handlers.get('session_shutdown')?.().catch(() => {});
     if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
     else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Pi can recover when a retained cleanup succeeds on retry', async () => {
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-retry-'));
+  const log = join(directory, 'mcp.jsonl');
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
+  const handlers = new Map();
+  const tools = new Map();
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
+  const ctx = { sessionManager: { getSessionId: () => 'fail-once-session' }, hasUI: false };
+  try {
+    piExtension(pi);
+    await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
+    await handlers.get('agent_start')({}, ctx);
+    await assert.rejects(handlers.get('agent_end')({
+      messages: [{ role: 'assistant', stopReason: 'stop' }],
+    }, ctx), /cleanup failed once/);
+
+    // Retrying cleanup succeeds before the next turn is made available.
+    await handlers.get('agent_start')({}, ctx);
+    const result = await tools.get('js').execute('new-turn', { code: 'recovered' }, undefined, undefined, ctx);
+    assert.equal(result.content[0].text, 'recovered');
+    await handlers.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
+
+    const entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    const cleanups = entries.filter(entry => entry.name === 'turn_ended');
+    assert.equal(cleanups.length, 3);
+    assert.equal(cleanups[0].args.turn_id, cleanups[1].args.turn_id);
+    assert.notEqual(cleanups[1].args.turn_id, cleanups[2].args.turn_id);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Pi deduplicates agent_end cleanup when shutdown overlaps it', async () => {
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-overlap-'));
+  const log = join(directory, 'mcp.jsonl');
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
+  const handlers = new Map();
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool() {} };
+  const ctx = { sessionManager: { getSessionId: () => 'overlap-session' }, hasUI: false };
+  try {
+    piExtension(pi);
+    await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
+    await handlers.get('agent_start')({}, ctx);
+    const ending = handlers.get('agent_end')({
+      messages: [{ role: 'assistant', stopReason: 'stop' }],
+    }, ctx);
+    const shutdown = handlers.get('session_shutdown')();
+    await Promise.all([ending, shutdown]);
+
+    const entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(entries.filter(entry => entry.name === 'turn_ended').length, 1);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
   }
 });
