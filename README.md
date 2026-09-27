@@ -1,6 +1,16 @@
-# LCU
+<p align="center">
+  <img src="docs/assets/lcu-icon.svg" width="120" height="120" alt="LCU logo">
+</p>
 
-**Codex computer use, decoupled from the Codex app.**
+<h1 align="center">LCU</h1>
+
+<p align="center"><strong>Codex computer use, decoupled from the Codex app.</strong></p>
+
+<p align="center">
+  <a href="docs/assets/lcu-showreel.mp4">
+    <img src="docs/assets/lcu-showreel-poster.jpg" width="720" alt="Watch the 30-second LCU demo">
+  </a>
+</p>
 
 LCU exposes Codex's original computer-use runtime to your harness without requiring Codex authentication. The official ChatGPT desktop app must still be installed locally: it supplies the runtime and instructions, while LCU handles setup and harness integration.
 
