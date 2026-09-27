@@ -1,6 +1,7 @@
 #!/bin/sh
 # Copies the showreel and its poster from docs/assets into site/media.
-# Run before previewing or deploying (the Vercel deploy uploads site/ as-is).
+# Vercel runs this with Root Directory set to site and outside-root files enabled.
+# Run locally before previewing; CLI deployments must upload the repository root.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$root/site/media"
