@@ -185,6 +185,8 @@ On Linux, `doctor` calls the original runtime's `list_windows` and `get_screensh
 
 On Windows, the existing original window-list check remains available. `doctor` reports that screenshot and Windows permission readiness are unverified; a window list alone is not a screenshot-readiness claim. Across platforms, generic provider errors remain runtime/backend failures unless the original API gives a specific supported error.
 
+Setup remembers these opt-ins per account. After a successful setup or export it saves `{"chrome": bool, "audio": bool}` to `~/.local/state/lcu/setup.json` (Windows: `%LOCALAPPDATA%\LCU\setup.json`). Rerunning setup without `--chrome`/`--audio` keeps the saved values, so `setup --agent AGENT --audio` no longer drops a Chrome surface you enabled earlier. Use `--no-chrome` or `--no-audio` to disable a saved opt-in. The interactive Chrome prompt appears only when there is neither a flag nor a saved choice.
+
 For computer-audio recording, explicitly opt in when registering the agent, then reconnect it. For example, run `lcu setup --agent pi --audio`. This enables the original recording API and approval flow. LCU adds no audio-specific instructions, and saving audio to a file does not deliver it to the model. See [the audio opt-in verification record](verification/audio-opt-in-2026-09-27.md).
 
 For Chrome, explicitly opt in when registering the agent, then reconnect it. For example, as the desktop account run `lcu setup --agent codex --chrome`. The selected browser and extension must run under that same account. To refresh the original native-host registration, run:
