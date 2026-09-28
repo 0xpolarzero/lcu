@@ -186,14 +186,17 @@ def select_scope(agent: str, rendered: str, scope: str) -> bool:
 
 def instrument_pi_cleanup(adapter_file: Path) -> None:
     source = adapter_file.read_text(encoding="utf-8")
-    anchor = "      await client.turnEnded({ ...cleanup.turn, event: cleanup.event });"
+    anchor = """      await client.turnEnded({ ...cleanup.turn, event: cleanup.event });
+      if (pendingCleanup === cleanup) pendingCleanup = undefined;"""
     observer = (
         "      const lifecyclePath = process.env.LCU_PI_LIFECYCLE_LOG;\n"
         "      if (lifecyclePath) appendFileSync(lifecyclePath, JSON.stringify({session_id: cleanup.turn.sessionId, turn_id: cleanup.turn.turnId, event: cleanup.event}) + '\\n');\n"
     )
-    if source.count(anchor) != 1:
-        raise RuntimeError("Committed OMP adapter cleanup anchor changed; refusing to instrument")
-    source = "import { appendFileSync } from 'node:fs';\n" + source.replace(anchor, anchor + "\n" + observer)
+    import_anchor = "import { randomUUID } from 'node:crypto';"
+    if source.count(anchor) != 1 or source.count(import_anchor) != 1:
+        raise RuntimeError("Committed OMP finish cleanup anchor changed; refusing to instrument")
+    source = source.replace(import_anchor, "import { appendFileSync } from 'node:fs';\n" + import_anchor)
+    source = source.replace(anchor, anchor.replace("\n      if (pendingCleanup", "\n" + observer + "      if (pendingCleanup"))
     adapter_file.write_text(source, encoding="utf-8")
 
 
@@ -215,7 +218,8 @@ def prepare_runtime_overlay(stage: Path, installed_root: Path, destination: Path
     """Run staged LCU code against the app already selected by the guest install."""
     destination.mkdir(parents=True)
     shutil.copytree(stage / "lcu", destination / "lcu")
-    shutil.copytree(stage / "adapters", destination / "adapters")
+    shutil.copytree(stage / "adapters", destination / "adapters",
+                    ignore=shutil.ignore_patterns("node_modules"))
     (destination / "bin").mkdir()
     shutil.copy2(stage / "bin/lcu", destination / "bin/lcu")
     (destination / "bin/lcu").chmod(0o755)
@@ -236,49 +240,52 @@ def prepare_runtime_overlay(stage: Path, installed_root: Path, destination: Path
 
 def instrument_client_trace(client_file: Path) -> None:
     source = client_file.read_text(encoding="utf-8")
-    source = "import { appendFileSync } from 'node:fs';\n" + source
+    fs_import = "import { chmodSync, mkdtempSync, rmSync } from 'node:fs';"
     marker = "const MODEL_TOOLS = new Set(['js', 'js_reset']);"
+    if source.count(fs_import) != 1 or source.count(marker) != 1:
+        raise RuntimeError("Committed MCP client trace preamble changed; refusing to instrument")
+    source = source.replace(fs_import, "import { appendFileSync, chmodSync, mkdtempSync, rmSync } from 'node:fs';")
     trace = marker + "\nconst nativeTrace = row => { const path = process.env.LCU_NATIVE_TRACE; if (path) appendFileSync(path, JSON.stringify(row) + '\\n'); };"
-    if source.count(marker) != 1:
-        raise RuntimeError("Committed MCP client trace seam changed")
     source = source.replace(marker, trace)
+
     elicitation = "    const answer = await onElicitation(params);"
     elicitation_trace = elicitation + "\n    nativeTrace({kind: 'elicitation', app_id: params?._meta?.tool_params?.app ?? null, action: answer?.action ?? 'cancel', persist: answer?._meta?.persist ?? (answer?.action === 'accept' ? 'once' : null)});"
     if source.count(elicitation) != 1:
-        raise RuntimeError("Committed MCP elicitation seam changed")
+        raise RuntimeError("Committed MCP elicitation seam changed; refusing to instrument")
     source = source.replace(elicitation, elicitation_trace)
+
     call_anchor = """      return client.callTool({ name, arguments: args, _meta: {
-        'x-codex-turn-metadata': { session_id: sessionId, turn_id: turnId,
-          ...(toolCallId ? { call_id: toolCallId } : {}),
-          ...(model ? { model } : {}) },
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        'x-codex-turn-metadata': turnMetadata,
       } }, undefined, { signal, timeout });"""
     call_trace = """      const result = await client.callTool({ name, arguments: args, _meta: {
-        'x-codex-turn-metadata': { session_id: sessionId, turn_id: turnId,
-          ...(toolCallId ? { call_id: toolCallId } : {}),
-          ...(model ? { model } : {}) },
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        'x-codex-turn-metadata': turnMetadata,
       } }, undefined, { signal, timeout });
-      nativeTrace({kind: 'tool_call', tool: name, session_id: sessionId, turn_id: turnId, is_error: Boolean(result.isError)});
+      nativeTrace({kind: 'tool_call', tool: name, session_id: turnMetadata.session_id,
+        turn_id: turnMetadata.turn_id, is_error: Boolean(result.isError)});
       return result;"""
     if source.count(call_anchor) != 1:
-        raise RuntimeError("Committed MCP call seam changed")
+        raise RuntimeError("Committed MCP metadata forwarding seam changed; refusing to instrument")
     source = source.replace(call_anchor, call_trace)
-    stop_anchor = """      if (result.isError) {
-        const detail = result.content.filter(item => item.type === 'text').map(item => item.text).join('\\n');
+
+    stop_anchor = r"""      if (result.isError) {
+        const detail = result.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
         throw new Error(`Original CUA turn cleanup failed: ${detail || 'unknown error'}`);
       }
       return result;
     },
-    async close()"""
-    stop_trace = """      if (result.isError) {
-        const detail = result.content.filter(item => item.type === 'text').map(item => item.text).join('\\n');
+    get hasHostControl()"""
+    stop_trace = r"""      if (result.isError) {
+        const detail = result.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
         throw new Error(`Original CUA turn cleanup failed: ${detail || 'unknown error'}`);
       }
       nativeTrace({kind: 'turn_ended', session_id: sessionId, turn_id: turnId, event});
       return result;
     },
-    async close()"""
+    get hasHostControl()"""
     if source.count(stop_anchor) != 1:
-        raise RuntimeError("Committed MCP turn-ended seam changed")
+        raise RuntimeError("Committed MCP turn-ended seam changed; refusing to instrument")
     client_file.write_text(source.replace(stop_anchor, stop_trace), encoding="utf-8")
 
 
@@ -576,7 +583,8 @@ def main() -> None:
             bundle_id = plistlib.loads((app_fixture / "Contents/Info.plist").read_bytes())["CFBundleIdentifier"]
             oracle = fixture_root / "draft.txt"
             test_release = root / "release"
-            shutil.copytree(release / "adapters", test_release / "adapters")
+            shutil.copytree(release / "adapters", test_release / "adapters",
+                            ignore=shutil.ignore_patterns("node_modules"))
             deps = runtime.parent.parent / "adapters/node_modules"
             if not deps.is_dir():
                 raise SystemExit("Installed LCU adapter dependencies are missing")

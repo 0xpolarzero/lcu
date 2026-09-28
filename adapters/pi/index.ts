@@ -469,7 +469,9 @@ export default function (pi: ExtensionAPI, options: {
   pi.on('before_agent_start', async (event, ctx) => {
     approvalContext = ctx;
     const client = await connected();
-    return { systemPrompt: `${event.systemPrompt}\n\n${client.instructions}` };
+    return { systemPrompt: Array.isArray(event.systemPrompt)
+      ? [...event.systemPrompt, client.instructions]
+      : `${event.systemPrompt}\n\n${client.instructions}` };
   });
   pi.on('agent_start', async (_event, ctx) => {
     // A failed turn_ended must succeed before Pi starts another turn. Keep the

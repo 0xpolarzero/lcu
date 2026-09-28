@@ -19,6 +19,7 @@ async function withPi({ allowedOrigins = [], hasUI = true, ui } = {}, run) {
   const pi = {
     on(event, handler) { handlers.set(event, handler); },
     registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand() {},
   };
   const ctx = {
     sessionManager: { getSessionId: () => `pi-origin-session-${++session}` },
