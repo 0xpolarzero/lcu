@@ -153,10 +153,10 @@ Use `--agent pi`, `codex`, `claude-code`, `omp`, or `hermes` to select agents. R
 ./scripts/install.sh --list-agents
 ~~~
 
-Unattended Linux registration skips desktop readiness. Use it only when setup cannot run interactively, then run `doctor` from the active desktop account's session:
+Unattended Linux registration skips desktop readiness. Run it from a terminal inside the active X11 desktop session and keep `--session direct`, matching the main Linux flow; without it setup defaults to `--session discover`, which requires an existing XFCE session (see [Desktop and browser](#desktop-and-browser)). Then run `doctor` from that session:
 
 ~~~sh
-/opt/lcu/current/bin/lcu setup --agent codex --yes
+/opt/lcu/current/bin/lcu setup --agent codex --yes --session direct
 ~~~
 
 Later, from that account's active desktop session:
@@ -165,7 +165,7 @@ Later, from that account's active desktop session:
 /opt/lcu/current/bin/lcu doctor
 ~~~
 
-For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and a compatible official app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
+For project scope, use --scope project --project /absolute/project. Use --runtime-only to install without registration, then run /opt/lcu/current/bin/lcu setup --agent codex --session direct from inside the desktop session as the desktop account. --export /absolute/new/directory creates a portable LCU bootstrap and host contract, without OpenAI files or producer account paths. Its MCP command resolves /opt/lcu/current on the destination; set LCU_PREFIX for another installed prefix and LCU_SESSION_MODE=direct for an agent already inside the desktop session. On the destination machine, install LCU and a compatible official app and run setup --export again to generate original instruction references locally. Import that new export and the local full skill.
 
 The original host contract advertises model-facing js and js_reset, keeps turn_ended for lifecycle and restricts module-directory injection. Generic MCP consumers must honor the exported visibility, output and lifecycle contract. MCP registration alone cannot enforce all agent-host behavior.
 
