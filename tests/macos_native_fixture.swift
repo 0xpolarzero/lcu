@@ -47,9 +47,13 @@ final class Fixture: NSObject, NSApplicationDelegate {
     }
 }
 
-guard CommandLine.arguments.count == 2 else {
-    fputs("Usage: LCUMacFixture OUTPUT_PATH\n", stderr)
+guard CommandLine.arguments.count == 2 || CommandLine.arguments.count == 3 else {
+    fputs("Usage: LCUMacFixture OUTPUT_PATH [PID_PATH]\n", stderr)
     exit(2)
+}
+if CommandLine.arguments.count == 3 {
+    try? "\(ProcessInfo.processInfo.processIdentifier)\n".write(
+        to: URL(fileURLWithPath: CommandLine.arguments[2]), atomically: true, encoding: .utf8)
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)

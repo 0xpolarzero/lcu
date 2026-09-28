@@ -23,9 +23,18 @@ cat > "$fixture_root/LCUMacFixture.app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-xcrun swiftc -O -framework AppKit "$script_dir/macos_native_fixture.swift" \
-  -o "$fixture_root/LCUMacFixture.app/Contents/MacOS/LCUMacFixture"
+fixture_binary="$fixture_root/LCUMacFixture.app/Contents/MacOS/LCUMacFixture"
+if [[ -x "$script_dir/macos_native_fixture.bin" ]]; then
+  cp "$script_dir/macos_native_fixture.bin" "$fixture_binary"
+else
+  xcrun swiftc -O -framework AppKit "$script_dir/macos_native_fixture.swift" \
+    -o "$fixture_binary"
+fi
 codesign --force --sign - "$fixture_root/LCUMacFixture.app"
 output="$fixture_root/draft.txt"
-open -n -a "$fixture_root/LCUMacFixture.app" --args "$output"
+if [[ -n "${LCU_FIXTURE_PID_FILE:-}" ]]; then
+  open -n -a "$fixture_root/LCUMacFixture.app" --args "$output" "$LCU_FIXTURE_PID_FILE"
+else
+  open -n -a "$fixture_root/LCUMacFixture.app" --args "$output"
+fi
 printf 'bundle_id=%s\napp=%s\noutput=%s\n' "$bundle_id" "$fixture_root/LCUMacFixture.app" "$output"
