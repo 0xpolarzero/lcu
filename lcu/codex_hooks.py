@@ -51,12 +51,29 @@ def export_files(command, host_root):
 from .app_server import app_server as config_writer
 
 
+def _selected_codex_home(env):
+    """Match the native CLI's `CODEX_HOME ?? join(homedir, '.codex')` selection.
+
+    The pinned Codex host resolves the home with nullish coalescing, so an
+    explicitly empty CODEX_HOME is kept verbatim (an unusable relative path)
+    rather than falling back to ~/.codex. Reject it with a clear error instead
+    of silently substituting a default, mirroring setup's absolute-path check.
+    """
+    if 'CODEX_HOME' in env and env['CODEX_HOME'] == '':
+        raise ValueError('CODEX_HOME is set but empty; unset it or set an absolute path')
+    return Path(env['CODEX_HOME']) if env.get('CODEX_HOME') else Path(env['HOME']) / '.codex'
+
+
 def require_cli_hook_support(env):
     """Reject an installed Codex CLI that cannot parse the original MCP hook type.
 
     Registration also works before Codex CLI is installed. The probe has an
     empty home and never starts a model or loads account configuration.
     """
+    # The probe uses its own isolated home, but reject an explicitly empty
+    # CODEX_HOME up front so setup fails clearly instead of at hook install.
+    if env.get('CODEX_HOME') == '':
+        raise ValueError('CODEX_HOME is set but empty; unset it or set an absolute path')
     executable = shutil.which('codex', path=env.get('PATH'))
     if not executable:
         return
@@ -102,7 +119,7 @@ def install_hooks(cli, config_path, cwd, env, host_root):
     config_path = regular_path(config_path)
     before = read_file(config_path)
     current = tomllib.loads((before or b'').decode())
-    trust_path = regular_path(Path(env.get('CODEX_HOME') or Path(env['HOME']) / '.codex') / 'config.toml')
+    trust_path = regular_path(_selected_codex_home(env) / 'config.toml')
     trust_before = before if trust_path == config_path else read_file(trust_path)
     tomllib.loads((trust_before or b'').decode())
     hooks = copy.deepcopy(current.get('hooks', {}))
