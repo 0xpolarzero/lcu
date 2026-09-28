@@ -189,7 +189,13 @@ assert '--chrome' in tomllib.loads(codex.read_text())['mcp_servers']['lcu']['arg
 browser_export = home / 'portable-chrome'
 subprocess.run([command, 'setup', '--user', account, '--export', str(browser_export),
                 '--session', 'direct', '--chrome', '--yes'], check=True)
-assert json.loads((browser_export / 'mcp.json').read_text())['mcpServers']['lcu']['args'][-1] == '--chrome'
+# The earlier audio opt-in is saved for this account and kept alongside Chrome.
+assert json.loads((browser_export / 'mcp.json').read_text())['mcpServers']['lcu']['args'][-2:] == ['--chrome', '--audio']
+browser_only_export = home / 'portable-chrome-only'
+subprocess.run([command, 'setup', '--user', account, '--export', str(browser_only_export),
+                '--session', 'direct', '--no-audio', '--yes'], check=True)
+assert json.loads((browser_only_export / 'mcp.json').read_text())['mcpServers']['lcu']['args'][-1] == '--chrome'
+assert json.loads((home / '.local/state/lcu/setup.json').read_text()) == {'chrome': True, 'audio': False}
 # A malformed existing supported-agent config must be left byte-for-byte intact.
 claude = home / '.claude.json'
 before = claude.read_bytes()
