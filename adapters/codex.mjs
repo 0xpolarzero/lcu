@@ -10,15 +10,9 @@ import {
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { persistAudioContent } from './audio-files.mjs';
+import { callTimeout, isMainModule } from './client.mjs';
 
 const HOST_ONLY_TOOLS = new Set(['js_add_node_module_dir', 'turn_ended']);
-
-function callTimeout(name, args) {
-  const requested = Number(args?.timeout_ms);
-  return name === 'js' && Number.isFinite(requested) && requested > 0
-    ? Math.max(120_000, requested + 30_000)
-    : 120_000;
-}
 
 function report(label, error) {
   console.error(`${label}:`, error instanceof Error ? error.message : String(error));
@@ -178,9 +172,14 @@ export async function runCodexBridge({ command, args = [], cwd, env } = {}) {
   }
 }
 
-if (import.meta.main) {
+async function main() {
   const [command, ...args] = process.argv.slice(2);
-  runCodexBridge({ command, args }).catch(error => {
+  if (!command) throw new Error('Usage: codex.mjs ORIGINAL_MCP_COMMAND [ARG ...]');
+  await runCodexBridge({ command, args });
+}
+
+if (isMainModule(import.meta.url)) {
+  main().catch(error => {
     report('Codex MCP relay failed', error);
     process.exitCode = 1;
   });
