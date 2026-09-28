@@ -7,3 +7,4 @@ node_modules/
 *.deb
 *.tar.*
 dist/
+tests/macos_native_fixture.bin
