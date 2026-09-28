@@ -290,16 +290,46 @@ def instrument_client_trace(client_file: Path) -> None:
 
 
 def terminate_process(process: subprocess.Popen | None) -> None:
-    if process is None or process.poll() is not None:
+    if process is None:
         return
     try:
         os.killpg(process.pid, signal.SIGTERM)
-        process.wait(5)
-    except subprocess.TimeoutExpired:
+    except ProcessLookupError:
+        process.wait()
+        return
+
+    # The leader can exit before descendants. Keep checking the whole group,
+    # treating zombies as gone because only their parent can reap them.
+    def live_group_members() -> bool:
+        result = subprocess.run(["ps", "-axo", "pgid=,stat="], capture_output=True,
+                                text=True, check=True)
+        return any(int(fields[0]) == process.pid and "Z" not in fields[1]
+                   for line in result.stdout.splitlines()
+                   if len(fields := line.split()) == 2)
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if process.poll() is None:
+            try:
+                process.wait(timeout=.05)
+            except subprocess.TimeoutExpired:
+                pass
+        if not live_group_members():
+            return
+        time.sleep(.05)
+
+    try:
         os.killpg(process.pid, signal.SIGKILL)
-        process.wait(5)
     except ProcessLookupError:
         pass
+    if process.poll() is None:
+        process.wait(5)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if not live_group_members():
+            return
+        time.sleep(.05)
+    raise TimeoutError(f"Agent process group {process.pid} remained alive after SIGKILL")
 
 
 def stop_fixture(pid_path: Path | None, pid: int | None) -> None:
@@ -544,135 +574,142 @@ def main() -> None:
     pid_path = None
     process_count = 2 if args.scope == "always" else 1
     markers = [f"lcu-{args.agent}-{uuid.uuid4().hex[:12]}" for _ in range(process_count)]
-    with tempfile.TemporaryDirectory(prefix=f"lcu-{args.agent}-scopes-", dir=temp_parent) as temporary:
-        root = Path(temporary)
-        overlay_runtime = prepare_runtime_overlay(release, runtime.parent.parent, root / "live-lcu")
-        home, hermes_home = root / "home", root / "hermes-home"
-        for directory in (home, hermes_home, root / "cwd", root / "session"):
-            directory.mkdir(parents=True)
-        if args.skill:
-            skill = args.skill.resolve(strict=True)
-        else:
-            from lcu.setup import generate_skill
-            skill = generate_skill(release / "skills/lcu", home, root / "live-lcu")
-        env = cua_environment(home, app, audio=False)
-        env["PATH"] = os.pathsep.join((str(cli.parent), env.get("PATH", "/usr/bin:/bin")))
-        if args.agent == "hermes":
-            env["PATH"] = ensure_node() + os.pathsep + env["PATH"]
-        env.update({"HOME": str(home), "HERMES_HOME": str(hermes_home),
-                    "OPENAI_API_KEY": "local-fixture-proxy", "TERM": "xterm-256color",
-                    "NO_COLOR": "1", "NO_PROXY": "localhost,127.0.0.1,192.168.64.1",
-                    "no_proxy": "localhost,127.0.0.1,192.168.64.1"})
-        fixture_root = root / "fixture"
-        fixture_root.mkdir()
-        pid_path = fixture_root / "fixture.pid"
-        env["LCU_FIXTURE_PID_FILE"] = str(pid_path)
-        lifecycle_path = root / "turn-ended.jsonl"
-        env.update({"LCU_PI_LIFECYCLE_LOG": str(lifecycle_path),
-                    "LCU_HERMES_LIFECYCLE_LOG": str(lifecycle_path)})
-        try:
-            subprocess.run([str(ROOT / "tests/macos_native_fixture.sh"), str(fixture_root)],
-                cwd=ROOT, env=env, capture_output=True, text=True, timeout=90, check=True)
-            deadline = time.monotonic() + 10
-            while not pid_path.is_file() and time.monotonic() < deadline:
-                time.sleep(.1)
-            if not pid_path.is_file():
-                raise RuntimeError("Generated fixture did not report its process ID")
-            fixture_pid = int(pid_path.read_text().strip())
-            app_fixture = fixture_root / "LCUMacFixture.app"
-            bundle_id = plistlib.loads((app_fixture / "Contents/Info.plist").read_bytes())["CFBundleIdentifier"]
-            oracle = fixture_root / "draft.txt"
-            test_release = root / "release"
-            shutil.copytree(release / "adapters", test_release / "adapters",
-                            ignore=shutil.ignore_patterns("node_modules"))
-            deps = runtime.parent.parent / "adapters/node_modules"
-            if not deps.is_dir():
-                raise SystemExit("Installed LCU adapter dependencies are missing")
-            (test_release / "adapters/node_modules").symlink_to(deps, target_is_directory=True)
-            instrument_client_trace(test_release / "adapters/client.mjs")
-            if args.agent == "omp":
-                instrument_pi_cleanup(test_release / "adapters/pi/index.ts")
-                profile = home / ".omp/profiles/lcu-macos/agent"
-                profile.mkdir(parents=True)
-                env.update({"OMP_PROFILE": "lcu-macos", "PI_PROFILE": "lcu-macos",
-                            "PI_CODING_AGENT_DIR": str(profile)})
-                (profile / "models.yml").write_text(
-                    "providers:\n  openai:\n    api: openai-completions\n"
-                    f"    baseUrl: {args.base_url.rstrip('/')}\n"
-                    "    apiKey: local-fixture-proxy\n    models:\n"
-                    f"      - id: {args.model}\n        contextWindow: 200000\n"
-                    "        maxTokens: 8192\n        supportsTools: true\n"
-                    "        compat:\n          supportsDeveloperRole: false\n", encoding="utf-8")
-                configure_omp(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
-                              test_release, scope="user", project=None, env=env)
-                (profile / "config.yml").write_text("setupVersion: 2\nstartup:\n  quiet: true\n")
-                run_args = ["--cwd", str(root / "cwd"), "--session-dir", str(root / "session")]
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"lcu-{args.agent}-scopes-", dir=temp_parent) as temporary:
+            root = Path(temporary)
+            overlay_runtime = prepare_runtime_overlay(release, runtime.parent.parent, root / "live-lcu")
+            home, hermes_home = root / "home", root / "hermes-home"
+            for directory in (home, hermes_home, root / "cwd", root / "session"):
+                directory.mkdir(parents=True)
+            if args.skill:
+                skill = args.skill.resolve(strict=True)
             else:
-                node = app / "Contents/Resources/cua_node/bin/node"
-                configure_hermes(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
-                                 node, test_release, scope="user", project=None, env=env)
-                instrument_hermes_cleanup(hermes_home / "plugins/lcu-cua/__init__.py")
-                from lcu.harness_setup import _run
-                for key, value in (("model.provider", "custom"), ("model.default", args.model),
-                    ("model.base_url", args.base_url.rstrip("/")), ("model.api_mode", "chat_completions"),
-                    ("agent.max_turns", "12"), ("tools.tool_search.enabled", "off")):
-                    _run([str(cli), "config", "set", key, value], cwd=home, env=env)
-                run_args = []
-            for index, marker in enumerate(markers):
-                phase = f"process-{index + 1}"
-                trace_path = root / f"{phase}-trace.jsonl"
-                phase_lifecycle = root / f"{phase}-turn-ended.jsonl"
-                env["LCU_NATIVE_TRACE"] = str(trace_path)
-                env["LCU_PI_LIFECYCLE_LOG"] = str(phase_lifecycle)
-                env["LCU_HERMES_LIFECYCLE_LOG"] = str(phase_lifecycle)
-                prompt = prompt_for(args.agent, bundle_id, marker)
-                phase_scope = args.scope if index == 0 else "always"
-                try:
-                    remaining = int(overall_deadline - time.monotonic())
-                    if remaining <= 0:
-                        raise TimeoutError("Overall scope check exceeded --timeout")
-                    record = run_phase(agent=args.agent, cli=cli, model=args.model, args=run_args,
-                        prompt=prompt, env=env, cwd=root / "cwd", oracle=oracle, marker=marker,
-                        scope=phase_scope, allow_approval=(index == 0), expect_approval=(index == 0),
-                        phase_timeout=remaining, trace_path=trace_path, lifecycle_path=phase_lifecycle,
-                        terminal_log_path=root / f"{phase}-terminal.log")
-                    record["phase"] = phase
-                    record["selected_scope"] = phase_scope if index == 0 else None
-                    record["app_pid"] = fixture_pid
-                    record["bundle_id"] = bundle_id
-                    phase_results.append(record)
-                except BaseException as exc:
+                from lcu.setup import generate_skill
+                skill = generate_skill(release / "skills/lcu", home, root / "live-lcu")
+            env = cua_environment(home, app, audio=False)
+            env["PATH"] = os.pathsep.join((str(cli.parent), env.get("PATH", "/usr/bin:/bin")))
+            if args.agent == "hermes":
+                env["PATH"] = ensure_node() + os.pathsep + env["PATH"]
+            env.update({"HOME": str(home), "HERMES_HOME": str(hermes_home),
+                        "OPENAI_API_KEY": "local-fixture-proxy", "TERM": "xterm-256color",
+                        "NO_COLOR": "1", "NO_PROXY": "localhost,127.0.0.1,192.168.64.1",
+                        "no_proxy": "localhost,127.0.0.1,192.168.64.1"})
+            fixture_root = root / "fixture"
+            fixture_root.mkdir()
+            pid_path = fixture_root / "fixture.pid"
+            env["LCU_FIXTURE_PID_FILE"] = str(pid_path)
+            lifecycle_path = root / "turn-ended.jsonl"
+            env.update({"LCU_PI_LIFECYCLE_LOG": str(lifecycle_path),
+                        "LCU_HERMES_LIFECYCLE_LOG": str(lifecycle_path)})
+            try:
+                subprocess.run([str(ROOT / "tests/macos_native_fixture.sh"), str(fixture_root)],
+                    cwd=ROOT, env=env, capture_output=True, text=True, timeout=90, check=True)
+                deadline = time.monotonic() + 10
+                while not pid_path.is_file() and time.monotonic() < deadline:
+                    time.sleep(.1)
+                if not pid_path.is_file():
+                    raise RuntimeError("Generated fixture did not report its process ID")
+                fixture_pid = int(pid_path.read_text().strip())
+                app_fixture = fixture_root / "LCUMacFixture.app"
+                bundle_id = plistlib.loads((app_fixture / "Contents/Info.plist").read_bytes())["CFBundleIdentifier"]
+                oracle = fixture_root / "draft.txt"
+                test_release = root / "release"
+                shutil.copytree(release / "adapters", test_release / "adapters",
+                                ignore=shutil.ignore_patterns("node_modules"))
+                deps = runtime.parent.parent / "adapters/node_modules"
+                if not deps.is_dir():
+                    raise SystemExit("Installed LCU adapter dependencies are missing")
+                (test_release / "adapters/node_modules").symlink_to(deps, target_is_directory=True)
+                instrument_client_trace(test_release / "adapters/client.mjs")
+                if args.agent == "omp":
+                    instrument_pi_cleanup(test_release / "adapters/pi/index.ts")
+                    profile = home / ".omp/profiles/lcu-macos/agent"
+                    profile.mkdir(parents=True)
+                    env.update({"OMP_PROFILE": "lcu-macos", "PI_PROFILE": "lcu-macos",
+                                "PI_CODING_AGENT_DIR": str(profile)})
+                    (profile / "models.yml").write_text(
+                        "providers:\n  openai:\n    api: openai-completions\n"
+                        f"    baseUrl: {args.base_url.rstrip('/')}\n"
+                        "    apiKey: local-fixture-proxy\n    models:\n"
+                        f"      - id: {args.model}\n        contextWindow: 200000\n"
+                        "        maxTokens: 8192\n        supportsTools: true\n"
+                        "        compat:\n          supportsDeveloperRole: false\n", encoding="utf-8")
+                    configure_omp(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
+                                  test_release, scope="user", project=None, env=env)
+                    (profile / "config.yml").write_text("setupVersion: 2\nstartup:\n  quiet: true\n")
+                    run_args = ["--cwd", str(root / "cwd"), "--session-dir", str(root / "session")]
+                else:
+                    node = app / "Contents/Resources/cua_node/bin/node"
+                    configure_hermes(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
+                                     node, test_release, scope="user", project=None, env=env)
+                    instrument_hermes_cleanup(hermes_home / "plugins/lcu-cua/__init__.py")
+                    from lcu.harness_setup import _run
+                    for key, value in (("model.provider", "custom"), ("model.default", args.model),
+                        ("model.base_url", args.base_url.rstrip("/")), ("model.api_mode", "chat_completions"),
+                        ("agent.max_turns", "12"), ("tools.tool_search.enabled", "off")):
+                        _run([str(cli), "config", "set", key, value], cwd=home, env=env)
+                    run_args = []
+                for index, marker in enumerate(markers):
+                    phase = f"process-{index + 1}"
+                    trace_path = root / f"{phase}-trace.jsonl"
+                    phase_lifecycle = root / f"{phase}-turn-ended.jsonl"
+                    env["LCU_NATIVE_TRACE"] = str(trace_path)
+                    env["LCU_PI_LIFECYCLE_LOG"] = str(phase_lifecycle)
+                    env["LCU_HERMES_LIFECYCLE_LOG"] = str(phase_lifecycle)
+                    prompt = prompt_for(args.agent, bundle_id, marker)
+                    phase_scope = args.scope if index == 0 else "always"
+                    try:
+                        remaining = int(overall_deadline - time.monotonic())
+                        if remaining <= 0:
+                            raise TimeoutError("Overall scope check exceeded --timeout")
+                        record = run_phase(agent=args.agent, cli=cli, model=args.model, args=run_args,
+                            prompt=prompt, env=env, cwd=root / "cwd", oracle=oracle, marker=marker,
+                            scope=phase_scope, allow_approval=(index == 0), expect_approval=(index == 0),
+                            phase_timeout=remaining, trace_path=trace_path, lifecycle_path=phase_lifecycle,
+                            terminal_log_path=root / f"{phase}-terminal.log")
+                        record["phase"] = phase
+                        record["selected_scope"] = phase_scope if index == 0 else None
+                        record["app_pid"] = fixture_pid
+                        record["bundle_id"] = bundle_id
+                        phase_results.append(record)
+                    except BaseException as exc:
+                        failure = f"{type(exc).__name__}: {exc}"
+                        diagnostic = getattr(exc, "phase_evidence", None)
+                        phase_results.append({"phase": phase, "failure": failure,
+                                              "diagnostic": diagnostic})
+                        raise
+                if args.scope == "always":
+                    first, second = phase_results
+                    if first["bundle_id"] != second["bundle_id"] or first["app_pid"] != second["app_pid"]:
+                        raise AssertionError("Fresh-process check did not reuse the same generated app")
+                    if (len(first["session_ids"]) != 1 or len(second["session_ids"]) != 1 or
+                            len(first["turn_ids"]) != 1 or len(second["turn_ids"]) != 1 or
+                            set(first["session_ids"]) & set(second["session_ids"]) or
+                            set(first["turn_ids"]) & set(second["turn_ids"])):
+                        raise AssertionError("The second process did not create one fresh agent session and turn")
+            except BaseException as exc:
+                if failure is None:
                     failure = f"{type(exc).__name__}: {exc}"
-                    diagnostic = getattr(exc, "phase_evidence", None)
-                    phase_results.append({"phase": phase, "failure": failure,
-                                          "diagnostic": diagnostic})
-                    raise
-            if args.scope == "always":
-                first, second = phase_results
-                if first["bundle_id"] != second["bundle_id"] or first["app_pid"] != second["app_pid"]:
-                    raise AssertionError("Fresh-process check did not reuse the same generated app")
-                if (len(first["session_ids"]) != 1 or len(second["session_ids"]) != 1 or
-                        len(first["turn_ids"]) != 1 or len(second["turn_ids"]) != 1 or
-                        set(first["session_ids"]) & set(second["session_ids"]) or
-                        set(first["turn_ids"]) & set(second["turn_ids"])):
-                    raise AssertionError("The second process did not create one fresh agent session and turn")
-        except BaseException as exc:
-            if failure is None:
-                failure = f"{type(exc).__name__}: {exc}"
-        finally:
-            stop_fixture(pid_path, fixture_pid)
-            evidence = {
-                "result": "passed" if failure is None and len(phase_results) == process_count else "failed",
-                "agent": args.agent, "agent_version": (cli_version.stdout or cli_version.stderr).strip(),
-                "agent_sha256": sha256_file(cli), "scope_mode": args.scope,
-                "model": args.model, "proxy_origin": f"{url.scheme}://{url.netloc}",
-                "app": app_report, "same_generated_app": process_count == 1 or
-                    (len(phase_results) == 2 and phase_results[0].get("bundle_id") == phase_results[1].get("bundle_id")
-                     and phase_results[0].get("app_pid") == phase_results[1].get("app_pid")),
-                "phases": phase_results, "failure": failure,
-            }
-            evidence_path = args.evidence.expanduser().resolve()
-            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+            finally:
+                stop_fixture(pid_path, fixture_pid)
+                evidence = {
+                    "result": "passed" if failure is None and len(phase_results) == process_count else "failed",
+                    "agent": args.agent, "agent_version": (cli_version.stdout or cli_version.stderr).strip(),
+                    "agent_sha256": sha256_file(cli), "scope_mode": args.scope,
+                    "model": args.model, "proxy_origin": f"{url.scheme}://{url.netloc}",
+                    "app": app_report, "same_generated_app": process_count == 1 or
+                        (len(phase_results) == 2 and phase_results[0].get("bundle_id") == phase_results[1].get("bundle_id")
+                         and phase_results[0].get("app_pid") == phase_results[1].get("app_pid")),
+                    "phases": phase_results, "failure": failure,
+                }
+                evidence_path = args.evidence.expanduser().resolve()
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+    except BaseException as exc:
+        failure = failure or f"{type(exc).__name__}: {exc}"
+        if "evidence" in locals() and "evidence_path" in locals():
+            evidence["result"] = "failed"
+            evidence["failure"] = failure
             evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
     if failure:
         raise SystemExit(failure)
