@@ -7,11 +7,12 @@ import {
   ElicitRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { realpathSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import {
+  callTimeout,
+  isMainModule,
   nativeAppApprovalOptions,
   nativeAppApprovalResponse,
+  TURN_END_TIMEOUT_MS,
 } from './client.mjs';
 
 const PUBLIC_TOOLS = new Set(['js', 'js_reset']);
@@ -43,19 +44,12 @@ function asError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function callTimeout(name, args) {
-  const requested = Number(args?.timeout_ms);
-  return name === 'js' && Number.isFinite(requested) && requested > 0
-    ? Math.max(120_000, requested + 30_000)
-    : 120_000;
-}
-
 function requireTurnContext(value) {
   if (!value || typeof value !== 'object' ||
       !nonEmptyString(value.session_id) || !nonEmptyString(value.turn_id) ||
       !nonEmptyString(value.tool_use_id) ||
       (value.agent_id !== undefined && typeof value.agent_id !== 'string')) {
-    throw new Error('Claude turn context requires session_id, prompt_id, and tool_use_id');
+    throw new Error('Claude turn context requires session_id, turn_id, and tool_use_id');
   }
   return {
     sessionId: value.session_id,
@@ -134,7 +128,7 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
         hook_event_name: event,
         session_id: sessionId,
         turn_id: turnId,
-      } }, undefined, { timeout: 120_000 });
+      } }, undefined, { timeout: TURN_END_TIMEOUT_MS });
       cleanupInFlight.set(key, cleanup);
     }
     try {
@@ -200,7 +194,11 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
           throw new Error('Too many pending Claude tool identities; LCU rejected this call safely');
         }
         contexts.set(context.toolUseId, context);
-        activeTurns.set(turnKey(context.sessionId, context.turnId), {
+        const key = turnKey(context.sessionId, context.turnId);
+        // The turn is live again: a later Stop must reach upstream turn_ended
+        // even if an earlier aborted call already ran Interrupt cleanup for it.
+        cleanedTurns.delete(key);
+        activeTurns.set(key, {
           sessionId: context.sessionId,
           turnId: context.turnId,
         });
@@ -242,7 +240,14 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
           timeout: callTimeout(name, toolArgs),
         });
       } finally {
-        if (extra.signal.aborted) await turnEnded(context.sessionId, context.turnId, 'Interrupt');
+        // Never let cleanup mask the original tool result or abort error.
+        if (extra.signal.aborted) {
+          try {
+            await turnEnded(context.sessionId, context.turnId, 'Interrupt');
+          } catch (error) {
+            console.error('Claude MCP interrupt cleanup failed:', asError(error));
+          }
+        }
       }
     });
 
@@ -315,16 +320,7 @@ async function main() {
   await runClaudeBridge({ command, args });
 }
 
-function isMainModule() {
-  if (!process.argv[1]) return false;
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
-  } catch {
-    return false;
-  }
-}
-
-if (isMainModule()) {
+if (isMainModule(import.meta.url)) {
   main().catch(error => {
     console.error('Claude MCP relay failed:', asError(error));
     process.exitCode = 1;

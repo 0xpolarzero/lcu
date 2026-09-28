@@ -340,6 +340,50 @@ test('Claude relay isolates overlapping child identities and makes SubagentStop 
   }
 });
 
+test('Claude relay re-runs Stop cleanup after an aborted call re-binds the same turn', async () => {
+  const bridge = await connectRelay();
+  try {
+    const sessionId = 'relive-session';
+    const turnId = 'relive-turn';
+    // An aborted call runs Interrupt cleanup, marking the turn ended.
+    const controller = new AbortController();
+    const aborted = callWithContext(bridge.client, 'js', { code: 'cancel-active' }, {
+      sessionId, turnId, toolUseId: 'relive-abort', signal: controller.signal,
+    }).then(value => ({ value }), error => ({ error }));
+    await waitFor(() => bridge.logs().some(entry => entry.type === 'active-call-start'));
+    controller.abort();
+    assert.ok((await aborted).error, 'the canceled call should reject at the caller');
+    await waitFor(() => bridge.logs().some(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === sessionId));
+    assert.equal(bridge.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === sessionId).length, 1);
+
+    // The model continues in the same prompt_id: re-binding revives the turn.
+    const live = await callWithContext(bridge.client, 'js', { code: 'relive-live' }, {
+      sessionId, turnId, toolUseId: 'relive-live',
+    });
+    assert.equal(live.content[0].text, 'relive-live');
+
+    // The final Stop must reach upstream turn_ended a second time, not dedupe.
+    const stop = await bridge.client.callTool({ name: 'turn_ended', arguments: {
+      hook_event_name: 'Stop', session_id: sessionId, turn_id: turnId,
+    } });
+    assert.equal(stop.content[0].text, 'Original cleanup completed.');
+    assert.equal(bridge.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === sessionId).length, 2);
+
+    // A duplicate Stop for the still-ended turn is still deduped.
+    const duplicate = await bridge.client.callTool({ name: 'turn_ended', arguments: {
+      hook_event_name: 'Stop', session_id: sessionId, turn_id: turnId,
+    } });
+    assert.equal(duplicate.content[0].text, 'Turn already ended.');
+    assert.equal(bridge.logs().filter(entry => entry.type === 'turn-ended' &&
+      entry.args.session_id === sessionId).length, 2);
+  } finally {
+    await bridge.close();
+  }
+});
+
 test('Claude relay maps native scopes and passes unrelated form and URL elicitations through unchanged', async () => {
   const bridge = await connectRelay();
   try {
