@@ -24,10 +24,10 @@ def inventory(root, target='linux'):
         if relative == 'bundle.json':
             continue
         if path.is_symlink():
-            target = os.readlink(path)
-            if Path(target).is_absolute() or not path.resolve().is_relative_to(root):
+            link = os.readlink(path)
+            if Path(link).is_absolute() or not path.resolve().is_relative_to(root):
                 raise ValueError(f'Unsafe bundle symlink: {relative}')
-            files[relative] = {'type': 'symlink', 'target': target}
+            files[relative] = {'type': 'symlink', 'target': link}
         elif path.is_file():
             with path.open('rb') as stream:
                 digest = hashlib.file_digest(stream, 'sha256').hexdigest()

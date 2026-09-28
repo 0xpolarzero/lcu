@@ -6,7 +6,7 @@ import unittest
 from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from bundle import seal, verify
+from bundle import inventory, seal, verify
 
 
 class BundleTests(unittest.TestCase):
@@ -20,6 +20,13 @@ class BundleTests(unittest.TestCase):
         self.binary.chmod(0o755)
         (self.root / 'runtime/bin/alias').symlink_to('node')
         seal(self.root, 'arm64')
+
+    def test_file_after_symlink_still_records_mode(self):
+        # A symlink sorts before 'node'; the loop must not shadow the target
+        # parameter with the readlink result and drop later files' modes.
+        files = inventory(self.root, 'linux')
+        self.assertEqual(files['runtime/bin/alias']['type'], 'symlink')
+        self.assertIn('mode', files['runtime/bin/node'])
 
     def test_relocated_bundle_verifies(self):
         moved = self.root.with_name('moved')
