@@ -1,6 +1,6 @@
 # Native macOS harness flows, 2026-09-28
 
-OMP 18.4.1 passed a real model-driven native macOS edit/save flow with session approval. Hermes native verification and fresh-process reuse of an always grant remain pending. [Browser flows and the interactive approval matrices](harness-browser-flows-2026-09-28.md) passed separately.
+OMP 18.4.1 passed a real model-driven native macOS edit/save flow with session approval. OMP also passed fresh-process reuse of an always grant. Hermes native verification remains pending. [Browser flows and the interactive approval matrices](harness-browser-flows-2026-09-28.md) passed separately.
 
 ## Environment and source boundary
 
@@ -23,3 +23,11 @@ The run passed in 88.88 seconds. Private evidence is `/private/tmp/lcu-harness-f
 This proves actual macOS actions and reuse of session approval across calls within the same OMP turn. It does not establish grant reuse after an agent/helper restart, audio behavior, or other platforms.
 
 For guests without developer tools, build only the generated fixture with `xcrun swiftc -O -framework AppKit tests/macos_native_fixture.swift -o /path/to/private/staged/tests/macos_native_fixture.bin`. Place that binary beside the staged fixture shell and Swift source. The shell uses it instead of invoking the guest compiler. The binary is excluded from Git; the optional `LCU_FIXTURE_PID_FILE` records the exact fixture process for cleanup.
+
+## OMP always approval across fresh processes
+
+Two independent OMP processes reused one generated app, `dev.lcu.NativeFixture.ba4b88d849c74702b746c88cee9ee77e`, PID 8902. Process 8905 selected Always allow through the real TUI; the original MCP response was exactly `accept` with `persist: always`. Its three `js` calls saved `lcu-omp-18efbf82612f` and completed `Stop`. After that process was terminated, process 8930 made three `js` calls, saved a different marker `lcu-omp-a3a1b089ba2b`, and completed `Stop` with zero elicitation callbacks. Both independent file checks passed. Session and turn IDs differed between the processes.
+
+Private evidence is `/private/tmp/lcu-harness-full-20260928/omp-macos-always-evidence.json`; the queue job is `596d7b9f-5ad9-4522-83d7-28f56f64fc1d`. A write-only observer in the disposable MCP client copy recorded successful tool calls, exact approval responses, and cleanup responses. It did not replace any call or decide approvals. The source harness owns no persistent grant cache.
+
+This proves always-grant reuse across agent and MCP process replacement for the same native app. It does not prove persistence across a guest reboot, deliberate native-helper restart, app update, or revocation.
