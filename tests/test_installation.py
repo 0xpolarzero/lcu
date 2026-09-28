@@ -2,6 +2,7 @@ import os
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import shutil
 import subprocess
 import sys
@@ -161,6 +162,27 @@ class InstallationTests(unittest.TestCase):
                 install_main(['--prefix', str(prefix), '--runtime-only', '--app-package',
                               str(self.root / 'chatgpt.deb')])
         self.assertFalse(prefix.exists())
+
+    def test_linux_installer_forwards_audio_opt_in_to_agent_setup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            home = base / 'account'
+            home.mkdir()
+            existing_app = base / 'chatgpt'
+            existing_app.mkdir()
+            account = SimpleNamespace(pw_name='fixture', pw_uid=1001, pw_dir=str(home))
+            with patch('install.DEFAULT_APP_PATH', existing_app), \
+                 patch('install.setup.validate', return_value=(account, ['pi'])), \
+                 patch('install.architecture', return_value='arm64'), \
+                 patch('install.verify'), patch('install.preflight_app'), \
+                 patch('install.install'), patch('install.setup.installer_environment'), \
+                 patch('install.subprocess.run') as run:
+                install_main(['--prefix', str(base / 'lcu'), '--existing-app', str(existing_app),
+                              '--agent', 'pi', '--audio', '--yes', '--skip-system'])
+            command = run.call_args.args[0]
+            self.assertIn('--audio', command)
+            self.assertIn('--agent', command)
+            self.assertIn('pi', command)
 
     def test_validated_package_cache_is_reused_offline_and_corruption_fails_closed(self):
         prefix = self.root / 'lcu'

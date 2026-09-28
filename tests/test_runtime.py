@@ -75,6 +75,21 @@ class UpstreamRuntimeTests(unittest.TestCase):
         self.assertEqual(env['BROWSER_USE_CODEX_APP_BUILD_FLAVOR'], 'prod')
         self.assertEqual(env['BROWSER_USE_CODEX_APP_VERSION'], '26.924.22138')
         self.assertEqual(env['BROWSER_USE_DISABLE_AMBIENT_NETWORK'], '1')
+        self.assertNotIn('SKY_ENABLE_AUDIO', env)
+        self.assertNotIn('NODE_REPL_ENABLE_AUDIO', env)
+
+    def test_audio_opt_in_sets_both_original_runtime_flags(self):
+        with patch.dict(os.environ, {'SKY_ENABLE_AUDIO': '0', 'NODE_REPL_ENABLE_AUDIO': '0'}, clear=True):
+            env = environment(self.root, audio=True)
+        self.assertEqual(env['SKY_ENABLE_AUDIO'], '1')
+        self.assertEqual(env['NODE_REPL_ENABLE_AUDIO'], '1')
+
+    def test_audio_off_preserves_explicit_caller_environment_policy(self):
+        settings = {'SKY_ENABLE_AUDIO': '1', 'NODE_REPL_ENABLE_AUDIO': '1'}
+        with patch.dict(os.environ, settings, clear=True):
+            env = environment(self.root)
+        self.assertEqual(env['SKY_ENABLE_AUDIO'], '1')
+        self.assertEqual(env['NODE_REPL_ENABLE_AUDIO'], '1')
 
     def test_caller_configuration_and_policies_survive(self):
         settings = {'CUA_REPL_BROWSER_ENV': 'orbit', 'CUA_REPL_ENABLED_SURFACES': 'browser',
@@ -149,6 +164,33 @@ class UpstreamRuntimeTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), patch('lcu.runtime.os.execve') as execute:
             main(self.root, ['--chrome'])
         self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'browser,computer')
+
+    def test_audio_flag_reaches_original_mcp_child_as_paired_flags(self):
+        with patch.dict(os.environ, {'SKY_ENABLE_AUDIO': '0'}, clear=True), \
+             patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--audio'])
+        child_env = execute.call_args.args[2]
+        self.assertEqual(child_env['SKY_ENABLE_AUDIO'], '1')
+        self.assertEqual(child_env['NODE_REPL_ENABLE_AUDIO'], '1')
+
+    def test_audio_flag_keeps_registration_probes_and_duplicates_fail(self):
+        output = io.StringIO()
+        with patch('sys.stdout', output), patch('lcu.runtime.os.execve') as execute:
+            main(self.root, ['--chrome', '--audio', '--version'])
+        self.assertIn('ChatGPT linux 26.924.22138', output.getvalue())
+        execute.assert_not_called()
+        with patch('lcu.runtime.os.execve') as execute:
+            with self.assertRaisesRegex(ValueError, 'Usage: lcu'):
+                main(self.root, ['--audio', '--audio'])
+        execute.assert_not_called()
+
+    def test_duplicate_runtime_flags_do_not_bypass_help_or_version_validation(self):
+        for args in (['--audio', '--audio', '--help'], ['--chrome', '--chrome', '--version']):
+            with self.subTest(args=args):
+                with patch('lcu.runtime.os.execve') as execute:
+                    with self.assertRaisesRegex(ValueError, 'Usage: lcu'):
+                        main(self.root, args)
+                execute.assert_not_called()
 
     def test_chrome_registration_keeps_version_probe(self):
         output = io.StringIO()

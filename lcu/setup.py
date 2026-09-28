@@ -540,7 +540,7 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     return failures
 
 
-def export_bundle(destination, source, command, release_root, *, chrome=False):
+def export_bundle(destination, source, command, release_root, *, chrome=False, audio=False):
     destination = regular_path(destination)
     if destination.exists():
         raise ValueError('Export destination already exists; choose a new directory.')
@@ -568,7 +568,8 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
               'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
               '"$prefix/current/bin/lcu" "$@";; '
               '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
-    portable_command = ['/bin/sh', '-c', launch, 'lcu-export', *(['--chrome'] if chrome else [])]
+    runtime_flags = (['--chrome'] if chrome else []) + (['--audio'] if audio else [])
+    portable_command = ['/bin/sh', '-c', launch, 'lcu-export', *runtime_flags]
     codex_launch = ('set -eu; case "$(uname -s)" in '
                     'Darwin) default_prefix="$HOME/.local/share/lcu"; default_session=direct;; '
                     'Linux) default_prefix=/opt/lcu; default_session=discover;; '
@@ -583,7 +584,7 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
                     'discover) exec "$prefix/current/bin/lcu-session" --user "$(id -un)" -- '
                     '"$node" "$adapter" "$server" "$@";; '
                     '*) echo "LCU_SESSION_MODE must be discover or direct" >&2; exit 2;; esac')
-    portable_codex_command = ['/bin/sh', '-c', codex_launch, 'lcu-export', *(['--chrome'] if chrome else [])]
+    portable_codex_command = ['/bin/sh', '-c', codex_launch, 'lcu-export', *runtime_flags]
     mcp = {'mcpServers': {'lcu': {'type': 'stdio', 'command': portable_command[0],
                                  'args': portable_command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
@@ -591,6 +592,8 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
                Change(destination / 'host-contract.json', None, (json.dumps(host_policy(release_root), indent=2) + '\n').encode())]
     bootstrap_metadata = {
         'requiresInstalledApplication': True,
+        'computerAudioOptIn': ('Enabled in the registered MCP command with --audio. The original optional recording API may require its own approval. A saved audio file does not mean the selected model receives audio. LCU does not add audio-specific instructions.'
+                               if audio else 'Disabled unless the caller explicitly sets both original audio environment flags.'),
         'applicationResourceRoot': resource_root,
         'instructionSources': [
             f'{resource_root}/cua_node/lib/node_modules/@oai/cua/docs',
@@ -602,7 +605,7 @@ def export_bundle(destination, source, command, release_root, *, chrome=False):
                f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome'] if chrome else []),
         ],
         'destinationSetup': ('Install the matching thin LCU archive and selected application, then run '
-                             'lcu setup --export /new/path ' + ('--chrome ' if chrome else '')
+                             'lcu setup --export /new/path ' + ('--chrome ' if chrome else '') + ('--audio ' if audio else '')
                              + '--yes on the destination account. Import the newly generated export and its local full skill.'),
         'runtimePrefix': 'Set LCU_PREFIX for a nondefault destination prefix: /opt/lcu on Linux, $HOME/.local/share/lcu on macOS.',
         'sessionMode': 'Linux defaults to XFCE discovery; set LCU_SESSION_MODE=direct inside its desktop session. macOS defaults to direct.',
@@ -642,6 +645,7 @@ def parser():
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
     p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
+    p.add_argument('--audio', action='store_true', help='Opt into the original optional computer-audio recording API')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true',
@@ -820,7 +824,8 @@ def main(argv=None):
         with setup_lock(home):
             if not args.yes and not args.chrome and sys.stdin.isatty():
                 args.chrome = input('Enable Chrome browser control and its extension connector? [y/N] ').strip().lower() in ('y', 'yes')
-            command = [*desktop_command, *(['--chrome'] if args.chrome else [])]
+            runtime_flags = (['--chrome'] if args.chrome else []) + (['--audio'] if args.audio else [])
+            command = [*desktop_command, *runtime_flags]
             if args.export:
                 print(f'Export tools and skill to {args.export}')
             else:
@@ -834,6 +839,8 @@ def main(argv=None):
                     print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave temporary tabs open; Chrome remains experimental.')
             else:
                 print('Native desktop control selected; Chrome connector and guidance are excluded.')
+            if args.audio:
+                print('Computer audio selected: enable the original optional recording API and its approval flow. A saved audio file is not model audio input.')
             if sys.platform == 'win32' and 'claude-code' in names:
                 print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave native helpers active.')
             if not args.yes:
@@ -848,7 +855,7 @@ def main(argv=None):
                 install_browser_host(release_root)
             if args.export:
                 local_skill = generate_skill(source, home, release_root, chrome=args.chrome)
-                export_bundle(args.export, source, command, release_root, chrome=args.chrome)
+                export_bundle(args.export, source, command, release_root, chrome=args.chrome, audio=args.audio)
                 print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
             else:
                 failures = configure(names, home, source, command, tools_root, release_root,
@@ -860,6 +867,8 @@ def main(argv=None):
                         retry += ['--project', str(args.project)]
                     if args.chrome:
                         retry += ['--chrome']
+                    if args.audio:
+                        retry += ['--audio']
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
@@ -877,6 +886,8 @@ def main(argv=None):
                 print('Browser status unavailable; run `lcu browser status` after setup.')
         else:
             print('Chrome browser control not enabled; add it later with `lcu setup --agent AGENT --chrome`.')
+        if not args.audio:
+            print('Computer-audio recording not enabled; add it later with `lcu setup --agent AGENT --audio`.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         mode, doctor, doctor_timeout = desktop_readiness_request(

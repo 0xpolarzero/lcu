@@ -89,12 +89,13 @@ class MacInstallationTests(unittest.TestCase):
              patch('sys.stdout', io.StringIO()):
             with self.assertRaises(SystemExit) as raised:
                 install_macos.main(['--prefix', str(self.prefix), '--existing-app', str(self.app),
-                                    '--agent', 'codex', '--yes'])
+                                    '--agent', 'codex', '--audio', '--yes'])
         self.assertEqual(raised.exception.code, 7)
         install.assert_called_once_with(self.prefix, self.app, account=account)
         self.assertEqual(run.call_args.args[0], [str(self.prefix / 'current/bin/lcu'), 'setup',
                          '--prefix', str(self.prefix), '--user', 'alice', '--scope', 'user',
-                         '--session', 'direct', '--agent', 'codex', '--yes'])
+                         '--session', 'direct', '--agent', 'codex', '--yes', '--audio'])
+        self.assertIn('--audio', run.call_args.args[0])
         self.assertFalse(run.call_args.kwargs['check'])
 
     def test_bundle_rejects_the_other_platform(self):
