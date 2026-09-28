@@ -1,13 +1,35 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { pathToFileURL } from 'node:url';
 
 const MODEL_TOOLS = new Set(['js', 'js_reset']);
+
+/** Default cleanup/tool timeout; `js` extends past a longer requested run. */
+export const TURN_END_TIMEOUT_MS = 120_000;
+
+/** Bound a tool call's timeout, extending `js` past its requested run. */
+export function callTimeout(name, args) {
+  const requested = Number(args?.timeout_ms);
+  return name === 'js' && Number.isFinite(requested) && requested > 0
+    ? Math.max(TURN_END_TIMEOUT_MS, requested + 30_000)
+    : TURN_END_TIMEOUT_MS;
+}
+
+/** True when importMetaUrl is the process entrypoint, resolving symlinks robustly. */
+export function isMainModule(importMetaUrl) {
+  if (!process.argv[1]) return false;
+  try {
+    return importMetaUrl === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
 
 const NATIVE_APPROVAL_PERSISTENCE = [
   ['session', 'Allow for this session'],
@@ -200,9 +222,7 @@ export function createCuaClient({ command, cwd, env, onElicitation, allowedOrigi
       if (!connected) throw new Error('LCU is not connected');
       if (!MODEL_TOOLS.has(name)) throw new Error(`Tool is reserved for host use: ${name}`);
       if (!sessionId || !turnId) throw new Error('A real host session and active turn are required');
-      const requested = Number(args?.timeout_ms);
-      const timeout = name === 'js' && Number.isFinite(requested) && requested > 0
-        ? Math.max(120_000, requested + 30_000) : 120_000;
+      const timeout = callTimeout(name, args);
       const inherited = metadata?.['x-codex-turn-metadata'];
       const original = typeof inherited === 'string' ? (() => {
         try { return JSON.parse(inherited); } catch { return undefined; }
@@ -232,7 +252,7 @@ export function createCuaClient({ command, cwd, env, onElicitation, allowedOrigi
       }
       const result = await client.callTool({ name: 'turn_ended', arguments: {
         hook_event_name: event, session_id: sessionId, turn_id: turnId,
-      } }, undefined, { timeout: 120_000 });
+      } }, undefined, { timeout: TURN_END_TIMEOUT_MS });
       if (result.isError) {
         const detail = result.content.filter(item => item.type === 'text').map(item => item.text).join('\n');
         throw new Error(`Original CUA turn cleanup failed: ${detail || 'unknown error'}`);
