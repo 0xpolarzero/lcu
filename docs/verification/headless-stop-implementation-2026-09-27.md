@@ -1,10 +1,10 @@
 # Headless macOS Stop control implementation and verification, 2026-09-27
 
 This document records the implementation evidence and current test result for
-the private, human-triggered macOS Stop control. The VM is recovered. The guest runs prove Stop between native calls, the original
-stopped-for-this-turn response from a pending `type_text` MCP call, same-turn
-rejection, and recovery in a fresh turn. They do not prove atomic interruption
-at a particular keystroke boundary.
+the private, human-triggered macOS Stop control. The VM is recovered. The current guest runs prove Stop between native calls,
+recovery in a fresh turn, and the original stopped-for-this-turn response from
+an MCP call that was pending when Stop was accepted. They do not show whether
+native input was interrupted mid-operation.
 
 ## Original seams
 
@@ -154,10 +154,11 @@ release-prepared 0.4.2 Darwin ARM64 archive is
 product source is byte-audited against the current tree. The Stop V2 guest
 result below is from the 0.4.1 archive.
 
-The earlier between-call guest run used runner SHA-256
-`b84be3c9572f861bc3e9352558d789cfb7c4ffba9084eb5f9342e7fd6c3d07d1`. Its
-result was retained as a task-private verification artifact with SHA-256
-`78f9adcba1a8e34170e1fc618c2a80ba011dedc7c99c350535e9fa5e9d1dce33`.
+The final guest run used runner SHA-256
+`b84be3c9572f861bc3e9352558d789cfb7c4ffba9084eb5f9342e7fd6c3d07d1` and is
+preserved at
+`/private/tmp/lcu-macos-audio-acceptance-20260927/native-stop-v2-between-and-recovery-20260928.json`
+(SHA-256 `78f9adcba1a8e34170e1fc618c2a80ba011dedc7c99c350535e9fa5e9d1dce33`).
 Original runtime warmup, desktop state, TextEdit
 state, app status, and lifecycle cleanup passed. Stop was accepted between
 completed native calls; the next action in that same turn returned the
@@ -180,8 +181,9 @@ exited successfully in about 10.7 seconds. Jobs
 the MCP worker thread was alive. The pending `type_text` call then returned the
 original stopped-for-this-turn error; a subsequent action in the same turn was
 rejected, and a fresh turn completed the 39-byte TextEdit save oracle with the
-existing approval. The repeat's guest output was retained as a task-private log (the first-run
-output was overwritten). These results prove the pending MCP call
+existing approval. The repeat's guest output is at
+`/private/tmp/lcu-native-mac-acceptance-20260928/stop-pending.output.log` (the
+first-run output was overwritten). These results prove the pending MCP call
 returned the original stopped response and the next-turn recovery path worked.
 They do not prove AppStop interrupted native typing atomically or at a specific
 keystroke boundary: the test observed the MCP worker thread, not the native
@@ -196,20 +198,6 @@ not an additional product failure. The two final normal-wrapper passes resolve
 the reported control timeout for those runs, but do not establish its earlier
 cause or rule out timing-sensitive failure. The isolated between-call and
 fresh-turn result remains separately verified.
-
-The final Pi 0.87.1 guest run exercised the real `/lcu stop` TUI flow against
-the original app and LCU control service. It completed in 18.34 seconds with
-exit status 0 using runner SHA-256
-`b039984c38daad482779ab5d50ed490d52b3e18960d2615da388cdb615f344ee` and the
-0.4.2 Darwin ARM64 archive above. Per-call checks confirmed the initial native
-action, Stop acceptance, same-turn rejection, all recovery actions, a second
-turn-end notification, and the independent saved-file oracle. The oracle
-confirmed the expected content in the generated TextEdit document. The fixture
-used Pi 0.87.1 with a local scripted provider and made no external provider
-request. The guest keyboard source was verified as U.S.
-(`com.apple.keylayout.US`) from the already enabled input sources before the
-run. This confirms the Pi menu-to-host bridge and fresh-turn recovery; it does
-not establish atomic interruption at a particular keystroke boundary.
 
 Read-only runtime probes (`getState()` and TextEdit `get_app_state()`) passed
 through the original runtime, LCU without the optional control socket, and LCU

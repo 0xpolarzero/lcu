@@ -469,6 +469,8 @@ export default function (pi: ExtensionAPI, options: {
   pi.on('before_agent_start', async (event, ctx) => {
     approvalContext = ctx;
     const client = await connected();
+    // OMP keeps system-prompt sections as an array. Preserve those boundaries
+    // and append LCU's instructions as one additional section. Pi uses a string.
     return { systemPrompt: Array.isArray(event.systemPrompt)
       ? [...event.systemPrompt, client.instructions]
       : `${event.systemPrompt}\n\n${client.instructions}` };
@@ -511,7 +513,8 @@ export default function (pi: ExtensionAPI, options: {
     },
   });
 
-
-  // Connect during OMP extension loading before its first tool snapshot.
+  // OMP builds the initial provider tool list after extension loading. Connect
+  // during factory execution so LCU tools are registered before that snapshot.
   if (options.connectOnLoad) return connected().then(() => undefined);
+
 }

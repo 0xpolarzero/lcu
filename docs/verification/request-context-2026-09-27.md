@@ -88,19 +88,15 @@ checks passed for JavaScript source and focused test modules. A subsequent
 interactive Pi smoke test exercised the installed Pi `0.87.1` command
 dispatcher, terminal selection menu, and editor API; the native picker evidence
 is recorded below. The socket protocol and Pi in-flight command path remain
-fixture-tested. A recovered macOS guest exercised the private control bridge against the
-original app: status returned the original active app, AppStop was accepted,
-and the next same-turn action returned the original stopped-for-this-turn
-error. The final Pi 0.87.1 guest run exercised the actual `/lcu stop` menu and
-verified the initial native call, Stop, same-turn rejection, recovery calls,
-a second `agent_end`, and the independent saved-file oracle. The run used a
-local scripted provider and made no external provider request. It completed
-with exit status 0 in 18.34 seconds using runner SHA-256
-`b039984c38daad482779ab5d50ed490d52b3e18960d2615da388cdb615f344ee`. The
-fixture verified U.S. keyboard input source `com.apple.keylayout.US` from the
-already enabled sources. These results prove the real Pi menu-to-host Stop path
-and fresh-turn recovery; they do not prove atomic interruption at a particular
-keystroke boundary. See the [Stop implementation record](headless-stop-implementation-2026-09-27.md).
+fixture-tested. A recovered macOS guest then exercised the private control
+bridge against the original app: status returned the original active app,
+AppStop was accepted, and the next same-turn action returned the original
+stopped-for-this-turn error. The guest run did not drive the actual Pi
+`/lcu stop` menu end to end. The final guest runs proved recovery through the original turn-ended hook and
+that a pending `type_text` MCP call returned the original stopped-for-this-turn
+error after Stop. They do not prove that native typing was interrupted at a
+specific keystroke boundary. See
+the [Stop implementation record](headless-stop-implementation-2026-09-27.md).
 The live browser-tab picker TUI check below supersedes the earlier statement
 that browser/profile/tab selection had not been tested. It verifies the happy
 path only; stale-profile rejection remains covered by adapter regressions, not
@@ -118,8 +114,7 @@ open tab, launch a browser, or make a provider request. A fixture-local request
 counter remained zero.
 
 The machine-readable result is
-The machine-readable result was retained in the task-local verification area;
-SHA-256
+`/private/tmp/lcu-browser-picker-20260928/browser-picker-live.json`, SHA-256
 `9d708a4ac4db3005d715a9d8ce16f7631c7b9de39ba395b06bcdea835487e350`. This is
 a live TUI happy-path result for Chrome; it does not establish macOS picker
 behavior or live stale-target race handling.
@@ -129,8 +124,9 @@ behavior or live stale-target race handling.
 Live smoke completed 2026-09-27 in disposable container `lcu-verification:arm64`
 with `--network none`. The test used Pi `0.87.1`, current-checkout adapter and
 runtime source built inside the container as LCU `0.4.1`, and the original
-ChatGPT Linux ARM64 package `26.915.31945` whose SHA-256 matched the pinned
-value
+ChatGPT Linux ARM64 package
+`/private/tmp/lcu-exact-pins-20260926/chatgpt_26.915.31945_arm64.deb` whose
+SHA-256 matched the pinned value
 `b94c494b5f0fd7c720fa6fccd5ef609879affc62332ca930ed29b907d537bc6d`. LCU
 reported ChatGPT `26.915.31945`, CUA
 `0.0.16/20260915001755-492f19756c31`. The temporary build skipped only

@@ -43,8 +43,12 @@ stopped-for-this-turn error. The real turn-ended hook sent the original
 `ComputerUseIPCCodexTurnEndedRequest` with the captured session, turn, and
 metadata, then retained the existing CLI cleanup; a distinct new turn recovered
 and saved the exact 39-byte fixture. The run used no approval or provider
-request. The Pi `/lcu stop` menu remains untested end to end, and Stop during an
-in-flight native action remains unproven. See the [current Stop record](verification/headless-stop-implementation-2026-09-27.md)
+request. Two final guest runs also accepted Stop while a `type_text` MCP call
+was pending; the call returned the original stopped-for-this-turn error, the
+next same-turn action was rejected, and a fresh turn passed the file oracle.
+This proves the pending MCP call's result semantics, not interruption of native
+typing at a specific keystroke boundary. The Pi `/lcu stop` menu remains
+untested end to end. See the [current Stop record](verification/headless-stop-implementation-2026-09-27.md)
 and the [recovery history](verification/macos-test-guest-recovery-2026-09-27.md).
 
 ### 3. Computer-audio opt-in: implemented; platform/model limits remain
@@ -111,9 +115,12 @@ The 0.4.2 generated release archives are preserved at
 `fb41ea062e5c78707a130b553c1864e57cd206508d0294ffa9c8a38e353efd00`) and
 `.verification/amd64.dyem7W/lcu-0.4.2-linux-x64.tar.gz` (SHA-256
 `0cdf716dc85b513e0d8cea881cf8f6e58c9996bd52321efeaa0dc6e983f3f49b`). The
-release copies and sidecars are under `dist/release-0.4.2/`. Exact commands,
-fixture paths, and pass counts are in the corresponding `.verification`
-manifests.
+gates produced these archives before the final docs-only payload refresh. All
+4,387 shared non-document files in each refreshed release archive remain
+byte-identical to the gate artifact. Current release archive hashes are
+recorded in `.verification/release-0.4.2-gates-20260928.txt`; the three
+release archives and sidecars are under `dist/release-0.4.2/`. Exact commands,
+fixture paths, and pass counts are in the same verification manifest.
 These Linux ARM64 and amd64 gates do not expand macOS, Windows, or architecture
 support claims.
 
@@ -156,6 +163,8 @@ claim was added.
 The supported scope is the three original-runtime integrations above plus the
 Pi picker and `/lcu stop` action. The browser-tab picker TUI, macOS original
 and LCU audio capture, and Stop between native actions with fresh-turn
-recovery passed in isolated fixtures. The Pi `/lcu stop` menu itself and Stop
-during an in-flight native action remain unverified. The tested host result
-contracts carry WAV file references rather than audio bytes to the provider.
+recovery passed in isolated fixtures. A pending MCP call returned the original
+stopped response after Stop, but interruption of native input mid-operation is
+not verified. The Pi `/lcu stop` menu itself also remains untested end to end.
+The tested host result contracts carry WAV file references rather than audio
+bytes to the provider.
