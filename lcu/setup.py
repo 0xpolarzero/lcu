@@ -698,12 +698,12 @@ def validate(args):
         raise ValueError('Use --agent all or --agent auto alone, or select explicit agent IDs.')
     if names == ['all']:
         names = list(CLIENTS)
+    if {'omp', 'hermes'} & set(names) and args.scope == 'project':
+        raise ValueError('Oh My Pi and Hermes native plugins are profile-scoped. Use --scope user with the intended profile; project scope is not supported.')
     return account, names
 
 
 def detect(home):
-    if {'omp', 'hermes'} & set(names) and args.scope == 'project':
-        raise ValueError('Oh My Pi and Hermes native plugins are profile-scoped. Use --scope user with the intended profile; project scope is not supported.')
     return [name for name, client in CLIENTS.items()
             if shutil.which(client.executable) or (home / client.detect_path).exists()]
 
