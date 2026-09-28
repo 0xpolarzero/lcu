@@ -31,7 +31,11 @@ def main():
     parser.add_argument('--user', required=True)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
-    if pwd.getpwnam(args.user).pw_uid != os.getuid():
+    try:
+        account = pwd.getpwnam(args.user)
+    except KeyError:
+        raise ValueError(f'Unknown account: {args.user}')
+    if account.pw_uid != os.getuid():
         raise ValueError('Run the launcher as the selected desktop account.')
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
     if not command:
