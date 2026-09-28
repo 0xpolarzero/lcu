@@ -15,7 +15,7 @@ Install LCU from the [latest release](https://github.com/0xpolarzero/lcu/release
 - **An existing desktop:** Apple Silicon macOS, or Ubuntu 24.04-compatible glibc Linux on ARM64 or x86-64 with an X11 desktop and D-Bus session owned by the target account. Native Wayland and musl are unsupported; Windows is deferred.
 - **The official ChatGPT desktop app:** [install it first](https://chatgpt.com/download/). Default paths are `/Applications/ChatGPT.app` on macOS and `/usr/lib/chatgpt` on Linux. Use `--existing-app /absolute/path` for another location. LCU never downloads or installs the app and does not require ChatGPT sign-in.
 - **Python 3.12+** and the host's normal sandbox facilities.
-- **Your installed, authenticated harness:** Pi, Codex CLI, or Claude Code. Codex CLI must support `mcp_tool` lifecycle hooks; update the public standalone CLI if setup reports a parser error. See [harness prerequisites](ADAPTERS.md).
+- **Your installed, authenticated harness:** Pi, Codex CLI, Claude Code, Oh My Pi, or Hermes Agent. Codex CLI must support `mcp_tool` lifecycle hooks; update the public standalone CLI if setup reports a parser error. See [harness prerequisites](ADAPTERS.md).
 
 LCU does not install a desktop or create a VM. Native computer use is the default; Chrome support is opt-in.
 

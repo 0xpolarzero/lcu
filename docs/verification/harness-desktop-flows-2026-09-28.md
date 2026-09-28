@@ -14,12 +14,12 @@ Start one fixture per harness, using fresh container names and output directorie
 
 ```sh
 bash tests/harness_fixture.sh \
-  /absolute/path/to/lcu-0.4.2-linux-arm64.tar.gz \
+  /absolute/path/to/lcu-0.4.1-linux-arm64.tar.gz \
   /absolute/path/to/verified-chatgpt.deb \
   lcu-omp-flow /tmp/lcu-omp-evidence
 
 bash tests/harness_fixture.sh \
-  /absolute/path/to/lcu-0.4.2-linux-arm64.tar.gz \
+  /absolute/path/to/lcu-0.4.1-linux-arm64.tar.gz \
   /absolute/path/to/verified-chatgpt.deb \
   lcu-hermes-flow /tmp/lcu-hermes-evidence
 ```
@@ -71,3 +71,11 @@ docker rm -f lcu-omp-flow lcu-hermes-flow
 ```
 
 This flow proves Linux GTK interaction through the tested harness versions. It does not extend browser, audio, macOS, Windows, native approval, or cancellation evidence.
+
+## Final task verification
+
+The clean commit snapshot, including the Hermes identity fix and excluding unrelated working-tree edits, passed `tests/run.sh linux/arm64` with the local verified package: 199 Python tests, offline installation, registration, and the complete Linux GTK desktop suite. The snapshot's adapter suite passed 27 tests with 8 opt-in environment skips. Its archive is `/private/tmp/lcu-harness-latest-20260928/committed-source/.verification/arm64.8l6xS9/lcu-0.4.1-linux-arm64.tar.gz`. The working-tree adapter suite also passed (35 tests, 8 skips).
+
+OMP 18.4.1 saved `omp-lcu-031538f03c23`. Hermes v2026.9.24 (0.21.5) saved `hermes-lcu-7515fa9cf4c4` with direct tool exposure, then saved `hermes-lcu-ed6be2c61580` from the clean snapshot through its default discovery tools. Every Target oracle matched exactly and every Other oracle stayed absent. Set `LCU_TEST_TOOL_SEARCH=on` to reproduce Hermes' default discovery route; the runner defaults to direct tool exposure for a smaller transcript.
+
+The full working-tree Python gate separately exposed an unrelated, uncommitted macOS acceptance-fixture race: `test_wait_drains_pty_while_waiting_for_agent_end_observer` checked its captured buffer before draining the PTY's remaining bytes. That fixture and the other preexisting edits were left unchanged. The clean snapshot excludes that unrelated work; its passing gate is not a claim that the entire working tree passed.

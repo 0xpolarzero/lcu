@@ -44,6 +44,21 @@ The Pi adapter uses Pi's extension API and the shared MCP client. It keeps the c
 
 A model-driven Linux GTK task and an opt-in official Chrome-extension task are recorded in [Pi verification](verification/pi-generated-gtk-real-model-2026-09-24.md). The [approval scope test](verification/native-app-approval-scopes-2026-09-25.md) verifies response forwarding, not grant persistence across helper restart or revocation. The [dismissal regression](verification/pi-approval-2026-09-26.md) verifies that dismissing an origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist.
 
+## Oh My Pi
+
+Register the experimental OMP integration with `lcu setup --agent omp`. Setup uses OMP's native `plugin link` command on a generated local package. The package includes the complete local LCU skill and a wrapper around the Pi adapter with the selected runtime command. OMP profiles receive separate generated packages. Native links are profile-scoped; `--scope project` is rejected because OMP ignores that scope for local links. Setup does not run `pi install` or write Pi settings.
+
+The OMP wrapper connects during asynchronous extension loading and marks its two core tools `loadMode: essential` so OMP advertises them in its first model request. The shared adapter preserves OMP's array of system-prompt blocks and appends the original MCP initialization instructions as a separate block. It uses the common native tool, selection, editor, and lifecycle APIs. Unsupported approval requests cancel. Pi's audio delivery limits also apply. OMP 18.4.1 passed a real model-directed Linux ARM64 GTK save flow with an independent file oracle; see [OMP source and test evidence](verification/omp-compatibility-2026-09-28.md). Browser actions and native OMP approval selection remain unverified.
+
+## Hermes Agent
+
+Register the experimental Hermes integration with `lcu setup --agent hermes`. Setup stages the native Python plugin under the selected profile's `plugins/lcu-cua`, includes the complete generated local LCU skill, and invokes `hermes plugins enable lcu-cua`. It preserves unrelated Hermes configuration through Hermes's own enable command. Set an absolute `HERMES_HOME` for a named or custom profile. Hermes plugins have profile scope, so `--scope project` is rejected.
+
+The plugin uses a private Node bridge backed by the shared official MCP SDK client. Host lifecycle and request metadata remain outside the model-visible tools. Empty-form permission requests use Hermes's native per-call consent prompt. Native app grants are limited to one-time consent; session and permanent grant selection are unavailable. Unsupported forms and URL approval flows cancel. Images use Hermes's native multimodal result envelope; audio is saved byte-for-byte and represented by a local file reference, as in Pi. The original installed app still supplies execution, schemas, instructions, and permission requests.
+
+Hermes v2026.9.24 (0.21.5) passed a real model-directed Linux ARM64 GTK save flow with an independent file oracle. Its public execution middleware supplies exact turn and call identities omitted by ordinary plugin-handler dispatch. See [Hermes verification](verification/hermes-harness-2026-09-28.md) for source evidence, session isolation, and remaining browser, approval, and platform limits.
+
+
 ## Codex CLI
 
 LCU uses the public standalone Codex CLI found as `codex` on the selected account's `PATH`. Install or update it through the official package, check the command that will run, then register and launch that same command:
@@ -55,22 +70,10 @@ codex --version
 /opt/lcu/current/bin/lcu setup --agent codex --yes
 codex
 ```
-## Oh My Pi
-
-Register the experimental OMP integration with `lcu setup --agent omp`. Setup uses OMP's native `plugin link` command on a generated local package. The package includes the complete local LCU skill and a wrapper around the Pi adapter with the selected runtime command. OMP profiles receive separate generated packages. Native links are profile-scoped; `--scope project` is rejected because OMP ignores that scope for local links. Setup does not run `pi install` or write Pi settings.
-
-The OMP wrapper connects during asynchronous extension loading and marks its two core tools `loadMode: essential` so OMP advertises them in its first model request. The shared adapter preserves OMP's array of system-prompt blocks and appends the original MCP initialization instructions as a separate block. It uses the common native tool, selection, editor, and lifecycle APIs. Unsupported approval requests cancel. Pi's command behavior and audio delivery limits also apply. See [OMP source and test evidence](verification/omp-compatibility-2026-09-28.md); Pi desktop evidence alone does not establish OMP desktop behavior.
-
-## Hermes Agent
-
-Register the experimental Hermes integration with `lcu setup --agent hermes`. Setup stages the native Python plugin under the selected profile's `plugins/lcu-cua`, includes the complete generated local LCU skill, and invokes `hermes plugins enable lcu-cua`. It preserves unrelated Hermes configuration through Hermes's own enable command. Set an absolute `HERMES_HOME` for a named or custom profile. Hermes plugins have profile scope, so `--scope project` is rejected.
-
-The plugin uses a private Node bridge backed by the shared official MCP SDK client. Host lifecycle and request metadata remain outside the model-visible tools. Empty-form permission requests use Hermes's native per-call consent prompt. Native app grants are limited to one-time consent; session and permanent grant selection are unavailable. Unsupported forms and URL approval flows cancel. Images use Hermes's native multimodal result envelope; audio is saved byte-for-byte and represented by a local file reference, as in Pi. The original installed app still supplies execution, schemas, instructions, and permission requests.
-
-See [Hermes verification](verification/hermes-harness-2026-09-28.md) for tested host behavior, result-delivery limits, session isolation, and remaining desktop gates. Existing platform evidence does not establish Hermes desktop behavior.
-
 
 LCU checks the actual `codex` on `PATH` for the native MCP tool hook type. The installed `0.145.0` public CLI failed that check because its parser rejected `mcp_tool`; the latest public `0.157.1` CLI passed the real tool/result and Stop cleanup fixture. If setup reports an unsupported hook type, update the standalone CLI and rerun setup. The official hooks API supports MCP tool handlers on an existing connection and exposes the Stop, Interrupt, and SubagentStop events used by LCU. LCU keeps `turn_ended` and `js_add_node_module_dir` hidden from model discovery while forwarding Stop cleanup through the original MCP server. The app remains the source for the original CUA runtime and plugin metadata; app-provided components used internally do not replace the public CLI running the Codex session. See the [latest CLI evidence](verification/codex-standalone-cli-2026-09-27.md), the [historical interactive run](verification/codex-interactive-2026-09-24.md), and the [native approval probe](verification/codex-native-approval-2026-09-25.md).
+
+The Codex relay preserves progress before successful and failed tool responses using the SDK's public notification API; the deterministic regression and upstream race are recorded in [Codex progress verification](verification/codex-progress-2026-09-28.md).
 
 ## Claude Code adapter
 

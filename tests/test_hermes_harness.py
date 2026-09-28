@@ -21,6 +21,7 @@ class FakeContext:
     def __init__(self):
         self.tools = {}
         self.hooks = {}
+        self.middleware = {}
         self.unload_callbacks = []
 
     def register_tool(self, *, name, toolset, schema, handler):
@@ -41,6 +42,10 @@ class FakeContext:
 
     def register_hook(self, event, handler):
         self.hooks[event] = handler
+
+    def register_middleware(self, kind, callback):
+        self.middleware[kind] = callback
+        return object()
 
 
 class HermesHarnessTests(unittest.TestCase):
@@ -99,11 +104,29 @@ class HermesHarnessTests(unittest.TestCase):
                 self.assertIn("Original CUA initialization guide.", injected)
                 self.assertIn('"name": "js"', injected)
 
-                raw = context.tools["js"]["handler"](
-                    {"code": "context"}, session_id="hermes-session", turn_id="hermes-turn",
-                    tool_call_id="hermes-call")
+                def invoke_lcu(name, params, call_id):
+                    # Mirror Hermes' public tool_execution contract: the
+                    # handler receives session_id/task_id, while exact turn
+                    # and call IDs are present only in middleware context.
+                    handler = context.tools[name]["handler"]
+                    middleware = context.middleware["tool_execution"]
+                    return middleware(
+                        tool_name=name, args=params, original_args=params,
+                        session_id="hermes-session", turn_id="hermes-turn",
+                        tool_call_id=call_id,
+                        next_call=lambda next_args=None: handler(
+                            params if next_args is None else next_args,
+                            session_id="hermes-session", task_id="hermes-task"),
+                    )
+
+                raw = invoke_lcu("js", {"code": "context"}, "hermes-call")
                 result = json.loads(raw)
                 self.assertEqual(result["content"], [{"type": "text", "text": "context"}])
+                # A subsequent unwrapped handler call cannot reuse the
+                # previous call's ContextVar identity.
+                stale = context.tools["js"]["handler"](
+                    {"code": "stale"}, session_id="hermes-session", task_id="hermes-task")
+                self.assertTrue(json.loads(stale)["isError"])
 
                 approvals = []
                 approval_module = types.ModuleType("tools.approval_prompt")
@@ -114,28 +137,20 @@ class HermesHarnessTests(unittest.TestCase):
                 with patch.dict(sys.modules, {
                     "tools": tools_module, "tools.approval_prompt": approval_module,
                 }):
-                    approval_raw = context.tools["js"]["handler"](
-                        {"code": "approval-native"}, session_id="hermes-session", turn_id="hermes-turn",
-                        tool_call_id="approval-call")
+                    approval_raw = invoke_lcu("js", {"code": "approval-native"}, "approval-call")
                 approval_result = json.loads(approval_raw)
                 self.assertEqual(json.loads(approval_result["content"][0]["text"])["action"], "accept")
                 self.assertIn("Allow once", approvals[0][1])
                 self.assertEqual(approvals[0][2]["surface"], "mcp-elicitation/lcu")
 
-                form_raw = context.tools["js"]["handler"](
-                    {"code": "approval-form"}, session_id="hermes-session", turn_id="hermes-turn",
-                    tool_call_id="form-call")
+                form_raw = invoke_lcu("js", {"code": "approval-form"}, "form-call")
                 self.assertEqual(json.loads(json.loads(form_raw)["content"][0]["text"])["action"], "cancel")
 
-                image_result = context.tools["js"]["handler"](
-                    {"code": "image"}, session_id="hermes-session", turn_id="hermes-turn",
-                    tool_call_id="image-call")
+                image_result = invoke_lcu("js", {"code": "image"}, "image-call")
                 self.assertEqual(image_result["content"][1]["image_url"]["url"],
                                  "data:image/png;base64,AAECAw==")
                 self.assertNotIn("AAECAw==", image_result["text_summary"])
-                audio_raw = context.tools["js"]["handler"](
-                    {"code": "audio"}, session_id="hermes-session", turn_id="hermes-turn",
-                    tool_call_id="audio-call")
+                audio_raw = invoke_lcu("js", {"code": "audio"}, "audio-call")
                 audio_text = json.loads(audio_raw)["content"][0]["text"]
                 self.assertIn("Audio result (original MIME type: audio/wav) saved to ", audio_text)
                 audio_path = Path(audio_text.rsplit(" ", 1)[-1])
@@ -168,6 +183,8 @@ class HermesHarnessTests(unittest.TestCase):
                 self.assertEqual([item["args"]["hook_event_name"] for item in retries], ["Stop", "Stop"])
                 self.assertEqual(retries[0]["args"]["turn_id"], "cleanup-turn")
                 self.assertEqual(context.skill[0], "lcu")
+                self.assertEqual(set(context.hooks), {"pre_llm_call", "on_session_end"})
+                self.assertIn("tool_execution", context.middleware)
             finally:
                 if "context" in locals():
                     context.unload()

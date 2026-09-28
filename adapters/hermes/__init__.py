@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import contextvars
 import json
 import os
 from pathlib import Path
@@ -187,6 +188,7 @@ def register(ctx) -> None:
     pending_cleanups: dict[tuple[str, str], str] = {}
     turn_lock = threading.Lock()
     owner_session: str | None = None
+    active_tool_identity = contextvars.ContextVar("lcu_hermes_active_tool_identity", default=None)
 
     skill_path = PLUGIN_DIR / "skills" / "lcu" / "SKILL.md"
     if not skill_path.is_file():
@@ -287,9 +289,40 @@ def register(ctx) -> None:
                     active_turns.pop(session_id, None)
             print(f"LCU original turn cleanup failed for Hermes session {session_id}: {exc}", file=os.sys.stderr)
 
+    def carry_tool_identity(tool_name="", args=None, next_call=None, session_id="", turn_id="",
+                            tool_call_id="", **kwargs):
+        """Carry exact Hermes tool identity through its real execution callback.
+
+        The host's registry handler dispatch omits turn_id/tool_call_id. Its
+        tool_execution middleware receives those IDs and invokes next_call in
+        the same context. ContextVar tokens isolate parallel calls and are
+        always restored, including when downstream execution raises.
+        """
+        del args, kwargs
+        if not callable(next_call):
+            raise RuntimeError("Hermes omitted the downstream tool execution callback")
+        if tool_name not in {"js", "js_reset"}:
+            return next_call()
+        token = active_tool_identity.set((tool_name, session_id, turn_id, tool_call_id))
+        try:
+            return next_call()
+        finally:
+            active_tool_identity.reset(token)
+
     def make_handler(name):
         def handler(params, session_id="", turn_id="", tool_call_id="", **kwargs):
             del kwargs
+            hooked_identity = active_tool_identity.get()
+            if hooked_identity:
+                hook_name, hook_session, hooked_turn, hooked_call = hooked_identity
+                if (hook_name != name or hook_session != session_id or
+                        (turn_id and turn_id != hooked_turn) or
+                        (tool_call_id and tool_call_id != hooked_call)):
+                    return json.dumps({"isError": True, "content": [{
+                        "type": "text", "text": "LCU rejected this call because Hermes tool execution identity did not match its active callback."
+                    }]}, ensure_ascii=False)
+                turn_id = turn_id or hooked_turn
+                tool_call_id = tool_call_id or hooked_call
             with turn_lock:
                 expected_turn = active_turns.get(session_id)
                 same_owner = owner_session == session_id
@@ -318,4 +351,5 @@ def register(ctx) -> None:
             raise RuntimeError(f"Hermes could not register LCU tool {name!r}; refusing a conflicting tool registration")
 
     ctx.register_hook("pre_llm_call", inject_original_context)
+    ctx.register_middleware("tool_execution", carry_tool_identity)
     ctx.register_hook("on_session_end", on_session_end)
