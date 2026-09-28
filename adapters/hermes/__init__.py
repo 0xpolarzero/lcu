@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import threading
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 
 PLUGIN_DIR = Path(__file__).resolve().parent
@@ -128,8 +129,49 @@ def _result_for_hermes(result: dict[str, Any]) -> str | dict[str, Any]:
     }
 
 
+def _approval_choice(message: str, description: str, *, title: str,
+                     allow_session: bool, allow_permanent: bool) -> Any:
+    """Use Hermes' owning CLI/TUI or gateway approval surface and return its exact choice."""
+    from tools import approval_context as approval_ctx
+    is_api_run = (approval_ctx._get_session_platform() == "api_server"
+                  and not approval_ctx._is_cron_approval_context()
+                  and not approval_ctx._is_single_query_approval_context())
+    if approval_ctx._is_gateway_approval_context() or is_api_run:
+        from tools import approval as approval
+        from tools import approval_gateway_wait as gateway_wait
+        session_key = approval_ctx.get_current_session_key()
+        notify_cb = approval._gateway_notify_cb(session_key)
+        if notify_cb is None:
+            return "cancel"
+        decision = gateway_wait._await_gateway_decision(
+            session_key, notify_cb,
+            {"command": message, "description": description,
+             "pattern_key": "mcp_elicitation", "pattern_keys": ["mcp_elicitation"],
+             "allow_session": allow_session, "allow_permanent": allow_permanent},
+            surface="mcp-elicitation/lcu")
+        if decision.get("notify_failed") or not decision.get("resolved") or decision.get("cancelled"):
+            return "cancel"
+        return decision.get("choice")
+    from tools.approval_prompt import prompt_dangerous_approval
+    choice = prompt_dangerous_approval(
+        message, description, allow_session=allow_session, allow_permanent=allow_permanent,
+        approval_callback=approval_ctx._resolve_cli_approval_callback(), title=title)
+    if choice in {"deny", "decline"}:
+        try:
+            from tools.interrupt import is_interrupted
+            if is_interrupted():
+                return "cancel"
+        except Exception:
+            pass
+    return choice
+
+
 def _present_elicitation(params: Any) -> dict[str, Any]:
-    """Use Hermes' existing per-call elicitation consent prompt; unsupported forms fail closed."""
+    """Present original CUA consent through Hermes' native selector.
+
+    The selected persistence scope is returned to the original runtime. This
+    adapter does not write Hermes allowlists or cache grants locally.
+    """
     if not isinstance(params, dict) or params.get("mode") != "form":
         return {"action": "cancel"}
     message = params.get("message")
@@ -142,25 +184,54 @@ def _present_elicitation(params: Any) -> dict[str, Any]:
         return {"action": "cancel"}
     metadata = params.get("_meta", params.get("meta", {}))
     metadata = metadata if isinstance(metadata, dict) else {}
+    browser_origin = metadata.get("origin")
+    if (metadata.get("codex_approval_kind") == "mcp_tool_call" and
+            metadata.get("connector_id") == "browser-use" and
+            metadata.get("tool_name") == "access_browser_origin" and
+            isinstance(browser_origin, str)):
+        try:
+            parsed = urlsplit(browser_origin)
+            canonical = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+            valid_origin = (parsed.scheme in {"http", "https"} and bool(parsed.hostname) and
+                            parsed.username is None and parsed.password is None and
+                            (parsed.port is None or 1 <= parsed.port <= 65535) and canonical == browser_origin)
+        except ValueError:
+            valid_origin = False
+        if not valid_origin:
+            return {"action": "cancel"}
+        try:
+            answer = _approval_choice(
+                message, f"Allow the original Browser Use runtime to access {browser_origin}?",
+                allow_session=False, allow_permanent=False,
+                title=f"Browser origin approval: {browser_origin}")
+        except Exception:
+            return {"action": "cancel"}
+        if answer == "once":
+            return {"action": "accept", "content": {}}
+        if answer in {"deny", "decline"}:
+            return {"action": "decline"}
+        return {"action": "cancel"}
     app = metadata.get("tool_params", {}).get("app") if isinstance(metadata.get("tool_params"), dict) else None
     native = (metadata.get("codex_approval_kind") == "mcp_tool_call" and
               metadata.get("connector_id") == "computer-use" and isinstance(app, str) and bool(app))
-    description = (
-        f"Allow once for the original Computer Use app {app}. Hermes can only present per-call consent here; "
-        "LCU will not turn this answer into a session or always grant."
-        if native else
-        "This is an original Computer Use runtime request. Hermes can present one-time consent; unsupported "
-        "form fields and URL authorization flows are canceled."
-    )
+    if not native:
+        return {"action": "cancel"}
+    persist = metadata.get("persist")
+    if not isinstance(persist, list) or any(item not in {"session", "always"} for item in persist):
+        return {"action": "cancel"}
+    persist = set(persist)
+    description = f"Original Computer Use request for {app}. The selected scope is sent to the original runtime."
     try:
-        from tools.approval_prompt import request_elicitation_consent
-        answer = request_elicitation_consent(
-            message, description, timeout_seconds=300, surface="mcp-elicitation/lcu")
+        answer = _approval_choice(
+            message, description, allow_session="session" in persist,
+            allow_permanent="always" in persist, title=f"Computer Use approval: {app}")
     except Exception:
         return {"action": "cancel"}
-    if answer == "accept":
+    if answer == "once":
         return {"action": "accept", "content": {}}
-    if answer == "decline":
+    if answer in {"session", "always"} and answer in persist:
+        return {"action": "accept", "content": {}, "_meta": {"persist": answer}}
+    if answer in {"deny", "decline"}:
         return {"action": "decline"}
     return {"action": "cancel"}
 

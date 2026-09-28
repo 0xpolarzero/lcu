@@ -130,18 +130,96 @@ class HermesHarnessTests(unittest.TestCase):
 
                 approvals = []
                 approval_module = types.ModuleType("tools.approval_prompt")
-                approval_module.request_elicitation_consent = lambda message, description, **kwargs: (
-                    approvals.append((message, description, kwargs)) or "accept")
+                approval_module.prompt_dangerous_approval = lambda message, description, **kwargs: (
+                    approvals.append((message, description, kwargs)) or "session")
+                approval_context = types.ModuleType("tools.approval_context")
+                approval_context._get_session_platform = lambda: "cli"
+                approval_context._is_cron_approval_context = lambda: False
+                approval_context._is_single_query_approval_context = lambda: False
+                approval_context._is_gateway_approval_context = lambda: False
+                approval_context._resolve_cli_approval_callback = lambda: "hermes-native-callback"
                 tools_module = types.ModuleType("tools")
                 tools_module.__path__ = []
                 with patch.dict(sys.modules, {
                     "tools": tools_module, "tools.approval_prompt": approval_module,
+                    "tools.approval_context": approval_context,
                 }):
                     approval_raw = invoke_lcu("js", {"code": "approval-native"}, "approval-call")
                 approval_result = json.loads(approval_raw)
-                self.assertEqual(json.loads(approval_result["content"][0]["text"])["action"], "accept")
-                self.assertIn("Allow once", approvals[0][1])
-                self.assertEqual(approvals[0][2]["surface"], "mcp-elicitation/lcu")
+                self.assertEqual(json.loads(approval_result["content"][0]["text"]), {
+                    "action": "accept", "content": {}, "_meta": {"persist": "session"}})
+                self.assertIn("dev.lcu.fixture", approvals[0][1])
+                self.assertTrue(approvals[0][2]["allow_session"])
+                self.assertTrue(approvals[0][2]["allow_permanent"])
+                self.assertEqual(approvals[0][2]["approval_callback"], "hermes-native-callback")
+                self.assertEqual(approvals[0][2]["title"], "Computer Use approval: dev.lcu.fixture")
+
+                selected = {"value": "once"}
+                approval_module.prompt_dangerous_approval = lambda message, description, **kwargs: (
+                    approvals.append((message, description, kwargs)) or selected["value"])
+                for scope, expected in (
+                    ("once", {"action": "accept", "content": {}}),
+                    ("always", {"action": "accept", "content": {}, "_meta": {"persist": "always"}}),
+                    ("decline", {"action": "decline"}),
+                    ("cancelled", {"action": "cancel"}),
+                ):
+                    selected["value"] = scope
+                    with patch.dict(sys.modules, {
+                        "tools": tools_module, "tools.approval_prompt": approval_module,
+                        "tools.approval_context": approval_context,
+                    }):
+                        response = invoke_lcu("js", {"code": "approval-native"}, f"approval-{scope}")
+                    self.assertEqual(json.loads(json.loads(response)["content"][0]["text"]), expected)
+                self.assertNotIn("timeout_seconds", approvals[-1][2])
+
+                selected["value"] = "once"
+                with patch.dict(sys.modules, {
+                    "tools": tools_module, "tools.approval_prompt": approval_module,
+                    "tools.approval_context": approval_context,
+                }):
+                    origin_response = invoke_lcu("js", {"code": "approval-origin"}, "origin-approval")
+                self.assertEqual(json.loads(json.loads(origin_response)["content"][0]["text"]),
+                                 {"action": "accept", "content": {}})
+                self.assertFalse(approvals[-1][2]["allow_session"])
+                self.assertFalse(approvals[-1][2]["allow_permanent"])
+
+                gateway_context = types.ModuleType("tools.approval_context")
+                gateway_context._get_session_platform = lambda: "telegram"
+                gateway_context._is_cron_approval_context = lambda: False
+                gateway_context._is_single_query_approval_context = lambda: False
+                gateway_context._is_gateway_approval_context = lambda: True
+                gateway_context.get_current_session_key = lambda: "fixture-gateway-session"
+                gateway_approval = types.ModuleType("tools.approval")
+                gateway_approval._gateway_notify_cb = lambda session: (lambda data: None)
+                gateway_wait = types.ModuleType("tools.approval_gateway_wait")
+                gateway_data = []
+                gateway_choice = {"value": "always"}
+                def gateway_decision(session, notify, data, *, surface):
+                    gateway_data.append((session, data, surface))
+                    return {"resolved": True, "choice": gateway_choice["value"]}
+                gateway_wait._await_gateway_decision = gateway_decision
+                gateway_tools = types.ModuleType("tools")
+                gateway_tools.__path__ = []
+                native_params = {
+                    "mode": "form", "message": "Allow fixture?",
+                    "requestedSchema": {"type": "object", "properties": {}},
+                    "_meta": {"codex_approval_kind": "mcp_tool_call", "connector_id": "computer-use",
+                              "persist": ["session", "always"],
+                              "tool_params": {"app": "dev.lcu.fixture"}},
+                }
+                with patch.dict(sys.modules, {
+                    "tools": gateway_tools, "tools.approval_context": gateway_context,
+                    "tools.approval": gateway_approval, "tools.approval_gateway_wait": gateway_wait,
+                }):
+                    self.assertEqual(plugin._present_elicitation(native_params), {
+                        "action": "accept", "content": {}, "_meta": {"persist": "always"}})
+                    gateway_choice["value"] = "session"
+                    self.assertEqual(plugin._present_elicitation(native_params), {
+                        "action": "accept", "content": {}, "_meta": {"persist": "session"}})
+                    self.assertEqual(gateway_data[-1][0], "fixture-gateway-session")
+                    self.assertTrue(gateway_data[-1][1]["allow_session"])
+                    self.assertTrue(gateway_data[-1][1]["allow_permanent"])
+                    self.assertEqual(gateway_data[-1][2], "mcp-elicitation/lcu")
 
                 form_raw = invoke_lcu("js", {"code": "approval-form"}, "form-call")
                 self.assertEqual(json.loads(json.loads(form_raw)["content"][0]["text"])["action"], "cancel")

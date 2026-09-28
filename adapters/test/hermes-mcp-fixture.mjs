@@ -27,16 +27,22 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
     return { isError: true, content: [{ type: 'text', text: 'cleanup failed once' }] };
   }
   if (name === 'turn_ended') return { content: [{ type: 'text', text: 'cleanup ok' }] };
-  if (args?.code === 'approval-native' || args?.code === 'approval-form') {
-    const native = args.code === 'approval-native';
+  if (args?.code === 'approval-native' || args?.code === 'approval-native-session-only' ||
+      args?.code === 'approval-form' || args?.code === 'approval-origin') {
+    const native = args.code.startsWith('approval-native');
+    const browserOrigin = args.code === 'approval-origin';
     const decision = await server.elicitInput({
       mode: 'form', message: native ? 'Allow Computer Use to use "Fixture App"?' : 'Enter fixture text',
-      requestedSchema: native ? { type: 'object', properties: {} } : {
+      requestedSchema: native || browserOrigin ? { type: 'object', properties: {} } : {
         type: 'object', properties: { text: { type: 'string' } }, required: ['text'],
       },
-      _meta: native ? { codex_approval_kind: 'mcp_tool_call', connector_id: 'computer-use',
-        persist: ['session', 'always'], tool_name: 'get_app_state', tool_params: { app: 'dev.lcu.fixture' } } : {},
+      _meta: browserOrigin ? { codex_approval_kind: 'mcp_tool_call', connector_id: 'browser-use',
+        tool_name: 'access_browser_origin', origin: 'http://127.0.0.1:8080', persist: 'always' } : native ? {
+        codex_approval_kind: 'mcp_tool_call', connector_id: 'computer-use',
+        persist: args.code === 'approval-native-session-only' ? ['session'] : ['session', 'always'],
+        tool_name: 'get_app_state', tool_params: { app: 'dev.lcu.fixture' } } : {},
     });
+    record({ name: 'elicitation-result', code: args.code, decision });
     return { content: [{ type: 'text', text: JSON.stringify(decision) }] };
   }
   if (args?.code === 'image') return { content: [
