@@ -20,6 +20,7 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
   const pi = {
     on(event, handler) { handlers.set(event, handler); },
     registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand() {},
   };
   const ctx = { sessionManager: { getSessionId: () => 'pi-real-session' },
     model: { id: 'pi-model' }, hasUI: false };
@@ -52,6 +53,9 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
     assert.equal(entries[0].meta['x-codex-turn-metadata'].turn_id,
       entries[1].meta['x-codex-turn-metadata'].turn_id);
     assert.equal(entries[0].meta['x-codex-turn-metadata'].model, 'pi-model');
+    assert.equal(entries[0].meta['x-codex-turn-metadata'].call_id, '1');
+    assert.equal(entries[1].meta['x-codex-turn-metadata'].call_id, '2');
+    assert.equal(entries[0].meta['x-codex-turn-metadata'].thread_id, undefined);
     await handlers.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
     entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
     const ended = entries.filter(entry => entry.name === 'turn_ended');
@@ -72,6 +76,205 @@ test('Pi keeps one original CUA turn across model rounds and cleans up after age
   }
 });
 
+test('Pi /lcu pick preserves profile and tab identity in the editor without claiming user tabs', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-pick-user-'));
+  const log = join(directory, 'mcp.jsonl');
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const oldStale = process.env.LCU_PICK_STALE;
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
+  delete process.env.LCU_PICK_STALE;
+  const handlers = new Map();
+  const tools = new Map();
+  const commands = new Map();
+  const selections = [];
+  const notifications = [];
+  let editor = 'Summarize the selected page';
+  const pi = {
+    on(event, handler) { handlers.set(event, handler); },
+    registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand(name, command) { commands.set(name, command); },
+  };
+  const ctx = {
+    sessionManager: { getSessionId: () => 'pi-picker-session' },
+    model: { id: 'pi-picker-model' }, hasUI: true,
+    ui: {
+      async select(title, options) {
+        selections.push({ title, options });
+        if (title === 'Pick a Computer Use target') return 'Browser tabs (2 browsers)';
+        if (title === 'Pick a browser or profile') return options.find(option => option.includes('profile-b'));
+        if (title.startsWith('Pick tab type')) return 'Open user tab';
+        if (title.startsWith('Pick a tab')) return options.find(option => option.includes('[702]'));
+        return undefined;
+      },
+      getEditorText() { return editor; },
+      setEditorText(value) { editor = value; },
+      notify(message, type) { notifications.push({ message, type }); },
+    },
+  };
+  try {
+    piExtension(pi);
+    await commands.get('lcu').handler('pick', ctx);
+    assert.deepEqual(selections[1], {
+      title: 'Pick a browser or profile',
+      options: ['Chrome · extension · chrome · profile-a · profile-a',
+        'Chrome · extension · chrome · profile-b · profile-b'],
+    });
+    assert.ok(selections[3].options[0].includes('[701]'));
+    assert.ok(selections[3].options[1].includes('[702]'));
+    assert.match(editor, /^Summarize the selected page\n\n/);
+    assert.match(editor, /browser ID "profile-b"/);
+    assert.match(editor, /provider tab ID "702"/);
+    assert.match(editor, /https:\/\/work\.example\/reports/);
+    assert.match(editor, /openTabs\(\).*claimTab/s);
+    assert.match(editor, /do not claim another tab/);
+
+    const entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    const calls = entries.filter(entry => entry.name === 'js');
+    assert.deepEqual(calls.map(entry => entry.args.code.match(/lcu-pick:[\w-]+/)?.[0]), [
+      'lcu-pick:inventory', 'lcu-pick:user-tabs', 'lcu-pick:verify-user-tab',
+    ]);
+    assert.ok(calls.every(entry => entry.meta['x-codex-turn-metadata'].session_id === 'pi-picker-session'));
+    assert.ok(calls.every(entry => entry.meta['x-codex-turn-metadata'].model === 'pi-picker-model'));
+    assert.ok(calls.every(entry => entry.meta['x-codex-turn-metadata'].call_id === undefined));
+    assert.equal(entries.filter(entry => entry.name === 'turn_ended').length, 1);
+    assert.match(notifications.at(-1).message, /Review and submit/);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    if (oldStale === undefined) delete process.env.LCU_PICK_STALE;
+    else process.env.LCU_PICK_STALE = oldStale;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Pi /lcu pick uses exact session tab IDs and preserves a stale or cancelled selection safely', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-pick-session-'));
+  const log = join(directory, 'mcp.jsonl');
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const oldStale = process.env.LCU_PICK_STALE;
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
+  const handlers = new Map();
+  const commands = new Map();
+  const notifications = [];
+  let editor = 'Keep this draft';
+  let cancelType = false;
+  const pi = {
+    on(event, handler) { handlers.set(event, handler); },
+    registerTool() {}, registerCommand(name, command) { commands.set(name, command); },
+  };
+  const ctx = {
+    sessionManager: { getSessionId: () => 'pi-session-tab-session' },
+    model: { id: 'pi-model' }, hasUI: true,
+    ui: {
+      async select(title, options) {
+        if (title === 'Pick a Computer Use target') return 'Browser tabs (2 browsers)';
+        if (title === 'Pick a browser or profile') return options.find(option => option.includes('profile-b'));
+        if (title.startsWith('Pick tab type')) return cancelType ? undefined : 'Session tab';
+        if (title.startsWith('Pick a tab')) return options.find(option => option.includes('[session-tab-b]'));
+        return undefined;
+      },
+      getEditorText() { return editor; }, setEditorText(value) { editor = value; },
+      notify(message, type) { notifications.push({ message, type }); },
+    },
+  };
+  try {
+    piExtension(pi);
+    process.env.LCU_PICK_STALE = 'session-tab';
+    await commands.get('lcu').handler('pick', ctx);
+    assert.equal(editor, 'Keep this draft');
+    assert.match(notifications.at(-1).message, /changed or is no longer available/);
+    let entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.ok(entries.some(entry => entry.name === 'js' && entry.args.code.includes('lcu-pick:verify-session-tab')));
+    assert.equal(entries.filter(entry => entry.name === 'turn_ended').length, 1);
+
+    delete process.env.LCU_PICK_STALE;
+    cancelType = true;
+    const before = entries.length;
+    await commands.get('lcu').handler('pick', ctx);
+    assert.equal(editor, 'Keep this draft');
+    entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(entries.filter(entry => entry.name === 'turn_ended').length, 2);
+    assert.equal(entries.slice(before).filter(entry => entry.name === 'js').length, 1);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    if (oldStale === undefined) delete process.env.LCU_PICK_STALE;
+    else process.env.LCU_PICK_STALE = oldStale;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Pi picker cleanup ends only its private turn when a real Pi turn starts during selection', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-pick-overlap-'));
+  const log = join(directory, 'mcp.jsonl');
+  const oldCommand = process.env.LCU_MCP_COMMAND;
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
+  process.env.LCU_FIXTURE_LOG = log;
+  const handlers = new Map();
+  const tools = new Map();
+  const commands = new Map();
+  const notifications = [];
+  let editor = 'Existing draft';
+  let startTurnDuringSelect = true;
+  const pi = {
+    on(event, handler) { handlers.set(event, handler); },
+    registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand(name, command) { commands.set(name, command); },
+  };
+  const ctx = {
+    sessionManager: { getSessionId: () => 'fail-once-session' },
+    model: { id: 'real-model' }, hasUI: true,
+    ui: {
+      async select(title, options) {
+        if (title === 'Pick a Computer Use target' && startTurnDuringSelect) {
+          startTurnDuringSelect = false;
+          await handlers.get('agent_start')({}, ctx);
+        }
+        return options[0];
+      },
+      getEditorText() { return editor; }, setEditorText(value) { editor = value; },
+      notify(message, type) { notifications.push({ message, type }); },
+    },
+  };
+  try {
+    piExtension(pi);
+    await handlers.get('before_agent_start')({ systemPrompt: 'Pi' }, ctx);
+    await commands.get('lcu').handler('pick', ctx);
+    assert.equal(editor, 'Existing draft');
+    assert.ok(notifications.some(item => /A Pi turn started while the picker was open/.test(item.message)));
+    assert.ok(notifications.some(item => /picker cleanup failed/.test(item.message)));
+
+    await tools.get('js').execute('real-call-after-picker', { code: 'real-call-after-picker' }, undefined, undefined, ctx);
+    const entries = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    const pickerCall = entries.find(entry => entry.name === 'js' && entry.args.code.includes('// lcu-pick:inventory'));
+    const pickerTurn = pickerCall.meta['x-codex-turn-metadata'].turn_id;
+    const endedTurns = entries.filter(entry => entry.name === 'turn_ended');
+    assert.deepEqual(endedTurns.map(entry => entry.args.turn_id), [pickerTurn, pickerTurn]);
+    const activeCall = entries.find(entry => entry.name === 'js' && entry.args.code === 'real-call-after-picker');
+    assert.equal(activeCall.meta['x-codex-turn-metadata'].session_id, 'fail-once-session');
+    assert.notEqual(activeCall.meta['x-codex-turn-metadata'].turn_id, pickerTurn);
+    await handlers.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
+  } finally {
+    await handlers.get('session_shutdown')?.();
+    if (oldCommand === undefined) delete process.env.LCU_MCP_COMMAND;
+    else process.env.LCU_MCP_COMMAND = oldCommand;
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('Pi asks for non-origin empty-form approval and cancels unsupported forms', async () => {
   const oldCommand = process.env.LCU_MCP_COMMAND;
   process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
@@ -79,7 +282,7 @@ test('Pi asks for non-origin empty-form approval and cancels unsupported forms',
   const tools = new Map();
   const prompts = [];
   const pi = { on(event, handler) { handlers.set(event, handler); },
-    registerTool(tool) { tools.set(tool.name, tool); } };
+    registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} };
   const ctx = { sessionManager: { getSessionId: () => 'pi-approval-session' },
     model: { id: 'pi-model' }, hasUI: true,
     ui: { async select(title, options) { prompts.push([title, options]); return 'Allow'; } } };
@@ -108,7 +311,7 @@ test('Pi forwards only the native app approval persistence scope selected in its
   const tools = new Map();
   const prompts = [];
   let selection = 'Allow for this session';
-  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} };
   const ctx = { sessionManager: { getSessionId: () => 'pi-native-approval-session' },
     model: { id: 'pi-model' }, hasUI: true,
     ui: {
@@ -165,7 +368,7 @@ test('Pi retains failed turn cleanup, blocks ended-turn tools, and retries befor
   process.env.LCU_FIXTURE_LOG = log;
   const handlers = new Map();
   const tools = new Map();
-  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} };
   const ctx = { sessionManager: { getSessionId: () => 'fail-session' }, hasUI: false };
   try {
     piExtension(pi);
@@ -210,7 +413,7 @@ test('Pi can recover when a retained cleanup succeeds on retry', async () => {
   process.env.LCU_FIXTURE_LOG = log;
   const handlers = new Map();
   const tools = new Map();
-  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); } };
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool(tool) { tools.set(tool.name, tool); }, registerCommand() {} };
   const ctx = { sessionManager: { getSessionId: () => 'fail-once-session' }, hasUI: false };
   try {
     piExtension(pi);
@@ -249,7 +452,7 @@ test('Pi deduplicates agent_end cleanup when shutdown overlaps it', async () => 
   process.env.LCU_MCP_COMMAND = JSON.stringify([process.execPath, fixture]);
   process.env.LCU_FIXTURE_LOG = log;
   const handlers = new Map();
-  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool() {} };
+  const pi = { on(event, handler) { handlers.set(event, handler); }, registerTool() {}, registerCommand() {} };
   const ctx = { sessionManager: { getSessionId: () => 'overlap-session' }, hasUI: false };
   try {
     piExtension(pi);

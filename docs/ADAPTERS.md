@@ -42,6 +42,14 @@ The PNG and WAV hashes identify the shared original fixtures. Provider-facing er
 
 The Pi adapter uses Pi's extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. Current package registration and result forwarding passed with Pi 0.87.1 from `@earendil-works/pi-coding-agent`; see [the standalone host record](verification/latest-standalone-harness-2026-09-27.md). Earlier desktop-task evidence below used Pi 0.73.0.
 
+Pi also registers `/lcu pick`:
+
+```text
+/lcu pick
+```
+
+`/lcu pick` requires Pi's interactive selection and editor APIs and runs only while no LCU turn is active. It selects an original app, browser/profile, and session or open user tab, then appends target guidance to the current editor draft. It does not submit the draft or claim an open user tab. The command is unavailable in headless Pi mode; browser and app availability depends on the original provider. Picker guidance asks the next request to revalidate the selected target, but cannot enforce later model behavior. Installed Pi 0.87.1 source executes registered slash commands inline before its normal streaming queue and its interactive UI can present the selector while the agent is active. Native-app selection passed a live Linux Pi UI smoke test. A separate live browser-tab TUI test on the final 0.4.2 runtime selected an open Chrome extension-provider tab by exact profile and tab identity and inserted guidance into the actual editor draft; it did not submit the draft, claim the tab, or contact a model provider. See [the request-context and picker verification](verification/request-context-2026-09-27.md) for evidence and behavior limits.
+
 A model-driven Linux GTK task and an opt-in official Chrome-extension task are recorded in [Pi verification](verification/pi-generated-gtk-real-model-2026-09-24.md). The [approval scope test](verification/native-app-approval-scopes-2026-09-25.md) verifies response forwarding, not grant persistence across helper restart or revocation. The [dismissal regression](verification/pi-approval-2026-09-26.md) verifies that dismissing an origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist.
 
 ## Oh My Pi
@@ -57,7 +65,6 @@ Register the experimental Hermes integration with `lcu setup --agent hermes`. Se
 The plugin uses a private Node bridge backed by the shared official MCP SDK client. Host lifecycle and request metadata remain outside the model-visible tools. Original native-app approval requests use Hermes's native selector with once, session, and always choices restricted to the scopes the original runtime offers. LCU forwards the selected scope to that runtime and keeps no grant cache. Original browser-origin requests offer once or deny. Unsupported forms and URL approval flows cancel. Images use Hermes's native multimodal result envelope; audio is saved byte-for-byte and represented by a local file reference, as in Pi. The original installed app still supplies execution, schemas, instructions, and permission requests.
 
 Hermes v2026.9.24 (0.21.5) passed a real model-directed Linux ARM64 GTK save flow with an independent file oracle. Its public execution middleware supplies exact turn and call identities omitted by ordinary plugin-handler dispatch. See [Hermes verification](verification/hermes-harness-2026-09-28.md) for source evidence, session isolation, and remaining browser, approval, and platform limits.
-
 
 ## Codex CLI
 

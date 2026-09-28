@@ -221,10 +221,21 @@ export async function runClaudeBridge({ command, args = [], cwd, env } = {}) {
           'Missing exact Claude PreToolUse identity; LCU did not run this tool call.' }] };
       }
       contexts.delete(toolUseId);
-      const metadata = {
-        ...(_meta ?? {}),
-        [TURN_CONTEXT_META]: { session_id: context.sessionId, turn_id: context.turnId },
-      };
+      const metadata = _meta && typeof _meta === 'object' && !Array.isArray(_meta)
+        ? { ..._meta } : {};
+      const inheritedTurnMetadata = metadata[TURN_CONTEXT_META];
+      let turnMetadata = inheritedTurnMetadata;
+      if (typeof turnMetadata === 'string') {
+        try { turnMetadata = JSON.parse(turnMetadata); } catch { turnMetadata = undefined; }
+      }
+      turnMetadata = turnMetadata && typeof turnMetadata === 'object' && !Array.isArray(turnMetadata)
+        ? { ...turnMetadata } : {};
+      Object.assign(turnMetadata, {
+        session_id: context.sessionId,
+        turn_id: context.turnId,
+        call_id: toolUseId,
+      });
+      metadata[TURN_CONTEXT_META] = turnMetadata;
       try {
         return await upstream.callTool({ name, arguments: toolArgs, _meta: metadata }, undefined, {
           signal: extra.signal,

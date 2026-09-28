@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse } from '../client.mjs';
 
 const command = [process.execPath, new URL('./mcp-fixture.mjs', import.meta.url).pathname];
@@ -33,6 +36,42 @@ test('keeps original tool descriptors and initialization instructions; hides int
     await assert.rejects(bridge.turnEnded({ sessionId: 'fail-session', turnId: 'real-turn' }),
       /cleanup failed/);
   } finally { await bridge.close(); }
+});
+
+test('forwards real call context and retains unrelated caller metadata', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-client-context-'));
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const log = join(directory, 'mcp.jsonl');
+  process.env.LCU_FIXTURE_LOG = log;
+  const bridge = createCuaClient({ command });
+  try {
+    await bridge.connect();
+    await bridge.call('js', { code: 'context' }, {
+      sessionId: 'host-session', turnId: 'host-turn', toolCallId: 'host-call',
+      threadId: 'host-thread', threadSource: 'subagent',
+      chatgptConversationId: 'host-conversation', model: 'host-model', reasoningEffort: 'high',
+      metadata: {
+        'openai/confirmation_policies': { computer_use: 'confirm' },
+        'sandbox/policy': { mode: 'workspace-write' },
+        'x-codex-turn-metadata': { caller_field: 'retained', item_id: 'host-item' },
+      },
+    });
+    const entry = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse).at(-1);
+    assert.deepEqual(entry.meta, {
+      'openai/confirmation_policies': { computer_use: 'confirm' },
+      'sandbox/policy': { mode: 'workspace-write' },
+      'x-codex-turn-metadata': {
+        caller_field: 'retained', item_id: 'host-item', session_id: 'host-session', turn_id: 'host-turn',
+        call_id: 'host-call', thread_id: 'host-thread', thread_source: 'subagent',
+        chatgpt_conversation_id: 'host-conversation', model: 'host-model', reasoning_effort: 'high',
+      },
+    });
+  } finally {
+    await bridge.close();
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('elicitation is denied by default and exact authorized origins are accepted', async () => {

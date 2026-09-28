@@ -117,17 +117,36 @@ export function createCuaClient({ command, cwd, env, onElicitation, allowedOrigi
       if (!connected) throw new Error('LCU is not connected');
       return tools;
     },
-    async call(name, args, { sessionId, turnId, toolCallId, model, signal } = {}) {
+    async call(name, args, {
+      sessionId, turnId, toolCallId, itemId, threadId, threadSource,
+      chatgptConversationId, model, reasoningEffort, metadata, signal,
+    } = {}) {
       if (!connected) throw new Error('LCU is not connected');
       if (!MODEL_TOOLS.has(name)) throw new Error(`Tool is reserved for host use: ${name}`);
       if (!sessionId || !turnId) throw new Error('A real host session and active turn are required');
       const requested = Number(args?.timeout_ms);
       const timeout = name === 'js' && Number.isFinite(requested) && requested > 0
         ? Math.max(120_000, requested + 30_000) : 120_000;
+      const inherited = metadata?.['x-codex-turn-metadata'];
+      const original = typeof inherited === 'string' ? (() => {
+        try { return JSON.parse(inherited); } catch { return undefined; }
+      })() : inherited;
+      const turnMetadata = original && typeof original === 'object' && !Array.isArray(original)
+        ? { ...original } : {};
+      Object.assign(turnMetadata, {
+        session_id: sessionId,
+        turn_id: turnId,
+        ...(toolCallId ? { call_id: toolCallId } : {}),
+        ...(itemId ? { item_id: itemId } : {}),
+        ...(threadId ? { thread_id: threadId } : {}),
+        ...(threadSource ? { thread_source: threadSource } : {}),
+        ...(chatgptConversationId ? { chatgpt_conversation_id: chatgptConversationId } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      });
       return client.callTool({ name, arguments: args, _meta: {
-        'x-codex-turn-metadata': { session_id: sessionId, turn_id: turnId,
-          ...(toolCallId ? { call_id: toolCallId } : {}),
-          ...(model ? { model } : {}) },
+        ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        'x-codex-turn-metadata': turnMetadata,
       } }, undefined, { signal, timeout });
     },
     async turnEnded({ sessionId, turnId, event = 'Stop' }) {

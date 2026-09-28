@@ -72,6 +72,10 @@ lcu setup --agent pi --audio
 
 This enables the installed original runtime's optional computer-audio recording API and its original approval flow. LCU does not add audio-specific instructions, and a saved recording is not audio delivered to the model. See the [audio opt-in verification record](docs/verification/audio-opt-in-2026-09-27.md).
 
+## Pi commands
+
+In interactive Pi, `/lcu pick` selects an original app or browser target and appends it to the editor draft while Pi is idle; review and submit the draft yourself. See [adapter command behavior and limits](docs/ADAPTERS.md#pi-extension).
+
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md): downloads, harness setup, permissions, sessions, and upgrades.
