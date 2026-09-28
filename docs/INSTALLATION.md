@@ -212,6 +212,12 @@ Custom harnesses must deliver the original instructions and images, present site
 
 Reinstall with the same prefix. The installer keeps app generations under apps/, LCU generations under releases/, and atomically changes current only after validating the new release. Agent registrations point at current and should be reloaded after a switch. A failed setup can leave completed agent registrations even when another agent fails; its error lists which to retry. Old generations are retained so live processes do not lose their files.
 
+Reclaim that space with `lcu prune [--keep N] [--yes]`. It removes old LCU release directories under `<prefix>/releases` and, on Linux and Windows, the private app generations under `<prefix>/apps` that the kept releases no longer use. It keeps the current release plus the `N-1` most recent (default `--keep 2`). Without `--yes` it is a dry run that lists the paths and sizes it would remove. Stop or restart any agents still using an older release before pruning, so a live process does not lose its files.
+
+~~~sh
+/opt/lcu/current/bin/lcu prune --keep 2
+~~~
+
 The installer accepts the legacy positional prefix. --offline prohibits installation network calls and requires preinstalled system libraries with --skip-system; model and browser services can still need network during use. --yes confirms a selected noninteractive setup. See --help for the complete option list and [verification](VERIFICATION.md) for exact tested outcomes.
 
 ## Windows 11 x64 candidate (deferred from this delivery)
