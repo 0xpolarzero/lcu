@@ -399,21 +399,16 @@ def generate_skill(source, home, release_root, *, chrome=False, setup_command=No
             wrapper = wrapper.replace('Linux', 'Windows').replace('/linux/', '/windows/')
             wrapper = wrapper.replace('For native Windows windows, target an exact observed window ID.',
                                       'For native Windows apps, target an exact observed window ID.')
-        # `lcu` is not on PATH; point at the installed runtime's setup command.
-        if setup_command:
-            wrapper = wrapper.replace('`lcu setup`', f'`{setup_command} setup`')
-        else:
-            example = {'linux': '/opt/lcu/current/bin/lcu',
-                       'macos': '~/.local/share/lcu/current/bin/lcu',
-                       'windows': r'%LOCALAPPDATA%\LCU\lcu.cmd'}[instruction_platform]
-            wrapper = wrapper.replace(
-                'run `lcu setup`',
-                f"run the installed LCU runtime's `setup` command (for example `{example} setup`)")
         if chrome:
             platform_name = {'darwin': 'macOS', 'linux': 'Linux', 'windows': 'Windows'}[target]
             wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
                                       f'description: Control {platform_name} desktop windows and opted-in Chrome tabs through the original Codex computer-use runtime.')
             wrapper += CHROME_SKILL_ADDENDUM
+        # `lcu` is not on PATH; name the installed runtime, or its default path.
+        runtime_command = setup_command or {'linux': '/opt/lcu/current/bin/lcu',
+                                            'macos': '~/.local/share/lcu/current/bin/lcu',
+                                            'windows': r'%LOCALAPPDATA%\LCU\lcu.cmd'}[instruction_platform]
+        wrapper = wrapper.replace('`lcu ', f'`{runtime_command} ')
         (stage / 'SKILL.md').write_text(wrapper)
         refs = stage / 'references'
         # Match upstream load_instructions(process.platform): expose shared
@@ -525,7 +520,8 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                     preflight_mcp(node, mcp, client, scope, cwd, env)
                 if phase == 'extension':
                     if not pi:
-                        raise ValueError('Pi is not on the target account PATH. Install Pi, then run `lcu setup --agent pi --yes` from that account shell.')
+                        raise ValueError('Pi is not on the target account PATH. Install Pi, then run '
+                                         f'`{setup_command or "lcu"} setup --agent pi --yes` from that account shell.')
                     adapter = release_root / 'adapters/pi/index.ts'
                     if not adapter.is_file():
                         raise ValueError(f'LCU Pi adapter missing: {adapter}')
@@ -884,6 +880,8 @@ def main(argv=None):
         setup_command = str(runtime)
         with setup_lock(home):
             state = load_setup_state(home)
+            # A saved choice, including a declined prompt, suppresses the prompt.
+            saved = setup_state_path(home).is_file()
             # Explicit flags win; otherwise a saved opt-in is kept.
             if args.audio:
                 audio = True
@@ -901,7 +899,7 @@ def main(argv=None):
             elif state['chrome']:
                 chrome = True
                 print('Keeping Chrome control enabled from the previous setup (use --no-chrome to disable).')
-            elif not args.yes and sys.stdin.isatty():
+            elif not saved and not args.yes and sys.stdin.isatty():
                 chrome = input('Enable Chrome browser control and its extension connector? [y/N] ').strip().lower() in ('y', 'yes')
             else:
                 chrome = False
@@ -964,9 +962,9 @@ def main(argv=None):
                 if browser_status.stdout.strip():
                     print(browser_status.stdout.strip())
                 if browser_status.returncode and not browser_status.stdout.strip():
-                    print('Browser status unavailable; run `lcu browser status` after setup.')
+                    print(f'Browser status unavailable; run `{setup_command} browser status` after setup.')
             except (OSError, subprocess.SubprocessError):
-                print('Browser status unavailable; run `lcu browser status` after setup.')
+                print(f'Browser status unavailable; run `{setup_command} browser status` after setup.')
         else:
             print(f'Chrome browser control not enabled; add it later with `{setup_command} setup --agent AGENT --chrome`; other saved opt-ins are kept.')
         if not args.audio:

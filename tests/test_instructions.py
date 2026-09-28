@@ -541,3 +541,22 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertNotIn('--chrome', captured[-1])
         self.assertEqual(json.loads((self.home / '.local/state/lcu/setup.json').read_text()),
                          {'chrome': False, 'audio': False})
+        # A saved decline is a choice: an interactive rerun does not prompt again.
+        prompts = []
+
+        def answer(question):
+            prompts.append(question)
+            return 'y'
+
+        with patch.object(setup.sys.stdin, 'isatty', return_value=True), \
+                patch('builtins.input', side_effect=answer):
+            drive([])
+        self.assertEqual(prompts, ['Apply this setup? [y/N] '])
+        self.assertNotIn('--chrome', captured[-1])
+
+    def test_chrome_skill_names_the_installed_runtime_for_browser_commands(self):
+        generated = generate_skill(self.skill_source, self.home, self.release, chrome=True,
+                                   setup_command='/opt/lcu/current/bin/lcu')
+        wrapper = (generated / 'SKILL.md').read_text()
+        self.assertIn('`/opt/lcu/current/bin/lcu browser status`', wrapper)
+        self.assertNotIn('`lcu ', wrapper)
