@@ -277,6 +277,51 @@ class UpstreamRuntimeTests(unittest.TestCase):
             main(self.root, [])
         self.assertEqual(execute.call_args.args[2]['CUA_REPL_ENABLED_SURFACES'], 'computer')
 
+    def test_bare_server_in_interactive_terminal_reports_usage_and_exits(self):
+        tty = SimpleNamespace(isatty=lambda: True)
+        stderr = io.StringIO()
+        with patch('lcu.runtime.sys.stdin', tty), patch('lcu.runtime.sys.stdout', tty), \
+             patch('lcu.runtime.sys.stderr', stderr), patch('lcu.runtime.os.execve') as execute:
+            with self.assertRaises(SystemExit) as exit_status:
+                main(self.root, [])
+        self.assertEqual(exit_status.exception.code, 2)
+        execute.assert_not_called()
+        self.assertIn('stdio MCP server', stderr.getvalue())
+        self.assertIn('Usage: lcu', stderr.getvalue())
+
+    def test_prune_dispatches_to_maintenance_without_resolving_app(self):
+        import types
+        module = types.ModuleType('lcu.maintenance')
+        calls = []
+        module.main = lambda root, argv: calls.append((root, argv))
+        with patch.dict(sys.modules, {'lcu.maintenance': module}), \
+             patch('lcu.runtime.paths') as resolve:
+            main(self.root, ['prune', '--keep', '3', '--yes'])
+        self.assertEqual(calls, [(self.root, ['--keep', '3', '--yes'])])
+        resolve.assert_not_called()
+
+    def test_doctor_help_prints_without_resolving_missing_app(self):
+        (self.root / 'installation.json').unlink()
+        output = io.StringIO()
+        with patch('sys.stdout', output), patch('lcu.runtime.paths') as resolve:
+            with self.assertRaises(SystemExit) as exit_status:
+                main(self.root, ['doctor', '--help'])
+        self.assertEqual(exit_status.exception.code, 0)
+        resolve.assert_not_called()
+        self.assertIn('--require-ready', output.getvalue())
+
+    def test_version_reports_invalid_selected_app_and_exits_nonzero(self):
+        descriptor = self.root / 'installation.json'
+        data = json.loads(descriptor.read_text())
+        data['app'] = 'mismatched-generation'
+        descriptor.write_text(json.dumps(data))
+        output = io.StringIO()
+        with patch('sys.stdout', output):
+            with self.assertRaises(SystemExit) as exit_status:
+                main(self.root, ['--version'])
+        self.assertEqual(exit_status.exception.code, 1)
+        self.assertIn('app invalid:', output.getvalue())
+
     def test_browser_setup_refuses_foreign_directory(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

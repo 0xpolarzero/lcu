@@ -12,17 +12,19 @@ USAGE = ('Usage: lcu [--chrome] [--audio] [--mcp-discovery-compat]\n'
          '       lcu setup OPTIONS\n'
          '       lcu browser install\n'
          '       lcu browser status\n'
+         '       lcu prune [--keep N] [--yes]\n'
          '       lcu doctor\n'
          '       lcu --version')
 
 
-def paths(root):
+def paths(root, descriptor=None):
     """Resolve one selected, intact application generation."""
     app = root / 'app'
     resources = app / 'resources'
     runtime = resources / 'cua_node'
     lock = json.loads((root / 'runtime.lock.json').read_text())
-    descriptor = json.loads((root / 'installation.json').read_text())
+    if descriptor is None:
+        descriptor = json.loads((root / 'installation.json').read_text())
     selected = Path(descriptor.get('app', ''))
     arch = descriptor.get('architecture')
     target = descriptor.get('platform', 'linux')
@@ -125,9 +127,10 @@ def paths(root):
     return app, resources, runtime, {'version': version, 'runtime': runtime_version}
 
 
-def environment(root, resolved=None, *, chrome=False, audio=False):
+def environment(root, resolved=None, *, chrome=False, audio=False, platform=None):
     _, resources, runtime, metadata = resolved or paths(root)
-    target = json.loads((root / 'installation.json').read_text()).get('platform', 'linux')
+    target = platform if platform is not None else json.loads(
+        (root / 'installation.json').read_text()).get('platform', 'linux')
     windows = target == 'windows'
     path_api = ntpath if windows else os.path
     separator = ';' if windows else os.pathsep
@@ -234,29 +237,38 @@ def reply_to_server_discover(source, destination):
     destination.flush()
 
 
-def _configure_macos_lifecycle(root, runtime, env):
-    """Keep original Sky behavior and add only its turn-ended host hook."""
+def _override_trusted_service(env, wrapper, separator, platform_name, *, computer_gated):
+    """Add the native-cleanup Sky wrapper while keeping any other trusted services."""
     surfaces = {surface.strip() for surface in env.get('CUA_REPL_ENABLED_SURFACES', '').split(',')}
-    if 'computer' not in surfaces:
-        return None
-    wrapper = root / 'lcu/macos_sky_service.mjs'
+    gate = ('computer' in surfaces) if computer_gated else True
     raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
     supplied = json.loads(raw_services) if raw_services is not None else None
     if raw_services is None:
         supplied = {}
         if 'browser' in surfaces:
             supplied['browser'] = '@oai/browser-desktop/service'
-        supplied['sky'] = '@oai/sky/service'
+        if gate:
+            supplied['sky'] = '@oai/sky/service'
     if not isinstance(supplied, dict) or any(not isinstance(key, str) or not isinstance(value, str)
                                              for key, value in supplied.items()):
         raise ValueError('NODE_REPL_TRUSTED_SERVICES must be a JSON string map.')
-    if supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
-        raise ValueError('A custom Sky trusted-service override conflicts with macOS native cleanup.')
+    if gate and supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
+        raise ValueError(f'A custom Sky trusted-service override conflicts with {platform_name} native cleanup.')
     services = dict(supplied)
-    services['sky'] = str(wrapper)
+    if gate:
+        services['sky'] = str(wrapper)
     env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(services)
-    env['NODE_REPL_TRUSTED_CODE_PATHS'] = os.pathsep.join(dict.fromkeys(
-        [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(os.pathsep))]))
+    env['NODE_REPL_TRUSTED_CODE_PATHS'] = separator.join(dict.fromkeys(
+        [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(separator))]))
+
+
+def _configure_macos_lifecycle(root, runtime, env):
+    """Keep original Sky behavior and add only its turn-ended host hook."""
+    surfaces = {surface.strip() for surface in env.get('CUA_REPL_ENABLED_SURFACES', '').split(',')}
+    if 'computer' not in surfaces:
+        return None
+    wrapper = root / 'lcu/macos_sky_service.mjs'
+    _override_trusted_service(env, wrapper, os.pathsep, 'macOS', computer_gated=False)
     env['LCU_MAC_SKY_SERVICE_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js')
     env['LCU_MAC_SKY_CLIENT_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/mac/client.js')
     client = Path(env['SKY_CUA_SERVICE_PATH']) / 'Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient'
@@ -283,7 +295,11 @@ def main(root, argv):
         descriptor = json.loads(descriptor_path.read_text()) if descriptor_path.is_file() else {}
         target = descriptor.get('platform', 'linux')
         if descriptor_path.is_file():
-            metadata = paths(root)[3]
+            try:
+                metadata = paths(root, descriptor)[3]
+            except ValueError as exc:
+                print(f'lcu {version} (ChatGPT {target} app invalid: {exc})')
+                raise SystemExit(1)
             print(f"lcu {version} (ChatGPT {target} {metadata['version']}; CUA {metadata['runtime']})")
         else:
             print(f'lcu {version} (ChatGPT {target} app not selected)')
@@ -298,6 +314,10 @@ def main(root, argv):
         from .browser import main as browser
         browser(root, argv[1:])
         return
+    if argv[:1] == ['prune']:
+        from .maintenance import main as maintenance
+        maintenance(root, argv[1:])
+        return
     if argv == ['--with-browser-host']:
         raise ValueError('--with-browser-host was removed with the embedded browser. '
                          'Run lcu browser install and enable the official Chrome extension.')
@@ -309,10 +329,22 @@ def main(root, argv):
     if (argv.count('--chrome') > 1 or argv.count('--audio') > 1 or
             (direct_args not in ([], ['--mcp-discovery-compat']) and doctor_args is None)):
         raise ValueError(USAGE)
-    resolved = paths(root)
+    # `lcu doctor --help` documents the check without resolving the installed app.
+    if doctor_args is not None and ('--help' in doctor_args or '-h' in doctor_args):
+        from .doctor import main as doctor
+        return doctor(root, doctor_args)
+    # A bare stdio server launched from a real terminal only appears to hang.
+    if direct_args == [] and sys.stdin.isatty() and sys.stdout.isatty():
+        print('lcu is a stdio MCP server, launched by an agent harness over pipes, not run directly.\n'
+              + USAGE + '\nRun `lcu setup` to register it with a harness, or `lcu doctor` to check readiness.',
+              file=sys.stderr)
+        raise SystemExit(2)
+    descriptor = json.loads((root / 'installation.json').read_text())
+    platform = descriptor.get('platform', 'linux')
+    resolved = paths(root, descriptor)
     app, resources, runtime, _ = resolved
-    env = environment(root, resolved, chrome=chrome, audio=audio)
-    windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
+    env = environment(root, resolved, chrome=chrome, audio=audio, platform=platform)
+    windows = platform == 'windows'
     if doctor_args is not None:
         from .doctor import main as doctor
         status = doctor(root, doctor_args, resolved=resolved, env=env)
@@ -344,31 +376,12 @@ def main(root, argv):
             'app/resources/cua_node/bin/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js'))
         wrapper = root / 'lcu-host/windows-sky-service.mjs'
         try:
-            raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
-            supplied = json.loads(raw_services) if raw_services is not None else None
-            surfaces = {surface.strip() for surface in env['CUA_REPL_ENABLED_SURFACES'].split(',')}
-            if raw_services is None:
-                supplied = {}
-                if 'browser' in surfaces:
-                    supplied['browser'] = '@oai/browser-desktop/service'
-                if 'computer' in surfaces:
-                    supplied['sky'] = '@oai/sky/service'
-            if not isinstance(supplied, dict) or any(not isinstance(k, str) or not isinstance(v, str)
-                                                     for k, v in supplied.items()):
-                raise ValueError('NODE_REPL_TRUSTED_SERVICES must be a JSON string map.')
-            if 'computer' in surfaces and supplied.get('sky') not in (None, '@oai/sky/service', str(wrapper)):
-                raise ValueError('A custom Sky trusted-service override conflicts with Windows native cleanup.')
-            services = dict(supplied)
-            if 'computer' in surfaces:
-                services['sky'] = str(wrapper)
-            env['NODE_REPL_TRUSTED_SERVICES'] = json.dumps(services)
-            env['NODE_REPL_TRUSTED_CODE_PATHS'] = ';'.join(dict.fromkeys(
-                [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(';'))]))
+            _override_trusted_service(env, wrapper, ';', 'Windows', computer_gated=True)
             status = subprocess.run(command, env=env, check=False).returncode
         finally:
             stop_original_host(host)
         raise SystemExit(status)
-    macos = json.loads((root / 'installation.json').read_text()).get('platform') == 'darwin'
+    macos = platform == 'darwin'
     if macos:
         client = _configure_macos_lifecycle(root, runtime, env)
         if client is not None:
