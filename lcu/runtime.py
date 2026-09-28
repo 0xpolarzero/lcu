@@ -258,6 +258,7 @@ def _configure_macos_lifecycle(root, runtime, env):
     env['NODE_REPL_TRUSTED_CODE_PATHS'] = os.pathsep.join(dict.fromkeys(
         [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(os.pathsep))]))
     env['LCU_MAC_SKY_SERVICE_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js')
+    env['LCU_MAC_SKY_CLIENT_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/mac/client.js')
     client = Path(env['SKY_CUA_SERVICE_PATH']) / 'Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient'
     return client
 
@@ -373,7 +374,8 @@ def main(root, argv):
         if client is not None:
             from .macos_host import start_original_host, stop_original_host
             host, temporary, address = start_original_host(
-                python=Path(sys.executable), client=client, entry=root / 'lcu/macos_host.py', env=env)
+                python=Path(sys.executable), client=client, entry=root / 'lcu/macos_host.py', env=env,
+                control_address=env.get('LCU_MAC_CONTROL_SOCKET'))
             env['LCU_MAC_LIFETIME_SOCKET'] = address
             try:
                 status = subprocess.run(command, env=env, check=False).returncode

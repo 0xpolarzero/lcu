@@ -95,6 +95,50 @@ export default function (pi: ExtensionAPI, options: {
     }
   }
 
+  async function stopComputerUse(ctx: ExtensionContext) {
+    if (!active) {
+      ctx.ui.notify('Start an LCU turn before stopping computer use.', 'warning');
+      return;
+    }
+    if (!ctx.hasUI || typeof ctx.ui.select !== 'function') {
+      ctx.ui.notify('Stopping Computer Use requires Pi interactive selection.', 'warning');
+      return;
+    }
+    const turn = { ...active };
+    const client = await connected();
+    if (!active || active.sessionId !== turn.sessionId || active.turnId !== turn.turnId) {
+      ctx.ui.notify('The LCU turn ended before Stop could be sent.', 'warning');
+      return;
+    }
+    if (!client.hasHostControl) {
+      ctx.ui.notify(process.platform === 'darwin'
+        ? 'The LCU macOS control endpoint is unavailable. Restart Pi and try again.'
+        : 'LCU Stop control is available on macOS only.', 'warning');
+      return;
+    }
+    const status = await client.controlStatus(turn) as {
+      computerUse?: { activeApplications?: Array<{ name?: string; bundleIdentifier?: string }> };
+    };
+    const apps = Array.isArray(status?.computerUse?.activeApplications)
+      ? status.computerUse.activeApplications.filter(app =>
+        typeof app?.name === 'string' && typeof app.bundleIdentifier === 'string' && app.bundleIdentifier)
+      : [];
+    if (!apps.length) {
+      ctx.ui.notify('No active Computer Use app is available to stop.', 'info');
+      return;
+    }
+    const labels = apps.map(app => `${app.name} (${app.bundleIdentifier})`);
+    const selected = await ctx.ui.select('Stop computer use for an app', labels);
+    const index = labels.indexOf(selected ?? '');
+    if (index < 0) return;
+    if (!active || active.sessionId !== turn.sessionId || active.turnId !== turn.turnId) {
+      ctx.ui.notify('The LCU turn ended before Stop could be sent.', 'warning');
+      return;
+    }
+    await client.controlStop({ ...turn, app: apps[index].bundleIdentifier });
+    ctx.ui.notify(`Requested Computer Use Stop for ${apps[index].name}.`, 'info');
+  }
+
   async function pickTarget(ctx: ExtensionCommandContext) {
     if (pickerInFlight) {
       ctx.ui.notify('An LCU picker is already open.', 'warning');
@@ -449,18 +493,20 @@ export default function (pi: ExtensionAPI, options: {
   });
   pi.on('session_shutdown', leaveSession);
   pi.registerCommand('lcu', {
-    description: 'Pick an original Computer Use target for the editor.',
+    description: 'Stop active original Computer Use or pick a target for the editor.',
     getArgumentCompletions: prefix => [
+      { value: 'stop', label: 'Stop active Computer Use' },
       { value: 'pick', label: 'Pick a target for the editor' },
     ].filter(item => item.value.startsWith(prefix)),
     async handler(args, ctx) {
       const [action, ...rest] = args.trim().split(/\s+/);
-      if (rest.length || action !== 'pick') {
-        ctx.ui.notify('Usage: /lcu pick', 'warning');
+      if (rest.length || !['stop', 'pick'].includes(action)) {
+        ctx.ui.notify('Usage: /lcu stop or /lcu pick', 'warning');
         return;
       }
       try {
-        await pickTarget(ctx);
+        if (action === 'stop') await stopComputerUse(ctx);
+        else await pickTarget(ctx);
       } catch (error) {
         ctx.ui.notify(`LCU ${action} failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
       }

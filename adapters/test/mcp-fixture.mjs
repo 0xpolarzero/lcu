@@ -1,4 +1,5 @@
 import { appendFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { runInNewContext } from 'node:vm';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -8,6 +9,44 @@ const server = new Server({ name: 'original-cua-contract-fixture', version: '1' 
   { capabilities: { tools: {} }, instructions: 'Original CUA initialization guide.' });
 const record = value => process.env.LCU_FIXTURE_LOG && appendFileSync(process.env.LCU_FIXTURE_LOG, `${JSON.stringify(value)}\n`);
 const failedCleanupSessions = new Set();
+let activeRequest;
+let completePending;
+const controlPath = process.env.LCU_MAC_CONTROL_SOCKET;
+if (controlPath) {
+  const control = createServer(socket => {
+    let input = '';
+    socket.setEncoding('utf8');
+    socket.on('data', data => {
+      input += data;
+      const newline = input.indexOf('\n');
+      if (newline < 0) return;
+      const request = JSON.parse(input.slice(0, newline));
+      record({ type: 'control', request });
+      if (!activeRequest || request.session_id !== activeRequest.session_id ||
+          request.turn_id !== activeRequest.turn_id) {
+        socket.end(`${JSON.stringify({ ok: false, error: 'active turn mismatch' })}\n`);
+        return;
+      }
+      if (request.type === 'status') {
+        socket.end(`${JSON.stringify({ ok: true, result: { computerUse: { activeApplications: [
+          { id: 'fixture-window', name: 'Fixture App', bundleIdentifier: 'dev.lcu.fixture', bundleURL: '' },
+        ] } } })}\n`);
+        return;
+      }
+      if (request.type === 'stop' && request.app === 'dev.lcu.fixture' && completePending) {
+        completePending();
+        completePending = undefined;
+        socket.end(`${JSON.stringify({ ok: true, result: { accepted: true, applicationId: request.app } })}\n`);
+        return;
+      }
+      socket.end(`${JSON.stringify({ ok: false, error: 'invalid control request' })}\n`);
+    });
+  });
+  await new Promise((resolve, reject) => {
+    control.once('error', reject);
+    control.listen(controlPath, resolve);
+  });
+}
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
   { name: 'js', description: 'Original JS description.', inputSchema: {
     type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
@@ -21,6 +60,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
 server.setRequestHandler(CallToolRequestSchema, async request => {
   const { name, arguments: args, _meta } = request.params;
   record({ name, args, meta: _meta });
+  if (name === 'js' && args?.code === 'stop-pending') {
+    const turn = _meta?.['x-codex-turn-metadata'] ?? {};
+    activeRequest = { session_id: turn.session_id, turn_id: turn.turn_id };
+    return new Promise(resolve => {
+      completePending = () => resolve({ content: [{ type: 'text', text: 'Original stopped condition.' }] });
+    });
+  }
   if (name === 'js' && args?.code.includes('// lcu-pick:')) {
     const profile = id => ({ id, name: 'Chrome', type: 'extension', family: 'chrome',
       metadata: { extensionInstanceId: id } });

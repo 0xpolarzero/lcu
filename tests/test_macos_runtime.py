@@ -4,9 +4,12 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
 import sys
 from types import SimpleNamespace
 import tempfile
+import time
+from threading import Thread
 import unittest
 from unittest.mock import patch
 
@@ -209,6 +212,120 @@ class MacRuntimeTests(unittest.TestCase):
             self.assertIn('status 23', result['error'])
         finally:
             stop_original_host(process, temporary)
+
+    def test_control_socket_routes_only_to_an_active_trusted_session_and_turn(self):
+        from lcu.macos_host import start_original_host, stop_original_host
+        client = self.root / 'unused-original-client'
+        client.write_text('#!/usr/bin/env python3\nraise SystemExit(99)\n')
+        client.chmod(0o755)
+        control = self.root / 'control.sock'
+        process, temporary, lifetime = start_original_host(
+            python=Path(sys.executable), client=client,
+            entry=Path(__file__).resolve().parents[1] / 'lcu/macos_host.py',
+            env=os.environ.copy(), control_address=str(control))
+        service = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            deadline = time.monotonic() + 4
+            while not control.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(control.exists())
+            service.connect(str(control))
+            service.sendall(b'{"type":"service"}\n'
+                            b'{"type":"context","token":"tool-1",'
+                            b'"session_id":"session-exact","turn_id":"turn-exact",'
+                            b'"app":"Fixture App"}\n')
+            service.settimeout(3)
+
+            def request(value):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                    connection.settimeout(4)
+                    connection.connect(str(control))
+                    connection.sendall((json.dumps(value) + '\n').encode())
+                    response = bytearray()
+                    while b'\n' not in response:
+                        response.extend(connection.recv(1024))
+                    return json.loads(response)
+
+            wrong_turn = request({'type': 'status', 'session_id': 'session-exact',
+                                  'turn_id': 'other-turn'})
+            self.assertFalse(wrong_turn['ok'])
+            self.assertIn('not active', wrong_turn['error'])
+            wrong_app_result = {}
+            wrong_app_worker = Thread(target=lambda: wrong_app_result.setdefault('value', request({
+                'type': 'stop', 'session_id': 'session-exact', 'turn_id': 'turn-exact',
+                'app': 'com.other.App'})))
+            wrong_app_worker.start()
+            buffered = bytearray()
+            while b'\n' not in buffered:
+                buffered.extend(service.recv(1024))
+            wrong_app_command = json.loads(buffered.split(b'\n', 1)[0])
+            self.assertEqual(wrong_app_command['app'], 'com.other.App')
+            service.sendall((json.dumps({'type': 'result',
+                'request_id': wrong_app_command['request_id'],
+                'response': {'ok': False, 'error': 'selected app is not targeted'}}) + '\n').encode())
+            wrong_app_worker.join(4)
+            self.assertFalse(wrong_app_worker.is_alive())
+            self.assertFalse(wrong_app_result['value']['ok'])
+            self.assertIn('not targeted', wrong_app_result['value']['error'])
+
+            result = {}
+            request_started = time.time()
+            worker = Thread(target=lambda: result.setdefault('value', request({
+                'type': 'stop', 'session_id': 'session-exact', 'turn_id': 'turn-exact',
+                'app': 'com.fixture.App'})))
+            worker.start()
+            buffered = bytearray()
+            while b'\n' not in buffered:
+                buffered.extend(service.recv(1024))
+            command = json.loads(buffered.split(b'\n', 1)[0])
+            self.assertEqual(command['type'], 'stop')
+            self.assertEqual(command['session_id'], 'session-exact')
+            self.assertEqual(command['turn_id'], 'turn-exact')
+            self.assertEqual(command['app'], 'com.fixture.App')
+            remaining_ms = command['deadline_unix_ms'] - int(request_started * 1000)
+            self.assertGreaterEqual(remaining_ms, 39000)
+            self.assertLessEqual(remaining_ms, 41000)
+            service.sendall((json.dumps({'type': 'result', 'request_id': command['request_id'],
+                'response': {'ok': True, 'result': {'accepted': True,
+                    'applicationId': 'com.fixture.App'}}}) + '\n').encode())
+            worker.join(4)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(result['value'], {'ok': True, 'result': {
+                'accepted': True, 'applicationId': 'com.fixture.App'}})
+        finally:
+            service.close()
+            stop_original_host(process, temporary)
+
+    def test_optional_control_socket_failure_keeps_original_lifecycle_host_alive(self):
+        from lcu.macos_host import start_original_host, stop_original_host
+        client = self.root / 'unused-original-client'
+        client.write_text('#!/usr/bin/env python3\nraise SystemExit(0)\n')
+        client.chmod(0o755)
+        occupied = self.root / 'occupied-control.sock'
+        occupied.write_text('owned by another process')
+        process, temporary, address = start_original_host(
+            python=Path(sys.executable), client=client,
+            entry=Path(__file__).resolve().parents[1] / 'lcu/macos_host.py',
+            env=os.environ.copy(), control_address=str(occupied))
+        try:
+            self.assertIsNone(process.poll())
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(4)
+                connection.connect(address)
+                connection.sendall(b'{"session_id":"session","turn_id":"turn"}\n')
+                response = bytearray()
+                while b'\n' not in response:
+                    response.extend(connection.recv(1024))
+            self.assertEqual(json.loads(response), {'notified': True})
+            self.assertEqual(occupied.read_text(), 'owned by another process')
+        finally:
+            stop_original_host(process, temporary)
+
+    def test_trusted_control_dispatch_preserves_original_runtime_context(self):
+        script = Path(__file__).with_name('macos_control_service.mjs')
+        result = subprocess.run(['node', str(script)], check=True, capture_output=True,
+                                text=True, timeout=20)
+        self.assertIn('macOS trusted control dispatch checks passed', result.stdout)
 
 
 if __name__ == '__main__':

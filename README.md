@@ -74,7 +74,7 @@ This enables the installed original runtime's optional computer-audio recording 
 
 ## Pi commands
 
-In interactive Pi, `/lcu pick` selects an original app or browser target and appends it to the editor draft while Pi is idle; review and submit the draft yourself. See [adapter command behavior and limits](docs/ADAPTERS.md#pi-extension).
+In interactive Pi, `/lcu stop` requests original Computer Use Stop for a selected app during the active LCU turn (macOS only). `/lcu pick` selects an original app or browser target and appends it to the editor draft while Pi is idle; review and submit the draft yourself. See [adapter command behavior and limits](docs/ADAPTERS.md#pi-extension).
 
 ## Documentation
 
