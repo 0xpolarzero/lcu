@@ -4,7 +4,7 @@ Install LCU from the [latest release](https://github.com/0xpolarzero/lcu/release
 
 ## If you are the installing agent
 
-1. Check the OS, architecture, desktop account, and current harness. Maintained adapters are `pi`, `codex`, and `claude-code`; select the user's harness explicitly. If it has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
+1. Check the OS, architecture, desktop account, and current harness. Adapters are `pi`, `codex`, `claude-code`, `omp` (Oh My Pi), and `hermes` (Hermes Agent); select the user's harness explicitly. OMP and Hermes are experimental; inspect their [verification limits](ADAPTERS.md) before claiming desktop behavior. If the harness has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
 2. Check the prerequisites below. The official desktop app, Python, and selected harness must already be installed. If anything is missing, report the prerequisite and its installation link; LCU does not install or authenticate them.
 3. Download the matching archive and SHA-256 sidecar from the latest release, verify the checksum, and extract it. Follow the installation section for that platform from inside the extracted directory.
 4. For unattended setup, add `--yes` to the command that selects the harness. Preserve the user's sandbox and approval settings. Enable Chrome only if the user requested it.
@@ -85,6 +85,15 @@ Use the public standalone Codex CLI on the desktop account's normal `PATH`. If s
 
 Pi setup uses Pi's package installer to register the bundled native extension and installs the original local skill. See [Pi approval verification](verification/pi-approval-2026-09-26.md) and [result forwarding](ADAPTERS.md#same-case-result-forwarding).
 
+For Oh My Pi or Hermes Agent, install the harness first, then register its native integration:
+
+```sh
+lcu setup --agent omp
+lcu setup --agent hermes
+```
+
+OMP setup calls `omp plugin link` on a generated local package containing the shared Pi extension and full local skill. Native links use the selected OMP user profile; project scope is rejected because OMP ignores it for local links. Hermes setup writes an LCU-owned plugin to `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`, includes the full local skill, and calls `hermes plugins enable lcu-cua`. Set an absolute `HERMES_HOME` to select another Hermes profile. Neither native integration supports project scope; setup rejects it. Restart the selected harness after registration. See [OMP](ADAPTERS.md#oh-my-pi) and [Hermes](ADAPTERS.md#hermes-agent) for behavior and evidence.
+
 Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths, shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, and opens a pane only after you choose it. `lcu doctor` cannot read macOS privacy grants; it reports the original provider methods as available while keeping permission readiness unverified. The first verification is an approved call from the reconnected agent against a harmless window, such as a blank TextEdit document, asking LCU to return a screenshot.
 
 `--yes` is unattended setup: it skips desktop readiness and prints the exact `lcu doctor` command to run later from the desktop account. `--check-desktop` performs a bounded noninteractive check, never opens System Settings, and exits nonzero when this platform cannot verify readiness. The original runtime remains responsible for its normal approval and macOS prompts.
@@ -125,7 +134,7 @@ The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Elec
 
 ## Account and agent registration
 
-Use `--agent pi`, `codex`, or `claude-code` to select agents. Repeat `--agent` for several; `--agent all` selects all three, including agents not installed yet. `--agent auto` selects detected agents (their executable is on `PATH` or their usual config path exists). With no `--agent`, an interactive setup shows a chooser and marks detected agents, but waits for you to choose; it does not select them automatically. Noninteractive agent setup requires an explicit selection. Use `--runtime-only` to install LCU without registering an agent. The `claude` alias remains available. Install and authenticate each selected agent yourself; LCU does not install or authenticate agents. Setup uses the original installed CUA Node and a fixed third-party registration toolchain, then creates user-local byte-identical original instruction references. Pi receives its native extension; Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated agent configuration values, although upstream registration tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export; additional integrations are open to contributions.
+Use `--agent pi`, `codex`, `claude-code`, `omp`, or `hermes` to select agents. Repeat `--agent` for several; `--agent all` selects all five and reports missing harness prerequisites. OMP and Hermes restrict this combination to user scope. `--agent auto` selects detected agents (their executable is on `PATH` or their usual config path exists). With no `--agent`, an interactive setup shows a chooser and marks detected agents, but waits for you to choose. Noninteractive setup requires an explicit selection. Use `--runtime-only` to install LCU without registering an agent. Aliases are `claude`, `oh-my-pi`, and `hermes-agent`. Install and authenticate each selected harness yourself; LCU does neither. Setup uses the original installed CUA Node and native harness registration tools, then creates local byte-identical original instruction references. Pi receives an extension, OMP and Hermes receive native plugins, and Codex CLI and Claude Code receive MCP registration. Setup preserves unrelated configuration values, although upstream tools can reformat files. Root setup drops to the selected account before writing account files. Other harnesses can use the shared client and portable export.
 
 ~~~sh
 /opt/lcu/current/bin/lcu setup --agent codex --agent claude-code
@@ -200,7 +209,7 @@ python .\scripts\install_windows.py --runtime-only
 & "$env:LOCALAPPDATA\LCU\lcu.cmd" --version
 ~~~
 
-To register a maintained agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer also accepts `claude-code` or `pi`; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
+To register an agent instead, use `python .\scripts\install_windows.py --agent codex --yes`. The installer accepts the common harness IDs; their installed-host prerequisites and lifecycle limits are in [harness adapters](ADAPTERS.md). OMP and Hermes remain experimental and have no Windows host verification; OMP also requires its generated package and LCU release on the same drive. Add `--chrome` only when the original external Chrome extension path is wanted. The default enables native computer use only. `--runtime-only` and `--agent` are alternative install modes.
 
 The installer reads the selected package version and CUA runtime, inventories the complete registered package, and copies it unchanged into a private generation identified by that source-derived inventory. It records the observed metadata and validates the inventory when reusing the copy; it does not compare the app with a repository version or component-hash allowlist. Its source stays managed by Windows. The first private copy can take several minutes; the installer prints phase messages while it verifies and copies. LCU derives the original native host from the selected app under each thin release and switches the selected release after validation. It does not change WindowsApps permissions or system policy, require ChatGPT sign-in, or bundle the app in the thin ZIP. Reinstalling with the same prefix reuses a validated private app generation and retains prior releases.
 

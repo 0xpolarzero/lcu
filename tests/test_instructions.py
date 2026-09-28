@@ -366,7 +366,7 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(install_hooks.call_args.args[1], config)
 
     def test_pi_registration_uses_original_skill_and_offline_local_package(self):
-        self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi'})
+        self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi', 'omp', 'hermes'})
         tool_root = self.root / 'agent-tools'
         node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
         (self.release / 'adapters/pi').mkdir(parents=True)

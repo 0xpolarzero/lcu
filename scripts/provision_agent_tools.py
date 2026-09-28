@@ -90,6 +90,9 @@ def provision(release, source, *, target='linux', mac_node=None, adapters_source
                     shutil.copy2(adapters_source / filename, adapters / filename)
                 (adapters / 'pi').mkdir()
                 shutil.copy2(adapters_source / 'pi/index.ts', adapters / 'pi/index.ts')
+                (adapters / 'hermes').mkdir()
+                for filename in ('plugin.yaml', '__init__.py', 'bridge.mjs'):
+                    shutil.copy2(adapters_source / 'hermes' / filename, adapters / 'hermes' / filename)
                 subprocess.run([str(node), str(npm), 'ci',
                                 '--cache', str(scratch / 'npm-cache'), '--omit=dev', '--omit=peer',
                                 *(['--no-bin-links'] if target == 'windows' else []),

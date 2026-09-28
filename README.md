@@ -24,7 +24,7 @@ Check my OS, architecture, and prerequisites, then guide me through any required
 
 - **Desktop apps:** read windows, click, type, and take screenshots.
 - **Chrome, when enabled:** read and control tabs through the official extension, with site approval.
-- **In your harness:** adapters are currently available for Pi, Codex CLI, and Claude Code. Other harnesses can integrate through the [shared JavaScript client](docs/ADAPTERS.md#shared-client-contract).
+- **In your harness:** adapters are available for Pi, Codex CLI, and Claude Code, with experimental Oh My Pi and Hermes integrations. See [setup and verification limits](docs/ADAPTERS.md).
 
 ## Requirements
 

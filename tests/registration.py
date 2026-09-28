@@ -34,7 +34,10 @@ project_claude_settings.parent.mkdir(exist_ok=True)
 project_claude_settings.write_text('{"permissions":{"deny":["Bash(rm *)"]}}\n')
 os.chown(project_claude_settings.parent, owner.pw_uid, owner.pw_gid)
 os.chown(project_claude_settings, owner.pw_uid, owner.pw_gid)
-base = [command, 'setup', '--user', account, '--agent', 'all', '--session', 'direct', '--yes']
+# This image supplies Pi and the Codex/Claude registration tooling. New native
+# harness installers are exercised in their separate isolated host fixtures.
+base = [command, 'setup', '--user', account, '--agent', 'codex', '--agent', 'claude-code',
+        '--agent', 'pi', '--session', 'direct', '--yes']
 for scope in ('user', 'project'):
     args = base + (['--scope', 'project', '--project', str(project)] if scope == 'project' else [])
     subprocess.run(args, check=True)

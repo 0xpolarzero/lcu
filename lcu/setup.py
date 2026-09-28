@@ -157,6 +157,10 @@ def installer_environment(home, names, environ=None):
     supported = []
     if 'codex' in names:
         supported.append('CODEX_HOME')
+    if 'hermes' in names:
+        supported.append('HERMES_HOME')
+    if 'omp' in names:
+        supported.append('PI_CODING_AGENT_DIR')
     if {'opencode', 'vscode', 'copilot-cli'} & set(names):
         supported.append('XDG_CONFIG_HOME')
     for variable in supported:
@@ -423,6 +427,20 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     failures = []
     for name in names:
         client = CLIENTS[name]
+        if name in ('omp', 'hermes'):
+            from .harness_setup import configure_omp, configure_hermes
+            try:
+                if name == 'omp':
+                    configure_omp(home, skill_source, command, release_root,
+                                  scope=scope, project=project, env=env)
+                else:
+                    configure_hermes(home, skill_source, command, node, release_root,
+                                     scope=scope, project=project, env=env)
+                print(f'{client.label}: plugin and skill registered.')
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                failures.append((name, 'plugin', str(exc)))
+                print(f'{client.label}: plugin failed: {exc}', file=sys.stderr)
+            continue
         mcp_command = command
         mcp_setup_error = None
         if name == 'claude-code':
@@ -684,6 +702,8 @@ def validate(args):
 
 
 def detect(home):
+    if {'omp', 'hermes'} & set(names) and args.scope == 'project':
+        raise ValueError('Oh My Pi and Hermes native plugins are profile-scoped. Use --scope user with the intended profile; project scope is not supported.')
     return [name for name, client in CLIENTS.items()
             if shutil.which(client.executable) or (home / client.detect_path).exists()]
 

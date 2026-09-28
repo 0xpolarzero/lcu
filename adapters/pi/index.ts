@@ -40,7 +40,11 @@ function originsFromEnvironment() {
   return raw ? JSON.parse(raw) : [];
 }
 
-export default function (pi: ExtensionAPI, options: { command?: string[] } = {}) {
+export default function (pi: ExtensionAPI, options: {
+  command?: string[];
+  connectOnLoad?: boolean;
+  ompEssentialTools?: boolean;
+} = {}) {
   let bridge: ReturnType<typeof createCuaClient> | undefined;
   let pending: Promise<ReturnType<typeof createCuaClient>> | undefined;
   let active: { sessionId: string; turnId: string } | undefined;
@@ -57,12 +61,13 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
         label: `LCU ${name}`,
         description: descriptor.description ?? '',
         parameters: descriptor.inputSchema as TSchema,
-        async execute(_id, args, signal, _onUpdate, ctx) {
+        ...(options.ompEssentialTools ? { loadMode: 'essential' } : {}),
+        async execute(id, args, signal, _onUpdate, ctx) {
           const current = await connected();
           if (!active) throw new Error('LCU requires an active Pi agent turn');
           approvalContext = ctx;
           const result = await current.call(name, args, {
-            ...active, model: ctx.model?.id, signal,
+            ...active, toolCallId: id, model: ctx.model?.id, signal,
           });
           return piContent(await persistAudioContent(result));
         },
@@ -144,7 +149,11 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
   pi.on('before_agent_start', async (event, ctx) => {
     approvalContext = ctx;
     const client = await connected();
-    return { systemPrompt: `${event.systemPrompt}\n\n${client.instructions}` };
+    // OMP keeps system-prompt sections as an array. Preserve those boundaries
+    // and append LCU's instructions as one additional section. Pi uses a string.
+    return { systemPrompt: Array.isArray(event.systemPrompt)
+      ? [...event.systemPrompt, client.instructions]
+      : `${event.systemPrompt}\n\n${client.instructions}` };
   });
   pi.on('agent_start', async (_event, ctx) => {
     // A failed turn_ended must succeed before Pi starts another turn. Keep the
@@ -160,5 +169,8 @@ export default function (pi: ExtensionAPI, options: { command?: string[] } = {})
     await finish(interrupted ? 'Interrupt' : 'Stop');
   });
   pi.on('session_shutdown', leaveSession);
+
+  // Connect during OMP extension loading before its first tool snapshot.
+  if (options.connectOnLoad) return connected().then(() => undefined);
 
 }

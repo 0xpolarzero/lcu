@@ -117,7 +117,7 @@ export function createCuaClient({ command, cwd, env, onElicitation, allowedOrigi
       if (!connected) throw new Error('LCU is not connected');
       return tools;
     },
-    async call(name, args, { sessionId, turnId, model, signal } = {}) {
+    async call(name, args, { sessionId, turnId, toolCallId, model, signal } = {}) {
       if (!connected) throw new Error('LCU is not connected');
       if (!MODEL_TOOLS.has(name)) throw new Error(`Tool is reserved for host use: ${name}`);
       if (!sessionId || !turnId) throw new Error('A real host session and active turn are required');
@@ -126,6 +126,7 @@ export function createCuaClient({ command, cwd, env, onElicitation, allowedOrigi
         ? Math.max(120_000, requested + 30_000) : 120_000;
       return client.callTool({ name, arguments: args, _meta: {
         'x-codex-turn-metadata': { session_id: sessionId, turn_id: turnId,
+          ...(toolCallId ? { call_id: toolCallId } : {}),
           ...(model ? { model } : {}) },
       } }, undefined, { signal, timeout });
     },

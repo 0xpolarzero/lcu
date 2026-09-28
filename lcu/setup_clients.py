@@ -15,6 +15,8 @@ CLIENTS = {
     'codex': Client('Codex', 'codex', '.codex', 'codex', 'codex'),
     'claude-code': Client('Claude Code', 'claude', '.claude.json', 'claude-code', 'claude-code'),
     'pi': Client('Pi', 'pi', '.pi/agent', 'pi', 'pi'),
+    'omp': Client('Oh My Pi', 'omp', '.omp', '', ''),
+    'hermes': Client('Hermes', 'hermes', '.hermes', '', ''),
 }
 
-ALIASES = {'claude': 'claude-code'}
+ALIASES = {'claude': 'claude-code', 'oh-my-pi': 'omp', 'hermes-agent': 'hermes'}

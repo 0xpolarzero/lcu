@@ -125,6 +125,9 @@ class BuildPlatformTests(unittest.TestCase):
             self.assertTrue((release / 'adapters/audio-files.mjs').is_file())
             self.assertTrue((release / 'adapters/codex.mjs').is_file())
             self.assertTrue((release / 'adapters/pi/index.ts').is_file())
+            for name in ('plugin.yaml', '__init__.py', 'bridge.mjs'):
+                self.assertTrue((release / 'adapters/hermes' / name).is_file())
+            self.assertFalse((release / 'adapters/hermes/lcu-config.json').exists())
             sdk_package = release / 'adapters/node_modules/@modelcontextprotocol/sdk/package.json'
             self.assertEqual(json.loads(sdk_package.read_text())['version'], '1.30.0')
             self.assertFalse((release / 'adapters/test').exists())

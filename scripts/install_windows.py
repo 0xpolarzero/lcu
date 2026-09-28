@@ -206,7 +206,7 @@ def main(argv=None):
     default = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local'))) / 'LCU'
     parser.add_argument('--prefix', type=Path, default=default)
     parser.add_argument('--runtime-only', action='store_true')
-    parser.add_argument('--agent', action='append', choices=('codex', 'claude-code', 'pi'))
+    parser.add_argument('--agent', action='append', choices=tuple(setup.CLIENTS) + tuple(setup.ALIASES))
     parser.add_argument('--chrome', action='store_true')
     parser.add_argument('--yes', action='store_true')
     parser.add_argument('--scope', choices=('user', 'project'), default='user')
@@ -215,7 +215,7 @@ def main(argv=None):
     if args.runtime_only and (args.agent or args.chrome or args.project or args.scope != 'user'):
         parser.error('--runtime-only cannot include agent setup options')
     if not args.runtime_only and not args.agent:
-        parser.error('Choose --agent codex, --agent claude-code, or --agent pi, or --runtime-only')
+        parser.error('Choose --agent NAME or --runtime-only. Agents: ' + ', '.join(setup.CLIENTS))
     release = install(args.prefix)
     print(f'LCU installed: {args.prefix / "lcu.cmd"}')
     if not args.runtime_only:
