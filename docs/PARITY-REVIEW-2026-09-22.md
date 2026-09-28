@@ -1,6 +1,6 @@
 # Linux runtime and instruction parity review
 
-> **Historical planning record (2026-09-22). Superseded by [AGENTS.md](../AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** The `.verification/...` paths cited below are private local evidence and are not in the repository.
+> **Historical planning record (2026-09-22). Superseded by [AGENTS.md](https://github.com/0xpolarzero/lcu/blob/main/AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** The `.verification/...` paths cited below are private local evidence and are not in the repository.
 
 Reviewed 2026-09-22 by three independent agents covering runtime, instructions, and reliability, plus a separate review of the official application host.
 

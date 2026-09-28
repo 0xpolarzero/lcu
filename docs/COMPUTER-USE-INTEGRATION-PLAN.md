@@ -1,6 +1,6 @@
 # Headless computer-use integration status
 
-> **Historical planning record (2026-09-28). Superseded by [AGENTS.md](../AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** The `.verification/...` paths cited below are private local evidence and are not in the repository.
+> **Historical planning record (2026-09-28). Superseded by [AGENTS.md](https://github.com/0xpolarzero/lcu/blob/main/AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** The `.verification/...` paths cited below are private local evidence and are not in the repository.
 
 Updated 2026-09-28 after guest recovery, macOS audio acceptance, and the live
 browser-tab picker check. The
