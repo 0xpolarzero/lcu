@@ -61,10 +61,11 @@ Root is required only for apt and another account's setup; the target app/REPL m
 Run `tests/run.sh` and focused checks inside disposable containers. For focused checks during implementation, run these in the container:
 
 ~~~sh
-python3 -m unittest discover -s tests -p 'test_runtime.py'
-python3 -m unittest discover -s tests -p 'test_instructions.py'
-python3 -m unittest discover -s tests -p 'test_installation.py'
+python3 -m unittest discover -b -s tests -p 'test_*.py'
+npm test --prefix adapters
 ~~~
+
+`-b` buffers setup output from passing tests and shows it only for failures. Narrow `-p` to one file, such as `test_runtime.py`, while iterating.
 
 The final gate must test both architectures, mark emulation explicitly, and run native and Chrome actions under a normal Ubuntu host policy outside a privileged container. Inspect the actual process confinement labels and policy denials; the ChatGPT Electron profile is not a prerequisite for LCU's direct Node/REPL path. The [ARM64 and x86-64 Ubuntu AppArmor host runs](verification/installed-app-2026-09-23.md) passed native use and no-sign-in Chrome actions with actual process labels. The x86-64 guest used KVM on physical AMD hardware. Docker fixtures alone prove bounded native behavior and offline failure paths, not host OS confinement.
 

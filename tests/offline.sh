@@ -124,6 +124,6 @@ test ! -e /opt/lcu/.next
 test -z "$(find /opt/lcu/releases -maxdepth 1 -name '.build-*' -print -quit)"
 test -z "$(find /opt/lcu/apps -maxdepth 1 -name '.app-stage-*' -print -quit)"
 test ! -e /opt/lcu/cache
-python3 -m unittest discover -s /src/tests -p 'test_*.py' -q
+python3 -m unittest discover -b -s /src/tests -p 'test_*.py' -q
 python3 /src/tests/registration.py
 runuser -u lcutester -- dbus-run-session -- bash /src/tests/desktop.sh
