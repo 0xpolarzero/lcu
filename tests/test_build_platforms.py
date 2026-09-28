@@ -9,6 +9,9 @@ import unittest
 from unittest import mock
 
 
+import re
+import tarfile as _tarfile
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 import build_bundle
@@ -81,6 +84,33 @@ class BuildPlatformTests(unittest.TestCase):
             with tarfile.open(archive) as bundle:
                 manifest = json.load(bundle.extractfile(f'lcu-{VERSION}-linux-x64/bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('linux', 'x64'))
+
+    def test_shipped_verification_links_resolve_inside_the_release(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(build_bundle, 'architecture', return_value='x64'), \
+                    mock.patch.object(build_bundle, 'provision_agents'):
+                archive = build_bundle.build(root / 'dist')
+            extracted = root / 'extracted'
+            with _tarfile.open(archive) as bundle:
+                bundle.extractall(extracted, filter='data')
+            release = extracted / f'lcu-{VERSION}-linux-x64'
+            verification = (release / 'docs/verification').resolve()
+            link = re.compile(r'\]\(([^)]+)\)')
+            checked = 0
+            for path in release.rglob('*.md'):
+                for match in link.finditer(path.read_text()):
+                    target = match.group(1).split('#', 1)[0].strip()
+                    if not target or '://' in target or target.startswith('mailto:'):
+                        continue
+                    resolved = (path.parent / target).resolve()
+                    # Every relative link into the shipped verification set must
+                    # resolve; the closure guarantees no dangling record link.
+                    if resolved.suffix == '.md' and resolved.parent == verification:
+                        self.assertTrue(resolved.is_file(),
+                                        f'dangling verification link {target} in {path}')
+                        checked += 1
+            self.assertGreater(checked, 0)
 
     def test_macos_provision_reuses_selected_node_and_packages_only_adapter_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:

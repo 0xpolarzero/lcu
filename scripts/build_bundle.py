@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,40 @@ from bundle import VERSION, architecture, seal, verify
 from provision_agent_tools import provision as provision_agents
 
 SOURCE = Path(__file__).resolve().parents[1]
+
+# The docs/*.md set shipped in every archive; README and the skill round out
+# the reachable roots for verification-record selection.
+SHIPPED_DOCS = ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
+                'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
+                'STANDALONE-ADAPTATIONS.md', 'ADAPTERS.md')
+_LINK = re.compile(r'\]\(([^)]+)\)')
+
+
+def linked_verification_records(source):
+    """Verification records reachable by relative .md links from the shipped docs.
+
+    Shipping only the transitive closure keeps every relative verification link
+    in the archive resolvable while dropping records nothing links to.
+    """
+    source = Path(source)
+    verification = (source / 'docs/verification').resolve()
+    roots = [source / 'README.md', source / 'skills/lcu/SKILL.md',
+             *(source / 'docs' / name for name in SHIPPED_DOCS)]
+    seen, records, stack = set(), set(), [path.resolve() for path in roots]
+    while stack:
+        path = stack.pop()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        for match in _LINK.finditer(path.read_text()):
+            target = match.group(1).split('#', 1)[0].strip()
+            if not target or '://' in target or target.startswith('mailto:'):
+                continue
+            resolved = (path.parent / target).resolve()
+            if resolved.suffix == '.md' and resolved.parent == verification:
+                records.add(resolved)
+                stack.append(resolved)
+    return records
 
 
 def build(output, package=None, *, target='linux', app=None):
@@ -52,7 +87,7 @@ def build(output, package=None, *, target='linux', app=None):
         (release / 'lcu').mkdir()
         modules = ('__init__.py', 'app_layout.py', 'asar.py', 'runtime.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py', 'doctor.py',
-                         'native_host.py', 'claude_visibility.py', 'harness_setup.py')
+                         'maintenance.py', 'native_host.py', 'claude_visibility.py', 'harness_setup.py')
         if target != 'windows':
             modules += ('session.py',)
         for filename in modules:
@@ -68,13 +103,13 @@ def build(output, package=None, *, target='linux', app=None):
             shutil.copy2(SOURCE / 'lcu/windows_lifetime_host.cjs', release / 'lcu/windows_lifetime_host.cjs')
             shutil.copy2(SOURCE / 'lcu/windows_sky_service.mjs', release / 'lcu/windows_sky_service.mjs')
         (release / 'docs').mkdir()
-        for filename in ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
-                         'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
-                         'STANDALONE-ADAPTATIONS.md', 'ADAPTERS.md'):
+        for filename in SHIPPED_DOCS:
             shutil.copy2(SOURCE / 'docs' / filename, release / 'docs' / filename)
         verification = release / 'docs/verification'
         verification.mkdir()
-        for record in sorted((SOURCE / 'docs/verification').glob('*.md')):
+        # Ship only records the shipped docs link to (transitively), so every
+        # relative verification link resolves without carrying unlinked records.
+        for record in sorted(linked_verification_records(SOURCE)):
             if record.is_symlink():
                 raise ValueError(f'Verification document cannot be a symlink: {record}')
             shutil.copy2(record, verification / record.name)
@@ -95,7 +130,7 @@ def build(output, package=None, *, target='linux', app=None):
         provision_agents(release, SOURCE / 'scripts/agent-tools', target=target,
                          mac_node=selected_node, adapters_source=SOURCE / 'adapters')
         # The installer selects and validates the matching app before registration.
-        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.doctor, lcu.codex_hooks'
+        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.doctor, lcu.codex_hooks, lcu.maintenance'
         if target != 'windows':
             imports += ', lcu.session'
         subprocess.run([sys.executable, '-B', '-c', imports],

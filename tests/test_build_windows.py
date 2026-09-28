@@ -44,8 +44,11 @@ class WindowsBuildTests(unittest.TestCase):
                     self.assertIn(prefix + name, names)
                 bundled_records = {name.removeprefix(prefix + 'docs/verification/') for name in names
                                    if name.startswith(prefix + 'docs/verification/')}
-                source_records = {path.name for path in (ROOT / 'docs/verification').glob('*.md')}
-                self.assertEqual(bundled_records, source_records)
+                # Only the transitively linked records ship; unlinked ones are dropped.
+                linked = {path.name for path in build_bundle.linked_verification_records(ROOT)}
+                self.assertEqual(bundled_records, linked)
+                all_records = {path.name for path in (ROOT / 'docs/verification').glob('*.md')}
+                self.assertTrue(linked < all_records)
                 self.assertFalse(any(name.startswith(prefix + 'docs/verification/')
                                      and not name.endswith('.md') for name in names))
                 manifest = json.loads(bundle.read(prefix + 'bundle.json'))
