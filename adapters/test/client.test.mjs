@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse } from '../client.mjs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  createCuaClient, nativeAppApprovalOptions, nativeAppApprovalResponse,
+  sendControlRequest,
+} from '../client.mjs';
 
 const command = [process.execPath, new URL('./mcp-fixture.mjs', import.meta.url).pathname];
 
@@ -33,6 +40,133 @@ test('keeps original tool descriptors and initialization instructions; hides int
     await assert.rejects(bridge.turnEnded({ sessionId: 'fail-session', turnId: 'real-turn' }),
       /cleanup failed/);
   } finally { await bridge.close(); }
+});
+
+test('forwards real call context and retains unrelated caller metadata', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-client-context-'));
+  const oldLog = process.env.LCU_FIXTURE_LOG;
+  const log = join(directory, 'mcp.jsonl');
+  process.env.LCU_FIXTURE_LOG = log;
+  const bridge = createCuaClient({ command });
+  try {
+    await bridge.connect();
+    await bridge.call('js', { code: 'context' }, {
+      sessionId: 'host-session', turnId: 'host-turn', toolCallId: 'host-call',
+      threadId: 'host-thread', threadSource: 'subagent',
+      chatgptConversationId: 'host-conversation', model: 'host-model', reasoningEffort: 'high',
+      metadata: {
+        'openai/confirmation_policies': { computer_use: 'confirm' },
+        'sandbox/policy': { mode: 'workspace-write' },
+        'x-codex-turn-metadata': { caller_field: 'retained', item_id: 'host-item' },
+      },
+    });
+    const entry = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse).at(-1);
+    assert.deepEqual(entry.meta, {
+      'openai/confirmation_policies': { computer_use: 'confirm' },
+      'sandbox/policy': { mode: 'workspace-write' },
+      'x-codex-turn-metadata': {
+        caller_field: 'retained', item_id: 'host-item', session_id: 'host-session', turn_id: 'host-turn',
+        call_id: 'host-call', thread_id: 'host-thread', thread_source: 'subagent',
+        chatgpt_conversation_id: 'host-conversation', model: 'host-model', reasoning_effort: 'high',
+      },
+    });
+  } finally {
+    await bridge.close();
+    if (oldLog === undefined) delete process.env.LCU_FIXTURE_LOG;
+    else process.env.LCU_FIXTURE_LOG = oldLog;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('host-control requests use the private newline JSON protocol and surface original errors', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-control-contract-'));
+  const socketPath = join(directory, 'control.sock');
+  const requests = [];
+  let rejectNext = false;
+  const server = createServer(socket => {
+    let input = '';
+    socket.setEncoding('utf8');
+    socket.on('data', data => {
+      input += data;
+      const newline = input.indexOf('\n');
+      if (newline < 0) return;
+      const request = JSON.parse(input.slice(0, newline));
+      requests.push(request);
+      if (rejectNext) {
+        socket.end(`${JSON.stringify({ ok: false, error: 'active turn mismatch' })}\n`);
+        return;
+      }
+      const result = request.type === 'status'
+        ? { computerUse: { activeApplications: [{ id: 'app-1', name: 'Fixture', bundleIdentifier: 'dev.lcu.fixture' }] } }
+        : { accepted: true, applicationId: request.app };
+      socket.end(`${JSON.stringify({ ok: true, result })}\n`);
+    });
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    const status = await sendControlRequest(socketPath, {
+      type: 'status', session_id: 'active-session', turn_id: 'active-turn',
+    });
+    assert.equal(status.computerUse.activeApplications[0].bundleIdentifier, 'dev.lcu.fixture');
+    const stopped = await sendControlRequest(socketPath, {
+      type: 'stop', session_id: 'active-session', turn_id: 'active-turn', app: 'dev.lcu.fixture',
+    });
+    assert.deepEqual(stopped, { accepted: true, applicationId: 'dev.lcu.fixture' });
+    assert.deepEqual(requests, [
+      { type: 'status', session_id: 'active-session', turn_id: 'active-turn' },
+      { type: 'stop', session_id: 'active-session', turn_id: 'active-turn', app: 'dev.lcu.fixture' },
+    ]);
+
+    rejectNext = true;
+    await assert.rejects(sendControlRequest(socketPath, {
+      type: 'stop', session_id: 'foreign-session', turn_id: 'foreign-turn', app: 'dev.lcu.fixture',
+    }), /active turn mismatch/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('host-control client expires an unresponsive request at its finite outer deadline', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'lcu-control-deadline-'));
+  const socketPath = join(directory, 'control.sock');
+  let received;
+  const requestReceived = new Promise(resolve => { received = resolve; });
+  const server = createServer(socket => socket.once('data', received));
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(socketPath, resolve);
+    });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const pending = sendControlRequest(socketPath, {type: 'status'});
+    await requestReceived;
+    t.mock.timers.tick(45_000);
+    await assert.rejects(pending, /LCU host-control request timed out/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('macOS control endpoint is optional, private to a live client, and unavailable after close', async () => {
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'darwin' });
+  const bridge = createCuaClient({ command });
+  try {
+    assert.equal(bridge.hasHostControl, false);
+    await bridge.connect();
+    assert.equal(bridge.hasHostControl, true);
+    await bridge.close();
+    assert.equal(bridge.hasHostControl, false);
+    await assert.rejects(bridge.controlStatus({ sessionId: 'session', turnId: 'turn' }), /after the client closes/);
+  } finally {
+    await bridge.close().catch(() => {});
+    Object.defineProperty(process, 'platform', platformDescriptor);
+  }
 });
 
 test('elicitation is denied by default and exact authorized origins are accepted', async () => {

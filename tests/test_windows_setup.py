@@ -18,6 +18,19 @@ from lcu import setup
 
 
 class WindowsSetupTests(unittest.TestCase):
+    def test_windows_installer_forwards_audio_option_to_shared_setup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary) / 'LCU'
+            release = Path(temporary) / 'release'
+            with mock.patch.object(install_windows, 'install', return_value=release) as install, \
+                 mock.patch.object(install_windows.subprocess, 'run') as run:
+                install_windows.main(['--prefix', str(prefix), '--agent', 'pi', '--audio', '--yes'])
+            install.assert_called_once_with(prefix)
+            command = run.call_args.args[0]
+            self.assertIn('--audio', command)
+            self.assertIn('--agent', command)
+            self.assertIn('pi', command)
+
     def test_missing_registered_app_has_official_download_link_before_prefix_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()

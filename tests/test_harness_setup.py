@@ -44,6 +44,23 @@ class HarnessSetupTests(unittest.TestCase):
                                    project=self.project if scope == 'project' else None,
                                    environ={'PATH': '/bin', **(env or {})})
 
+    def test_detect_uses_client_path_without_setup_scope_state(self):
+        def which(executable):
+            return '/mock/bin/omp' if executable == 'omp' else None
+        with patch('lcu.setup.shutil.which', side_effect=which):
+            self.assertEqual(setup.detect(self.home), ['omp'])
+
+    def test_validate_rejects_profile_scoped_agents_for_project_scope(self):
+        for name in ('omp', 'hermes'):
+            with self.subTest(agent=name):
+                argv = ['--prefix', str(self.root / 'prefix'), '--scope', 'project',
+                        '--project', str(self.project), '--agent', name]
+                if os.getuid() == 0:
+                    argv += ['--user', 'root']
+                args = setup.parser().parse_args(argv)
+                with self.assertRaisesRegex(ValueError, 'project scope is not supported'):
+                    setup.validate(args)
+
     def test_omp_native_link_preserves_scope_command_and_original_skill(self):
         calls = []
 

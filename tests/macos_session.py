@@ -27,7 +27,10 @@ def isolated_env(home: Path, app: Path) -> dict[str, str]:
     codex_home = home / '.codex'
     codex_home.mkdir(parents=True)
     return {
-        'HOME': str(home),
+        # Original macOS CUA resolves its installed native socket under the
+        # real account HOME. Keep that path intact and isolate only Codex state
+        # and scratch output in this test's temporary directory.
+        'HOME': str(Path.home()),
         'CODEX_HOME': str(codex_home),
         'PATH': os.pathsep.join((str(Path(sys.executable).parent), str(runtime / 'bin'), '/usr/bin', '/bin')),
         'LANG': 'C.UTF-8',
@@ -38,6 +41,8 @@ def isolated_env(home: Path, app: Path) -> dict[str, str]:
         'NODE_REPL_NODE_PATH': str(runtime / 'bin/node'),
         'NODE_REPL_NODE_MODULE_DIRS': str(modules),
         'NODE_REPL_TRUSTED_CODE_PATHS': os.pathsep.join((str(codex_home), str(modules), str(plugins))),
+        'SKY_CUA_SERVICE_PATH': str(modules / '@oai/sky/Codex Computer Use.app'),
+        'NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS': '1000',
         'NODE_REPL_DISABLE_ANALYTICS': '1',
         'NODE_REPL_REQUEST_META': json.dumps({'x-codex-turn-metadata': {
             'session_id': 'lcu-macos-validation', 'turn_id': 'pure-js-check'}}),

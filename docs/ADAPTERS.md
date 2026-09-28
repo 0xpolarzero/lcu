@@ -42,6 +42,17 @@ The PNG and WAV hashes identify the shared original fixtures. Provider-facing er
 
 The Pi adapter uses Pi's extension API and the shared MCP client. It keeps the connection through model rounds and sends cleanup after the full prompt. Its UI presents original native-app persistence choices and browser-origin requests; headless mode cancels. Current package registration and result forwarding passed with Pi 0.87.1 from `@earendil-works/pi-coding-agent`; see [the standalone host record](verification/latest-standalone-harness-2026-09-27.md). Earlier desktop-task evidence below used Pi 0.73.0.
 
+Pi also registers `/lcu stop` and `/lcu pick`:
+
+```text
+/lcu stop
+/lcu pick
+```
+
+`/lcu stop` requires an interactive Pi session on macOS and an active LCU turn. It lists the original Computer Use apps observed for that turn, asks which app to stop, and sends the exact session, turn, and app identities to the private host-control channel. The host validates the active turn and invokes the installed original Stop method. A task-owned macOS guest verified that the next same-turn action returned the original stopped-for-this-turn error and that the original turn-ended hook recovered a distinct next turn with an exact 39-byte save oracle. LCU sends the original `ComputerUseIPCCodexTurnEndedRequest` with the captured session, turn, and metadata, then retains the existing CLI cleanup notification. The Pi slash-command UI has not been exercised end to end, and Stop during an in-flight native action remains unverified. See the [current Stop verification](verification/headless-stop-implementation-2026-09-27.md).
+
+`/lcu pick` requires Pi's interactive selection and editor APIs and runs only while no LCU turn is active. It selects an original app, browser/profile, and session or open user tab, then appends target guidance to the current editor draft. It does not submit the draft or claim an open user tab. The command is unavailable in headless Pi mode; browser and app availability depends on the original provider. Picker guidance asks the next request to revalidate the selected target, but cannot enforce later model behavior. Installed Pi 0.87.1 source executes registered slash commands inline before its normal streaming queue and its interactive UI can present the selector while the agent is active. Native-app selection passed a live Linux Pi UI smoke test. A separate live browser-tab TUI test on the final 0.4.2 runtime selected an open Chrome extension-provider tab by exact profile and tab identity and inserted guidance into the actual editor draft; it did not submit the draft, claim the tab, or contact a model provider. The `/lcu stop` menu has not been exercised end to end. See [the request-context and picker verification](verification/request-context-2026-09-27.md) for evidence and behavior limits.
+
 A model-driven Linux GTK task and an opt-in official Chrome-extension task are recorded in [Pi verification](verification/pi-generated-gtk-real-model-2026-09-24.md). The [approval scope test](verification/native-app-approval-scopes-2026-09-25.md) verifies response forwarding, not grant persistence across helper restart or revocation. The [dismissal regression](verification/pi-approval-2026-09-26.md) verifies that dismissing an origin prompt cancels it and that an unrelated request is not accepted through an origin allowlist.
 
 ## Oh My Pi

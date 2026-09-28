@@ -47,7 +47,7 @@ Download the archive and matching `.sha256` file from the [latest release](https
 | Linux ARM64 | `lcu-<version>-linux-arm64.tar.gz` |
 | Linux x86-64 | `lcu-<version>-linux-x64.tar.gz` |
 
-Follow the [installation guide](docs/INSTALLATION.md) to verify the checksum, extract the archive, and register LCU in your harness. Setup offers an agent chooser and desktop-readiness guidance. Chrome is opt-in.
+Follow the [installation guide](docs/INSTALLATION.md) to verify the checksum, extract the archive, and register LCU in your harness. Setup offers an agent chooser and desktop-readiness guidance. Chrome and computer-audio recording are opt-in.
 
 For development, see [building from source](docs/DEVELOPMENT.md#building-from-source).
 
@@ -61,6 +61,20 @@ https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desk
 ```
 
 Enable the official extension in your Chrome profile and restart your harness. Then ask it to use LCU to list Chrome tabs. Sites still require approval. Claude Code's Chrome support remains experimental because some interruptions do not trigger tab cleanup; see [adapter limitations](docs/ADAPTERS.md).
+
+## Enable computer-audio recording
+
+Pass `--audio` when setting up a maintained harness, for example:
+
+```sh
+lcu setup --agent pi --audio
+```
+
+This enables the installed original runtime's optional computer-audio recording API and its original approval flow. LCU does not add audio-specific instructions, and a saved recording is not audio delivered to the model. See the [audio opt-in verification record](docs/verification/audio-opt-in-2026-09-27.md).
+
+## Pi commands
+
+In interactive Pi, `/lcu stop` requests original Computer Use Stop for a selected app during the active LCU turn (macOS only). `/lcu pick` selects an original app or browser target and appends it to the editor draft while Pi is idle; review and submit the draft yourself. See [adapter command behavior and limits](docs/ADAPTERS.md#pi-extension).
 
 ## Documentation
 

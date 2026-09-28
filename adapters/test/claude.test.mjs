@@ -141,7 +141,10 @@ async function assertOriginalProtocol(bridge) {
   const result = await bridge.client.callTool({
     name: 'js',
     arguments: { code: 'identity-smoke' },
-    _meta: { 'claudecode/toolUseId': context.tool_use_id, callerMarker: { retained: true } },
+    _meta: { 'claudecode/toolUseId': context.tool_use_id, callerMarker: { retained: true },
+      'openai/confirmation_policies': { computer_use: 'confirm' },
+      'sandbox/policy': { mode: 'workspace-write' },
+      'x-codex-turn-metadata': { caller_field: 'retained', thread_id: 'real-thread', thread_source: 'subagent' } },
   });
   assert.deepEqual(result.content, [{ type: 'text', text: 'identity-smoke' }]);
 
@@ -153,7 +156,12 @@ async function assertOriginalProtocol(bridge) {
     meta: {
       'claudecode/toolUseId': context.tool_use_id,
       callerMarker: { retained: true },
-      'x-codex-turn-metadata': { session_id: context.session_id, turn_id: context.turn_id },
+      'openai/confirmation_policies': { computer_use: 'confirm' },
+      'sandbox/policy': { mode: 'workspace-write' },
+      'x-codex-turn-metadata': {
+        caller_field: 'retained', thread_id: 'real-thread', thread_source: 'subagent',
+        session_id: context.session_id, turn_id: context.turn_id, call_id: context.tool_use_id,
+      },
     },
   });
 }
@@ -225,12 +233,12 @@ test('Claude relay preserves original results/errors and isolates parallel and s
       { name: 'js', meta: {
         'claudecode/toolUseId': 'parallel-use-a',
         caller: 'a',
-        'x-codex-turn-metadata': { session_id: 'parallel-session-a', turn_id: 'parallel-turn-a' },
+        'x-codex-turn-metadata': { session_id: 'parallel-session-a', turn_id: 'parallel-turn-a', call_id: 'parallel-use-a' },
       } },
       { name: 'js_reset', meta: {
         'claudecode/toolUseId': 'parallel-use-b',
         caller: 'b',
-        'x-codex-turn-metadata': { session_id: 'parallel-session-b', turn_id: 'parallel-turn-b' },
+        'x-codex-turn-metadata': { session_id: 'parallel-session-b', turn_id: 'parallel-turn-b', call_id: 'parallel-use-b' },
       } },
     ]);
 
@@ -277,9 +285,9 @@ test('Claude relay isolates overlapping child identities and makes SubagentStop 
       .filter(entry => entry.type === 'tool-call' && initial.some(item => item.code === entry.args.code))
       .map(entry => [entry.args.code, entry.meta['x-codex-turn-metadata']]));
     assert.deepEqual(forwarded, {
-      'parent-active': { session_id: sessionId, turn_id: turnId },
-      'child-a-active': { session_id: 'agent-a', turn_id: turnId },
-      'child-b-active': { session_id: 'agent-b', turn_id: turnId },
+      'parent-active': { session_id: sessionId, turn_id: turnId, call_id: 'parent-active' },
+      'child-a-active': { session_id: 'agent-a', turn_id: turnId, call_id: 'child-a-active' },
+      'child-b-active': { session_id: 'agent-b', turn_id: turnId, call_id: 'child-b-active' },
     });
 
     const pending = [

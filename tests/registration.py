@@ -70,13 +70,26 @@ host_only = ['mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir', 'mcp__l
 assert user_claude['permissions']['deny'] == host_only
 assert project_claude['permissions']['deny'] == ['Bash(rm *)', *host_only]
 
+# Audio opt-in is a distinct persistent runtime command option for every
+# maintained harness. Existing unrelated settings and Pi scopes remain intact.
+for agent in ('codex', 'claude-code', 'pi'):
+    subprocess.run([command, 'setup', '--user', account, '--agent', agent,
+                    '--session', 'direct', '--audio', '--yes'], check=True)
+assert '--audio' in tomllib.loads(codex.read_text())['mcp_servers']['lcu']['args']
+for config_path in (home / '.claude.json',):
+    assert '--audio' in json.loads(config_path.read_text())['mcpServers']['lcu']['args']
+assert json.loads((home / '.local/share/lcu/pi/commands.json').read_text())['user'] == [command, '--audio']
+assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
+assert json.loads(claude_settings.read_text())['model'] == 'keep-me'
+
 # Claude invokes the shipped relay, which launches the original direct LCU
 # command unchanged. Project registration belongs to the project .mcp.json.
 expected_claude_command = [str(prefix / 'current/adapters/claude.mjs'), command]
 for config_path in (home / '.claude.json', project / '.mcp.json'):
     registered = json.loads(config_path.read_text())['mcpServers']['lcu']
     assert registered['command'] == str(prefix / 'current/agent-tools/node/bin/node'), (config_path, registered)
-    assert registered['args'] == expected_claude_command, (config_path, registered)
+    expected = expected_claude_command + (['--audio'] if config_path == home / '.claude.json' else [])
+    assert registered['args'] == expected, (config_path, registered)
 
 context_group = next(group for group in user_claude['hooks']['PreToolUse']
                      if group.get('matcher') == 'mcp__lcu__js|mcp__lcu__js_reset')
@@ -101,7 +114,7 @@ user_extension = home / '.local/share/lcu/pi/extension.mjs'
 assert any((pi_settings.parent / item).resolve() == user_extension.resolve()
            for item in pi_packages if isinstance(item, str)), pi_packages
 pi_commands = json.loads((home / '.local/share/lcu/pi/commands.json').read_text())
-assert pi_commands['user'] == [command]
+assert pi_commands['user'] == [command, '--audio']
 assert pi_commands['projects'][str(project.resolve())] == [command]
 assert not (project / '.pi/lcu-command.json').exists()
 project_pi_settings = project / '.pi/settings.json'

@@ -305,7 +305,7 @@ class InstalledInstructionTests(unittest.TestCase):
         register('user', base_command)
         self.assertEqual(user_settings.read_bytes(), configured_user)
 
-        project_command = [*base_command, '--chrome']
+        project_command = [*base_command, '--chrome', '--audio']
         self.assertEqual(register('project', project_command, chrome=True),
                          [str(node), str(adapter), *project_command])
         project_settings = project / '.claude/settings.local.json'
@@ -333,7 +333,7 @@ class InstalledInstructionTests(unittest.TestCase):
         adapter.parent.mkdir(parents=True)
         adapter.write_text('fixture relay')
         helper.write_text('fixture helper')
-        original = ['/opt/lcu/current/bin/lcu', '--chrome', '--session=direct']
+        original = ['/opt/lcu/current/bin/lcu', '--chrome', '--audio', '--session=direct']
         calls = []
         policy = {'enabled_tools': ['js', 'js_reset', 'turn_ended'],
                   'omit_tools_from': ['code_mode', 'deferred'], 'startup_timeout_sec': 120,
@@ -371,6 +371,10 @@ class InstalledInstructionTests(unittest.TestCase):
         node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
         (self.release / 'adapters/pi').mkdir(parents=True)
         (self.release / 'adapters/pi/index.ts').write_text('fixture')
+        selected_commands = self.home / '.local/share/lcu/pi/commands.json'
+        selected_commands.parent.mkdir(parents=True)
+        selected_commands.write_text(json.dumps({'projects': {'/existing/project': ['/usr/bin/lcu']},
+                                                 'preserved': True}))
         calls = []
 
         def run(argv, **kwargs):
@@ -388,7 +392,7 @@ class InstalledInstructionTests(unittest.TestCase):
                 patch('lcu.setup.shutil.which', return_value='/bin/pi'), \
                 patch('lcu.setup.subprocess.run', side_effect=run):
             failures = configure(['pi'], self.home, self.skill_source,
-                                 ['/usr/bin/lcu'], tool_root, self.release,
+                                 ['/usr/bin/lcu', '--audio'], tool_root, self.release,
                                  environ={'HOME': str(self.home)})
         self.assertEqual(failures, [])
         self.assertEqual(len(calls), 2)
@@ -398,7 +402,8 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('realpathSync(process.cwd())', wrapper)
         self.assertNotIn('.pi/lcu-command.json', wrapper)
         self.assertEqual(json.loads((self.home / '.local/share/lcu/pi/commands.json').read_text()),
-                         {'projects': {}, 'user': ['/usr/bin/lcu']})
+                         {'projects': {'/existing/project': ['/usr/bin/lcu']},
+                          'preserved': True, 'user': ['/usr/bin/lcu', '--audio']})
 
     def test_selected_app_descriptor_and_resources_are_required(self):
         self.assertEqual(installed_app_resources(self.release), self.resources.resolve())
@@ -417,9 +422,15 @@ class InstalledInstructionTests(unittest.TestCase):
             export_bundle(self.root / 'native-export', self.skill_source, ['/usr/bin/lcu'], self.release)
             export_bundle(self.root / 'chrome-export', self.skill_source, ['/usr/bin/lcu', '--chrome'],
                           self.release, chrome=True)
+            export_bundle(self.root / 'audio-export', self.skill_source, ['/usr/bin/lcu', '--audio'],
+                          self.release, audio=True)
         native = json.loads((self.root / 'native-export/mcp.json').read_text())['mcpServers']['lcu']
         browser = json.loads((self.root / 'chrome-export/mcp.json').read_text())['mcpServers']['lcu']
+        audio = json.loads((self.root / 'audio-export/mcp.json').read_text())['mcpServers']['lcu']
         self.assertNotIn('--chrome', native['args'])
         self.assertEqual(browser['args'][-1], '--chrome')
+        self.assertEqual(audio['args'][-1], '--audio')
         metadata = json.loads((self.root / 'chrome-export/lcu-bootstrap.json').read_text())
         self.assertIn('--chrome', metadata['destinationSetup'])
+        audio_metadata = json.loads((self.root / 'audio-export/lcu-bootstrap.json').read_text())
+        self.assertIn('--audio', audio_metadata['destinationSetup'])

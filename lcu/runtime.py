@@ -8,7 +8,7 @@ import subprocess
 import sys
 import uuid
 
-USAGE = ('Usage: lcu [--chrome] [--mcp-discovery-compat]\n'
+USAGE = ('Usage: lcu [--chrome] [--audio] [--mcp-discovery-compat]\n'
          '       lcu setup OPTIONS\n'
          '       lcu browser install\n'
          '       lcu browser status\n'
@@ -125,7 +125,7 @@ def paths(root):
     return app, resources, runtime, {'version': version, 'runtime': runtime_version}
 
 
-def environment(root, resolved=None, *, chrome=False):
+def environment(root, resolved=None, *, chrome=False, audio=False):
     _, resources, runtime, metadata = resolved or paths(root)
     target = json.loads((root / 'installation.json').read_text()).get('platform', 'linux')
     windows = target == 'windows'
@@ -170,6 +170,11 @@ def environment(root, resolved=None, *, chrome=False):
     # The original launcher selects both its API and instructions from this
     # surface list. External Chrome is an explicit opt-in for LCU clients.
     env.setdefault('CUA_REPL_ENABLED_SURFACES', 'browser,computer' if chrome else 'computer')
+    # These paired switches are the original optional computer-audio API gate.
+    # Inherit caller policy when LCU was not explicitly asked to enable audio.
+    if audio:
+        env['SKY_ENABLE_AUDIO'] = '1'
+        env['NODE_REPL_ENABLE_AUDIO'] = '1'
     env.setdefault('CUA_REPL_BROWSER_ENV', 'codex-app')
     env.setdefault('CODEX_CLI_PATH', str(codex))
     if resources.parent.name == 'Contents':
@@ -253,17 +258,23 @@ def _configure_macos_lifecycle(root, runtime, env):
     env['NODE_REPL_TRUSTED_CODE_PATHS'] = os.pathsep.join(dict.fromkeys(
         [str(wrapper.parent), *filter(None, env.get('NODE_REPL_TRUSTED_CODE_PATHS', '').split(os.pathsep))]))
     env['LCU_MAC_SKY_SERVICE_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js')
+    env['LCU_MAC_SKY_CLIENT_PATH'] = str(runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/targets/mac/client.js')
     client = Path(env['SKY_CUA_SERVICE_PATH']) / 'Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient'
     return client
 
 
 def main(root, argv):
-    # Agent registrations place --chrome before generic executable probes.
-    if argv[:1] == ['--chrome'] and argv[1:] in (['--help'], ['-h'], ['--version']):
-        argv = argv[1:]
+    # Agent registrations place LCU options before generic executable probes.
+    probe = list(argv)
+    probe_options = set()
+    while probe[:1] and probe[0] in ('--chrome', '--audio') and probe[0] not in probe_options:
+        probe_options.add(probe.pop(0))
+    if probe in (['--help'], ['-h'], ['--version']):
+        argv = probe
     if argv[:1] in (['--help'], ['-h']):
         print(USAGE + '\nWith no arguments, starts the original computer-use stdio MCP server. '
-              '`lcu --chrome` also enables its browser surface; `lcu setup --chrome` registers that command.')
+              '`lcu --chrome` also enables its browser surface; `lcu setup --chrome` registers that command. '
+              '`lcu --audio` enables the original optional computer-audio API; `lcu setup --audio` registers that command.')
         return
     if argv[:1] == ['--version']:
         release_path = root / 'bundle.json'
@@ -291,15 +302,16 @@ def main(root, argv):
         raise ValueError('--with-browser-host was removed with the embedded browser. '
                          'Run lcu browser install and enable the official Chrome extension.')
     chrome = argv.count('--chrome') == 1
-    direct_args = [arg for arg in argv if arg != '--chrome']
+    audio = argv.count('--audio') == 1
+    direct_args = [arg for arg in argv if arg not in ('--chrome', '--audio')]
     doctor_args = direct_args[1:] if direct_args[:1] == ['doctor'] else None
     discovery_compat = direct_args == ['--mcp-discovery-compat']
-    if (argv.count('--chrome') > 1 or
+    if (argv.count('--chrome') > 1 or argv.count('--audio') > 1 or
             (direct_args not in ([], ['--mcp-discovery-compat']) and doctor_args is None)):
         raise ValueError(USAGE)
     resolved = paths(root)
     app, resources, runtime, _ = resolved
-    env = environment(root, resolved, chrome=chrome)
+    env = environment(root, resolved, chrome=chrome, audio=audio)
     windows = json.loads((root / 'installation.json').read_text()).get('platform') == 'windows'
     if doctor_args is not None:
         from .doctor import main as doctor
@@ -362,7 +374,8 @@ def main(root, argv):
         if client is not None:
             from .macos_host import start_original_host, stop_original_host
             host, temporary, address = start_original_host(
-                python=Path(sys.executable), client=client, entry=root / 'lcu/macos_host.py', env=env)
+                python=Path(sys.executable), client=client, entry=root / 'lcu/macos_host.py', env=env,
+                control_address=env.get('LCU_MAC_CONTROL_SOCKET'))
             env['LCU_MAC_LIFETIME_SOCKET'] = address
             try:
                 status = subprocess.run(command, env=env, check=False).returncode
