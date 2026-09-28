@@ -335,9 +335,11 @@ def main(root, argv):
         return doctor(root, doctor_args)
     # A bare stdio server launched from a real terminal only appears to hang.
     if direct_args == [] and sys.stdin.isatty() and sys.stdout.isatty():
+        # `lcu` is not on PATH; name the command exactly as it was invoked.
+        command = sys.argv[0] if os.path.isabs(sys.argv[0]) else str(root / 'bin/lcu')
         print('lcu is a stdio MCP server, launched by an agent harness over pipes, not run directly.\n'
-              + USAGE + '\nRun `lcu setup` to register it with a harness, or `lcu doctor` to check readiness.',
-              file=sys.stderr)
+              + USAGE + f'\nRun `{command} setup` to register it with a harness, '
+              f'or `{command} doctor` to check readiness.', file=sys.stderr)
         raise SystemExit(2)
     descriptor = json.loads((root / 'installation.json').read_text())
     platform = descriptor.get('platform', 'linux')
