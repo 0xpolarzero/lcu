@@ -1,6 +1,6 @@
 # Native macOS harness flows, 2026-09-28
 
-OMP 18.4.1 passed a real model-driven native macOS edit/save flow with session approval. OMP also passed fresh-process reuse of an always grant. Hermes v2026.9.24 also passed the native session-approval flow; its always-grant reuse check is pending. [Browser flows and the interactive approval matrices](harness-browser-flows-2026-09-28.md) passed separately.
+OMP 18.4.1 passed a real model-driven native macOS edit/save flow with session approval. OMP also passed fresh-process reuse of an always grant. Hermes v2026.9.24 passed both the native session-approval flow and always-grant reuse across fresh processes. [Browser flows and the interactive approval matrices](harness-browser-flows-2026-09-28.md) passed separately.
 
 ## Environment and source boundary
 
@@ -58,3 +58,11 @@ LCU_SOURCE_ROOT=/path/to/staged/source python3 /path/to/macos_harness_live.py \
 ```
 
 Use `--agent omp` with its official CLI for OMP; use `--scope always` for the two-process check. The runner does not belong in the default container suite. It prepares only a separate development/test Node distribution for the Hermes source TUI, from the [official archive](https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.xz), verified against SHA-256 `6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe` in the [official checksum manifest](https://nodejs.org/dist/v24.21.0/SHASUMS256.txt). It never acquires the OpenAI desktop app.
+
+## Hermes always approval across fresh processes
+
+Two independent Hermes processes reused generated app `dev.lcu.NativeFixture.f6201f432447450f876ba952bcd83a5e`, PID 9494. Process 9503 selected Always allow through the real TUI, producing exactly one `accept` with `persist: always`. Its three original `js` calls saved `lcu-hermes-99b7740a714e` and completed `Stop`. After that process was terminated, process 9577 made three original `js` calls, saved `lcu-hermes-e2b0104c7173`, and completed `Stop` with zero elicitation callbacks and no approval input. The agent session and turn IDs differed between phases. Both phases exercised the ready-composer startup fallback.
+
+Private evidence is `/private/tmp/lcu-harness-full-20260928/hermes-macos-always-evidence.json`; queue job `bed0fe5b-4dbc-4974-8dab-7d7a4cce8466`. The runner SHA-256 for the Hermes session and always runs is `d6ca79db28616417291efd0fe92b47fddf65e9ec5591e92155925d16fa661336`, identical to the committed `tests/macos_harness_live.py`. The host proxy recorded 33 successful model requests across all four native checks, with no credential copied into the guest.
+
+Hermes and OMP forward the requested persistence scope to the original runtime; LCU owns no persistent grant cache. Both checks prove always-grant reuse across replacement of the agent and MCP processes for the same app. Neither establishes persistence across VM reboot, deliberate native-helper restart, app update, or revocation. The browser and clean-source container evidence remain separate from this native overlay check.
