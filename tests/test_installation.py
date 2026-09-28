@@ -1,3 +1,4 @@
+import io
 import os
 import hashlib
 import json
@@ -177,12 +178,36 @@ class InstallationTests(unittest.TestCase):
                  patch('install.verify'), patch('install.preflight_app'), \
                  patch('install.install'), patch('install.setup.installer_environment'), \
                  patch('install.subprocess.run') as run:
+                run.return_value.returncode = 0
                 install_main(['--prefix', str(base / 'lcu'), '--existing-app', str(existing_app),
                               '--agent', 'pi', '--audio', '--yes', '--skip-system'])
             command = run.call_args.args[0]
             self.assertIn('--audio', command)
             self.assertIn('--agent', command)
             self.assertIn('pi', command)
+
+    def test_linux_installer_reports_runtime_path_when_agent_registration_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            home = base / 'account'
+            home.mkdir()
+            existing_app = base / 'chatgpt'
+            existing_app.mkdir()
+            account = SimpleNamespace(pw_name='fixture', pw_uid=1001, pw_dir=str(home))
+            with patch('install.DEFAULT_APP_PATH', existing_app), \
+                 patch('install.setup.validate', return_value=(account, ['pi'])), \
+                 patch('install.architecture', return_value='arm64'), \
+                 patch('install.verify'), patch('install.preflight_app'), \
+                 patch('install.install'), patch('install.setup.installer_environment'), \
+                 patch('install.subprocess.run') as run, \
+                 patch('sys.stderr', io.StringIO()) as stderr:
+                run.return_value.returncode = 5
+                with self.assertRaises(SystemExit) as raised:
+                    install_main(['--prefix', str(base / 'lcu'), '--existing-app', str(existing_app),
+                                  '--agent', 'pi', '--yes', '--skip-system'])
+            self.assertEqual(raised.exception.code, 5)
+            self.assertIn('agent registration failed', stderr.getvalue())
+            self.assertIn(str(base / 'lcu' / 'current/bin/lcu'), stderr.getvalue())
 
     def test_validated_package_cache_is_reused_offline_and_corruption_fails_closed(self):
         prefix = self.root / 'lcu'

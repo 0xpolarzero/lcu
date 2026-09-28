@@ -163,7 +163,9 @@ def main(argv=None):
     account, names = setup.validate(args)
     prefix = checked_prefix(args.prefix)
     if args.runtime_only:
-        if args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop or args.session != 'discover' or args.browser_host or args.chrome or args.audio:
+        if (args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop
+                or args.session != 'discover' or args.browser_host or args.chrome or args.audio
+                or args.no_chrome or args.no_audio):
             raise ValueError('--runtime-only cannot include agent setup options')
     elif not names and not args.export and (args.yes or not sys.stdin.isatty()):
         raise ValueError('Select --agent NAME, --agent all, --agent auto, --export PATH, or --runtime-only')
@@ -188,11 +190,17 @@ def main(argv=None):
         for flag in ('project', 'export'):
             if getattr(args, flag):
                 forwarded += ['--' + flag, str(getattr(args, flag))]
-        for flag in ('yes', 'check_desktop', 'chrome', 'audio'):
+        for flag in ('yes', 'check_desktop', 'chrome', 'audio', 'no_chrome', 'no_audio'):
             if getattr(args, flag):
                 forwarded += ['--' + flag.replace('_', '-')]
         # Run setup from the selected release, and drop privileges before account writes.
-        subprocess.run([str(prefix / 'current/bin/lcu'), 'setup', *forwarded], check=True)
+        runtime = prefix / 'current/bin/lcu'
+        result = subprocess.run([str(runtime), 'setup', *forwarded], check=False)
+        if result.returncode:
+            print(f'LCU runtime installed at {runtime}, but agent registration failed. '
+                  f'After resolving the errors, retry: {runtime} setup {" ".join(forwarded)}',
+                  file=sys.stderr)
+            raise SystemExit(result.returncode)
 
 
 if __name__ == '__main__':

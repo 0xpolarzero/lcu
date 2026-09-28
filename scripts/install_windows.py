@@ -208,12 +208,15 @@ def main(argv=None):
     parser.add_argument('--runtime-only', action='store_true')
     parser.add_argument('--agent', action='append', choices=tuple(setup.CLIENTS) + tuple(setup.ALIASES))
     parser.add_argument('--chrome', action='store_true')
+    parser.add_argument('--no-chrome', action='store_true')
     parser.add_argument('--audio', action='store_true')
+    parser.add_argument('--no-audio', action='store_true')
     parser.add_argument('--yes', action='store_true')
     parser.add_argument('--scope', choices=('user', 'project'), default='user')
     parser.add_argument('--project', type=Path)
     args = parser.parse_args(argv)
-    if args.runtime_only and (args.agent or args.chrome or args.audio or args.project or args.scope != 'user'):
+    if args.runtime_only and (args.agent or args.chrome or args.audio or args.no_chrome
+                              or args.no_audio or args.project or args.scope != 'user'):
         parser.error('--runtime-only cannot include agent setup options')
     if not args.runtime_only and not args.agent:
         parser.error('Choose --agent NAME or --runtime-only. Agents: ' + ', '.join(setup.CLIENTS))
@@ -228,8 +231,12 @@ def main(argv=None):
             command += ['--project', str(args.project)]
         if args.chrome:
             command += ['--chrome']
+        if args.no_chrome:
+            command += ['--no-chrome']
         if args.audio:
             command += ['--audio']
+        if args.no_audio:
+            command += ['--no-audio']
         if args.yes:
             command += ['--yes']
         subprocess.run(command, check=True)
