@@ -2,6 +2,18 @@
 
 Install LCU from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest), then register it in your harness. For source changes, see [Building from source](DEVELOPMENT.md#building-from-source).
 
+## The `lcu` command
+
+The installer does not add `lcu` to your `PATH`. Invoke it by its installed path:
+
+| Platform | Installed command |
+| --- | --- |
+| macOS | `~/.local/share/lcu/current/bin/lcu` |
+| Linux | `/opt/lcu/current/bin/lcu` (or `<prefix>/current/bin/lcu`) |
+| Windows | `%LOCALAPPDATA%\LCU\lcu.cmd` |
+
+Where a command below is written as `lcu ...`, run it through the installed path for your platform. This is the `mcp` server harnesses launch; running it directly in an interactive terminal only prints a hint that it is a stdio MCP server.
+
 ## If you are the installing agent
 
 1. Check the OS, architecture, desktop account, and current harness. Adapters are `pi`, `codex`, `claude-code`, `omp` (Oh My Pi), and `hermes` (Hermes Agent); select the user's harness explicitly. OMP and Hermes are experimental; inspect their [verification limits](ADAPTERS.md) before claiming desktop behavior. If the harness has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
@@ -88,8 +100,8 @@ Pi setup uses Pi's package installer to register the bundled native extension an
 For Oh My Pi or Hermes Agent, install the harness first, then register its native integration:
 
 ```sh
-lcu setup --agent omp
-lcu setup --agent hermes
+~/.local/share/lcu/current/bin/lcu setup --agent omp
+~/.local/share/lcu/current/bin/lcu setup --agent hermes
 ```
 
 OMP setup calls `omp plugin link` on a generated local package containing the shared Pi extension and full local skill. Native links use the selected OMP user profile; project scope is rejected because OMP ignores it for local links. Hermes setup writes an LCU-owned plugin to `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`, includes the full local skill, and calls `hermes plugins enable lcu-cua`. Set an absolute `HERMES_HOME` to select another Hermes profile. Neither native integration supports project scope; setup rejects it. Restart the selected harness after registration. See [OMP](ADAPTERS.md#oh-my-pi) and [Hermes](ADAPTERS.md#hermes-agent) for behavior and evidence.

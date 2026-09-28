@@ -67,8 +67,10 @@ Enable the official extension in your Chrome profile and restart your harness. T
 Pass `--audio` when setting up a maintained harness, for example:
 
 ```sh
-lcu setup --agent pi --audio
+~/.local/share/lcu/current/bin/lcu setup --agent pi --audio
 ```
+
+The installer does not add `lcu` to your `PATH`; run its installed path (`/opt/lcu/current/bin/lcu` on Linux). See [the `lcu` command](docs/INSTALLATION.md#the-lcu-command).
 
 This enables the installed original runtime's optional computer-audio recording API and its original approval flow. LCU does not add audio-specific instructions, and a saved recording is not audio delivered to the model. See the [audio opt-in verification record](docs/verification/audio-opt-in-2026-09-27.md).
 
