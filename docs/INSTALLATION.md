@@ -106,9 +106,7 @@ For Oh My Pi or Hermes Agent, install the harness first, then register its nativ
 
 OMP setup calls `omp plugin link` on a generated local package containing the shared Pi extension and full local skill. Native links use the selected OMP user profile; project scope is rejected because OMP ignores it for local links. Hermes setup writes an LCU-owned plugin to `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`, includes the full local skill, and calls `hermes plugins enable lcu-cua`. Set an absolute `HERMES_HOME` to select another Hermes profile. Neither native integration supports project scope; setup rejects it. Restart the selected harness after registration. See [OMP](ADAPTERS.md#oh-my-pi) and [Hermes](ADAPTERS.md#hermes-agent) for behavior and evidence.
 
-Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths, shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, and opens a pane only after you choose it. `lcu doctor` cannot read macOS privacy grants; it reports the original provider methods as available while keeping permission readiness unverified. The first verification is an approved call from the reconnected agent against a harmless window, such as a blank TextEdit document, asking LCU to return a screenshot.
-
-`--yes` is unattended setup: it skips desktop readiness and prints the exact `lcu doctor` command to run later from the desktop account. `--check-desktop` performs a bounded noninteractive check, never opens System Settings, and exits nonzero when this platform cannot verify readiness. The original runtime remains responsible for its normal approval and macOS prompts.
+Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths and shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, opening a pane only after you choose it. The original runtime remains responsible for its normal approval and macOS prompts. See [Desktop and browser](#desktop-and-browser) for what `doctor` verifies per platform, its exit codes, and how first-call readiness is confirmed.
 
 Chrome mode also requires the official browser extension and site approval. For unattended use, a harness can pass exact origins the user already authorized via `LCU_APPROVED_ORIGINS`; this is an explicit grant, not a blanket bypass. The original provider chooses the platform instructions automatically.
 
@@ -173,15 +171,15 @@ The original host contract advertises model-facing js and js_reset, keeps turn_e
 
 On Linux, the default `--session discover` mode attaches to exactly one existing XFCE session owned by the account. Other X11 desktops use `--session direct` when the agent already has `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and, when needed, `XAUTHORITY`. Run setup and the agent from a terminal in that desktop session. macOS uses direct mode automatically.
 
-Pass `--check-desktop` to setup to require a noninteractive readiness check after registration. It never opens System Settings and exits nonzero when readiness is incomplete or unverifiable; agent registration remains saved. To repeat the interactive check, use the installed command (`~/.local/share/lcu/current/bin/lcu` on macOS). On Linux, run from the desktop session:
+Interactive setup launches the guided `lcu doctor` flow automatically after registration. `--yes` is unattended setup: it skips desktop readiness and prints the exact `doctor` command to run later. `--check-desktop` runs a bounded noninteractive readiness check (it uses `--require-ready`); it never opens System Settings and exits nonzero when readiness is incomplete or unverifiable, while agent registration remains saved. To repeat the check, run the installed command from the desktop session:
 
 ~~~sh
 /opt/lcu/current/bin/lcu doctor
 ~~~
 
-Interactive setup launches the guided `lcu doctor` flow automatically after registration. `--yes` skips it; the command above can be run later from the active desktop account.
+Whatever `doctor` reports, readiness is only confirmed when the reconnected agent makes its first approved screenshot call against a harmless window, such as a blank TextEdit document, and you check the returned image.
 
-On macOS, `doctor` safely checks original runtime metadata and names the selected app/helper entries from their bundle metadata. It does not inspect application content or determine whether Accessibility or screen-capture grants are enabled. Its **Open** choices are explicit, and its recheck repeats only the metadata check. Readiness remains unverified until the connected agent makes its first approved screenshot call against a harmless window, such as a blank TextEdit document. A nonzero macOS doctor result means the grant state could not be verified through the original CLI API.
+On macOS, `doctor` safely checks original runtime metadata and names the selected app/helper entries from their bundle metadata. It does not inspect application content or determine whether Accessibility or screen-capture grants are enabled; its **Open** choices are explicit, and its recheck repeats only the metadata check. `doctor` now exits 0 when the original provider loads (permission grants are still reported as not verifiable by LCU) and exits 2 when the provider check fails. `--check-desktop` still exits nonzero on macOS because this check cannot verify the permission grants.
 
 On Linux, `doctor` calls the original runtime's `list_windows` and `get_screenshot` methods. It reports only status and counts; LCU discards the returned image data locally. The original API may create its normal temporary capture files. A successful result verifies these two original runtime calls in the current desktop session, then asks you to verify an agent call.
 
