@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
   ElicitRequestSchema,
+  ProgressNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
@@ -51,7 +52,7 @@ async function waitFor(predicate, timeoutMs = 5_000) {
   assert.fail(`Condition did not become true within ${timeoutMs} ms`);
 }
 
-async function connectCodexRelay(relayPath = relay) {
+async function connectCodexRelay(relayPath = relay, { delayProgress = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'lcu-codex-relay-test-'));
   const logPath = join(directory, 'fixture.jsonl');
   const env = {
@@ -60,6 +61,10 @@ async function connectCodexRelay(relayPath = relay) {
     TMPDIR: directory,
     LCU_CODEX_FIXTURE_LOG: logPath,
   };
+  if (delayProgress) {
+    const preload = fileURLToPath(new URL('./codex-progress-delay.mjs', import.meta.url));
+    env.NODE_OPTIONS = `--import=${preload}`;
+  }
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [relayPath, process.execPath, fixture],
@@ -71,6 +76,19 @@ async function connectCodexRelay(relayPath = relay) {
   const client = new Client({ name: 'codex-relay-contract-test', version: '1' }, {
     capabilities: { elicitation: { form: {}, url: {} } },
   });
+  const receivedMessages = [];
+  const progressEvents = [];
+  const progressRequestIds = new Map();
+  client.setNotificationHandler(ProgressNotificationSchema, async notification => {
+    progressEvents.push(notification.params);
+  });
+  const originalSend = transport.send.bind(transport);
+  transport.send = message => {
+    if (message.method === 'tools/call' && message.params?.arguments?.code?.startsWith('send-progress')) {
+      progressRequestIds.set(message.params._meta?.progressToken, message.id);
+    }
+    return originalSend(message);
+  };
   const elicitationRequests = [];
   const elicitationResponses = [];
   client.setRequestHandler(ElicitRequestSchema, async request => {
@@ -86,6 +104,11 @@ async function connectCodexRelay(relayPath = relay) {
   });
   try {
     await client.connect(transport);
+    const originalOnMessage = transport.onmessage;
+    transport.onmessage = message => {
+      receivedMessages.push(message);
+      return originalOnMessage(message);
+    };
   } catch (error) {
     await client.close().catch(() => {});
     rmSync(directory, { recursive: true, force: true });
@@ -119,6 +142,9 @@ async function connectCodexRelay(relayPath = relay) {
     elicitationRequests,
     elicitationResponses,
     listChanged,
+    progressEvents,
+    progressRequestIds,
+    receivedMessages,
     get listChangedCount() { return listChangedCount; },
     close,
     get stderr() { return stderr; },
@@ -150,7 +176,7 @@ test('Codex relay starts through the installed current symlink', { timeout: 10_0
 });
 
 test('Codex relay preserves MCP contracts and changes only returned audio blocks', { timeout: 20_000 }, async () => {
-  const bridge = await connectCodexRelay();
+  const bridge = await connectCodexRelay(relay, { delayProgress: true });
   try {
     assert.deepEqual(bridge.client.getServerVersion(), {
       name: 'lcu-codex-contract-fixture', version: '7.4.2',
@@ -238,18 +264,40 @@ test('Codex relay preserves MCP contracts and changes only returned audio blocks
     });
     assert.deepEqual(bridge.logs().find(entry => entry.type === 'elicitation-response').response, accepted);
 
-    const progressEvents = [];
+    const progressToken = 'codex-progress-contract-token';
     const progressResult = await bridge.client.callTool(
-      { name: 'js', arguments: { code: 'send-progress' }, _meta: { callerMarker: 'progress-call' } },
-      undefined,
-      { onprogress: progress => progressEvents.push(progress) },
+      { name: 'js', arguments: { code: 'send-progress' },
+        _meta: { callerMarker: 'progress-call', progressToken } },
     );
     assert.equal(progressResult.content[0].text, 'Progress sent.');
-    assert.deepEqual(progressEvents.map(({ progress, total, message }) => ({ progress, total, message })), [{
+    await waitFor(() => bridge.progressEvents.length > 0);
+    assert.equal(bridge.progressEvents[0].progressToken, progressToken);
+    assert.deepEqual(bridge.progressEvents.map(({ progress, total, message }) => ({ progress, total, message })), [{
       progress: 2, total: 5, message: 'Synthetic fixture progress.',
-    }]);
+    }], bridge.stderr);
+    const requestId = bridge.progressRequestIds.get(progressToken);
+    const progressIndex = bridge.receivedMessages.findIndex(message =>
+      message.method === 'notifications/progress' && message.params?.progressToken === progressToken);
+    const responseIndex = bridge.receivedMessages.findIndex(message =>
+      message.id === requestId && Object.hasOwn(message, 'result'));
+    assert.ok(progressIndex >= 0, 'the relay must emit progress to its downstream client');
+    assert.ok(responseIndex > progressIndex, 'the tool result must not overtake the progress notification');
     assert.equal(bridge.logs().find(entry => entry.type === 'call' && entry.args.code === 'send-progress').meta.callerMarker,
       'progress-call');
+
+    const errorProgressToken = 'codex-progress-error-contract-token';
+    await assert.rejects(bridge.client.callTool({
+      name: 'js', arguments: { code: 'send-progress-then-fail' },
+      _meta: { callerMarker: 'progress-error-call', progressToken: errorProgressToken },
+    }));
+    await waitFor(() => bridge.progressEvents.some(event => event.progressToken === errorProgressToken));
+    const errorRequestId = bridge.progressRequestIds.get(errorProgressToken);
+    const errorProgressIndex = bridge.receivedMessages.findIndex(message =>
+      message.method === 'notifications/progress' && message.params?.progressToken === errorProgressToken);
+    const errorResponseIndex = bridge.receivedMessages.findIndex(message =>
+      message.id === errorRequestId && Object.hasOwn(message, 'error'));
+    assert.ok(errorProgressIndex >= 0, 'progress before an upstream error must reach the downstream client');
+    assert.ok(errorResponseIndex > errorProgressIndex, 'the error response must not overtake accepted progress');
 
     await bridge.client.callTool({ name: 'js', arguments: { code: 'notify-tools-changed' } });
     const notification = await Promise.race([

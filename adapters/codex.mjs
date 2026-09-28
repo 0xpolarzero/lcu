@@ -6,6 +6,7 @@ import {
   CallToolRequestSchema,
   ElicitRequestSchema,
   ListToolsRequestSchema,
+  ProgressNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { persistAudioContent } from './audio-files.mjs';
@@ -43,6 +44,8 @@ export async function runCodexBridge({ command, args = [], cwd, env } = {}) {
   let server;
   let connected = false;
   let shutdown;
+  let nextProgressToken = 0;
+  const progressHandlers = new Map();
 
   upstream.setRequestHandler(ElicitRequestSchema, async (request, extra) => {
     try {
@@ -55,6 +58,17 @@ export async function runCodexBridge({ command, args = [], cwd, env } = {}) {
   try {
     await upstream.connect(upstreamTransport);
     connected = true;
+    // SDK 1.x removes a request's progress callback as soon as its response is
+    // parsed, while notification handlers run in a later microtask. A progress
+    // frame adjacent to its result can therefore be rejected as an unknown
+    // token. Route progress through the public notification-handler API and
+    // keep our own per-call token until the tool call settles; late frames are
+    // benign and ignored.
+    upstream.setNotificationHandler(ProgressNotificationSchema, async notification => {
+      const { progressToken, ...progress } = notification.params;
+      const handler = progressHandlers.get(progressToken);
+      if (handler) await handler(progress);
+    });
     const originalCapabilities = upstream.getServerCapabilities() ?? {};
     if (!originalCapabilities.tools) {
       throw new Error('Original CUA server does not advertise tools');
@@ -76,21 +90,38 @@ export async function runCodexBridge({ command, args = [], cwd, env } = {}) {
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const { params } = request;
-      const progressToken = extra._meta?.progressToken;
+      const progressSends = [];
       const options = {
         signal: extra.signal,
         timeout: callTimeout(params.name, params.arguments),
       };
-      if (progressToken !== undefined) {
-        options.onprogress = progress => {
-          void extra.sendNotification({
-            method: 'notifications/progress',
-            params: { ...progress, progressToken },
-          }).catch(error => report('Codex MCP progress relay error', error));
+      let upstreamParams = params;
+      const downstreamProgressToken = extra._meta?.progressToken;
+      let upstreamProgressToken;
+      if (downstreamProgressToken !== undefined) {
+        upstreamProgressToken = `lcu-codex-${++nextProgressToken}`;
+        upstreamParams = {
+          ...params,
+          _meta: { ...params._meta, progressToken: upstreamProgressToken },
         };
+        progressHandlers.set(upstreamProgressToken, progress => {
+          const send = extra.sendNotification({
+            method: 'notifications/progress',
+            params: { ...progress, progressToken: downstreamProgressToken },
+          }).catch(error => report('Codex MCP progress relay error', error));
+          progressSends.push(send);
+          return send;
+        });
       }
-      const result = await upstream.callTool(params, undefined, options);
-      return persistAudioContent(result);
+      try {
+        const result = await upstream.callTool(upstreamParams, undefined, options);
+        return persistAudioContent(result);
+      } finally {
+        if (upstreamProgressToken !== undefined) progressHandlers.delete(upstreamProgressToken);
+        // Drain notifications on both success and failure so neither a result
+        // nor an error can overtake progress already accepted for this call.
+        await Promise.all(progressSends);
+      }
     });
 
     if (originalCapabilities.tools.listChanged) {

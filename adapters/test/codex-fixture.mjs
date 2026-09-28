@@ -137,6 +137,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       log({ type: 'call-aborted', meta: _meta });
       return { content: [{ type: 'text', text: 'Fixture observed cancellation.' }] };
     case 'send-progress':
+    case 'send-progress-then-fail':
       await server.notification({
         method: 'notifications/progress',
         params: {
@@ -146,6 +147,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
           message: 'Synthetic fixture progress.',
         },
       });
+      if (args.code === 'send-progress-then-fail') {
+        throw new Error('Synthetic failure after progress.');
+      }
       return { content: [{ type: 'text', text: 'Progress sent.' }] };
     case 'notify-tools-changed':
       await server.notification({ method: 'notifications/tools/list_changed' });
