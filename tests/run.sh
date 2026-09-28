@@ -15,7 +15,7 @@ else
   docker run --rm --platform "$platform" -v "$repo:/src:ro" -v "$output:/out" "$tag" python3 -c '
 import json,sys
 from pathlib import Path
-sys.path.insert(0,"/src/scripts")
+sys.path[:0]=["/src/scripts","/src"]
 from bundle import architecture
 from installed_app import _download
 lock=json.loads(Path("/src/runtime.lock.json").read_text()); entry=lock["architectures"][architecture()]
