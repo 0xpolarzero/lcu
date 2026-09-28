@@ -1,5 +1,7 @@
+import io
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import pwd
 import subprocess
@@ -10,7 +12,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lcu.setup import configure, export_bundle, generate_skill, host_policy, installed_app_resources, parser, validate
+from lcu import setup
+from lcu.setup import (agent_scopes, configure, export_bundle, generate_skill, host_policy,
+                       installed_app_resources, load_setup_state, parser, save_setup_state,
+                       setup_state_path, validate)
 from lcu.setup_clients import CLIENTS
 
 class InstalledInstructionTests(unittest.TestCase):
@@ -66,7 +71,14 @@ class InstalledInstructionTests(unittest.TestCase):
 
     def test_generated_skill_has_complete_pre_call_sources_byte_identically(self):
         generated = generate_skill(self.skill_source, self.home, self.release)
-        self.assertEqual((generated / 'SKILL.md').read_bytes(), (self.skill_source / 'SKILL.md').read_bytes())
+        wrapper = (generated / 'SKILL.md').read_text()
+        # The template's bare `lcu setup` is replaced; `lcu` is not on PATH.
+        self.assertNotIn('run `lcu setup`', wrapper)
+        self.assertIn('/opt/lcu/current/bin/lcu setup', wrapper)
+        # An explicit installed runtime path substitutes exactly.
+        exact = generate_skill(self.skill_source, self.home, self.release,
+                               setup_command='/opt/lcu/current/bin/lcu')
+        self.assertIn('`/opt/lcu/current/bin/lcu setup`', (exact / 'SKILL.md').read_text())
         mapping = {
             '@oai/cua/docs/tinysky-alt-core-cua-repl.md': 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md',
             '@oai/cua-repl/instructions/linux/description.md': 'references/upstream/cua-repl/instructions/linux/description.md',
@@ -107,6 +119,23 @@ class InstalledInstructionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Original instruction file missing'):
             generate_skill(self.skill_source, self.home, self.release)
         self.assertEqual((generated / 'marker').read_text(), 'previous generation')
+
+    def test_macos_wrapper_drops_the_window_id_sentence_kept_on_linux(self):
+        linux = generate_skill(self.skill_source, self.home, self.release)
+        self.assertIn('exact observed window ID', (linux / 'SKILL.md').read_text())
+        contents = self.app / 'Contents'
+        contents.mkdir()
+        self.resources.rename(contents / 'Resources')
+        self.resources = contents / 'Resources'
+        self.modules = self.resources / 'cua_node/lib/node_modules'
+        (self.release / 'installation.json').write_text('{"platform":"darwin","app":"app"}')
+        sky = self.modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md'
+        sky.parent.mkdir(parents=True)
+        sky.write_bytes(b'macos guide\n')
+        macos = generate_skill(self.skill_source, self.home, self.release)
+        wrapper = (macos / 'SKILL.md').read_text()
+        self.assertNotIn('exact observed window ID', wrapper)
+        self.assertIn('effective policy.', wrapper)
 
     def test_macos_skill_selects_original_macos_guides_without_linux_guidance(self):
         # A macOS bundle has a different resources root, but its original guides
@@ -434,3 +463,81 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('--chrome', metadata['destinationSetup'])
         audio_metadata = json.loads((self.root / 'audio-export/lcu-bootstrap.json').read_text())
         self.assertIn('--audio', audio_metadata['destinationSetup'])
+
+    def test_export_bootstrap_skill_includes_audio_rerun_flag(self):
+        with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
+            export_bundle(self.root / 'audio-export', self.skill_source, ['/usr/bin/lcu', '--audio'],
+                          self.release, audio=True)
+        bootstrap = (self.root / 'audio-export/skills/lcu/SKILL.md').read_text()
+        self.assertIn('lcu setup --export /new/path --audio --yes', bootstrap)
+
+    def test_setup_state_round_trips_and_rejects_malformed(self):
+        self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False})
+        save_setup_state(self.home, chrome=True, audio=False)
+        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False})
+        self.assertEqual(json.loads(setup_state_path(self.home).read_text()),
+                         {'chrome': True, 'audio': False})
+        setup_state_path(self.home).write_text('{ not json')
+        with self.assertRaisesRegex(ValueError, 'Malformed LCU setup state'):
+            load_setup_state(self.home)
+        setup_state_path(self.home).write_text('{"chrome": "yes", "audio": false}')
+        with self.assertRaisesRegex(ValueError, 'Malformed LCU setup state'):
+            load_setup_state(self.home)
+
+    def test_conflicting_chrome_and_audio_flags_are_rejected(self):
+        for pair in (['--chrome', '--no-chrome'], ['--audio', '--no-audio']):
+            args = parser().parse_args([*pair, '--agent', 'codex'])
+            with self.assertRaisesRegex(ValueError, 'not both'):
+                validate(args)
+
+    def test_list_agents_shows_user_only_scope_for_native_harness_plugins(self):
+        self.assertEqual(agent_scopes('omp'), 'user')
+        self.assertEqual(agent_scopes('hermes'), 'user')
+        self.assertEqual(agent_scopes('codex'), 'user, project')
+        with patch('sys.stdout', io.StringIO()) as out:
+            setup.main(['--list-agents'])
+        listing = out.getvalue()
+        self.assertRegex(listing, r'omp .*\(user\)')
+        self.assertRegex(listing, r'hermes .*\(user\)')
+        self.assertRegex(listing, r'codex .*\(user, project\)')
+
+    def test_setup_persists_and_reuses_chrome_opt_in(self):
+        prefix = self.root / 'prefix'
+        binary = prefix / 'current/bin/lcu'
+        session = prefix / 'current/bin/lcu-session'
+        binary.parent.mkdir(parents=True)
+        for path in (binary, session):
+            path.write_text('fixture')
+            path.chmod(0o755)
+        account = SimpleNamespace(pw_name='fixture', pw_uid=os.getuid(), pw_dir=str(self.home))
+        captured = []
+
+        def fake_configure(names, home, source, command, *args, **kwargs):
+            captured.append(command)
+            return []
+
+        def run(argv, **kwargs):
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+
+        def drive(argv):
+            with patch.object(setup.sys, 'platform', 'linux'), \
+                 patch.object(setup, 'validate', return_value=(account, ['codex'])), \
+                 patch.object(setup, 'installer_environment'), \
+                 patch.object(setup, 'installer_paths'), \
+                 patch.object(setup, 'setup_lock', return_value=nullcontext()), \
+                 patch.object(setup, 'configure', side_effect=fake_configure), \
+                 patch('lcu.browser.install'), \
+                 patch.object(setup.subprocess, 'run', side_effect=run), \
+                 patch('sys.stdout', io.StringIO()):
+                setup.main(['--prefix', str(prefix), '--agent', 'codex', '--session', 'direct', *argv])
+
+        drive(['--chrome', '--yes'])
+        self.assertEqual(json.loads((self.home / '.local/state/lcu/setup.json').read_text()),
+                         {'chrome': True, 'audio': False})
+        self.assertIn('--chrome', captured[-1])
+        drive(['--yes'])
+        self.assertIn('--chrome', captured[-1])
+        drive(['--no-chrome', '--yes'])
+        self.assertNotIn('--chrome', captured[-1])
+        self.assertEqual(json.loads((self.home / '.local/state/lcu/setup.json').read_text()),
+                         {'chrome': False, 'audio': False})

@@ -153,6 +153,40 @@ class WindowsSetupTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Windows portable export'):
                     setup.validate(args)
 
+    def test_windows_shared_launcher_docs_do_not_shadow_sky_doc_copies(self):
+        # A banner.js present under the %40oai layout used to overwrite the
+        # `target` platform string and make the Windows sky doc copies fail.
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            home = base / 'account'
+            home.mkdir()
+            release = base / 'release'
+            release.mkdir()
+            (release / 'installation.json').write_text(json.dumps({'platform': 'windows'}))
+            resources = base / 'registered-msix/app/resources'
+            modules = resources / 'cua_node/bin/node_modules/%40oai'
+            content = b'original\r\n'
+            paths = [
+                modules / 'cua/docs/tinysky-alt-core-cua-repl.md',
+                modules / 'cua-repl/instructions/banner.js',
+                modules / 'cua-repl/instructions/windows/description.md',
+                modules / 'sky/docs/skills/oai_sky_lib/windows/SKILL.md',
+                modules / 'sky/docs/sky-full-desktop-api.md',
+                modules / 'sky/docs/sky-window-api.md',
+                modules / 'sky/docs/sky-window2-api.md',
+            ]
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            source = Path(__file__).resolve().parents[1] / 'skills/lcu'
+            with mock.patch.object(setup, 'installed_app_resources', return_value=resources):
+                generated = setup.generate_skill(source, home, release)
+            self.assertEqual((generated / 'references/upstream/cua-repl/instructions/banner.js').read_bytes(), content)
+            self.assertEqual((generated / 'references/upstream/sky/native-api.md').read_bytes(), content)
+            self.assertEqual((generated / 'references/upstream/sky/windows/SKILL.md').read_bytes(), content)
+            wrapper = (generated / 'SKILL.md').read_text()
+            self.assertIn('For native Windows apps, target an exact observed window ID.', wrapper)
+
     def test_windows_original_encoded_instruction_tree_copied_byte_exact(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()

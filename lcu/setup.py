@@ -141,6 +141,32 @@ def setup_lock(home):
         os.close(fd)
 
 
+def setup_state_path(home):
+    """Per-account opt-in memory, beside setup.lock."""
+    return regular_path((home / 'AppData/Local/LCU/setup.json') if sys.platform == 'win32'
+                        else (home / '.local/state/lcu/setup.json'))
+
+
+def load_setup_state(home):
+    """Return saved opt-ins; tolerate a missing file, reject a malformed one."""
+    path = setup_state_path(home)
+    data = read_file(path)
+    if data is None:
+        return {'chrome': False, 'audio': False}
+    try:
+        parsed = json.loads(data)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.') from exc
+    if not isinstance(parsed, dict) or not all(isinstance(parsed.get(key), bool) for key in ('chrome', 'audio')):
+        raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.')
+    return {'chrome': parsed['chrome'], 'audio': parsed['audio']}
+
+
+def save_setup_state(home, *, chrome, audio):
+    atomic_write(setup_state_path(home),
+                 (json.dumps({'chrome': chrome, 'audio': audio}, indent=2) + '\n').encode())
+
+
 def installer_environment(home, names, environ=None):
     """Select a real account home; only honor profile overrides understood upstream."""
     env = dict(os.environ if environ is None else environ)
@@ -336,7 +362,7 @@ def _copy_resource_file(source, destination):
     shutil.copyfile(source, destination)
 
 
-def generate_skill(source, home, release_root, *, chrome=False):
+def generate_skill(source, home, release_root, *, chrome=False, setup_command=None):
     """Materialize the selected platform's original references byte for byte."""
     resources = installed_app_resources(release_root)
     installation = json.loads((Path(release_root) / 'installation.json').read_text())
@@ -366,11 +392,23 @@ def generate_skill(source, home, release_root, *, chrome=False):
             # Only LCU-authored bootstrap text changes. All upstream documents
             # below are copied without altering their prose or APIs.
             wrapper = wrapper.replace('Linux', 'macOS').replace('/linux/', '/macos/')
-            wrapper = wrapper.replace('For native macOS windows, target an exact observed window ID. ', '')
+            # The sentence ends its paragraph with no trailing space; strip the
+            # preceding space so the macOS wrapper drops it cleanly.
+            wrapper = wrapper.replace(' For native macOS windows, target an exact observed window ID.', '')
         elif target == 'windows':
             wrapper = wrapper.replace('Linux', 'Windows').replace('/linux/', '/windows/')
             wrapper = wrapper.replace('For native Windows windows, target an exact observed window ID.',
                                       'For native Windows apps, target an exact observed window ID.')
+        # `lcu` is not on PATH; point at the installed runtime's setup command.
+        if setup_command:
+            wrapper = wrapper.replace('`lcu setup`', f'`{setup_command} setup`')
+        else:
+            example = {'linux': '/opt/lcu/current/bin/lcu',
+                       'macos': '~/.local/share/lcu/current/bin/lcu',
+                       'windows': r'%LOCALAPPDATA%\LCU\lcu.cmd'}[instruction_platform]
+            wrapper = wrapper.replace(
+                'run `lcu setup`',
+                f"run the installed LCU runtime's `setup` command (for example `{example} setup`)")
         if chrome:
             platform_name = {'darwin': 'macOS', 'linux': 'Linux', 'windows': 'Windows'}[target]
             wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
@@ -384,9 +422,10 @@ def generate_skill(source, home, release_root, *, chrome=False):
         for name in ('banner.js', 'browser-disabled.md', 'code.md', 'computer-disabled.md', 'reset.md', 'server.md'):
             path = repl_source / name
             if path.is_file():
-                target = refs / repl_target / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, target)
+                # Do not shadow the `target` platform read by original().
+                destination = refs / repl_target / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
         _copy_resource_tree(repl_source / instruction_platform, refs / repl_target / instruction_platform)
         for upstream, relative in (selections[0], *(selections[2:] if chrome else ())):
             _copy_resource_tree(upstream, refs / relative)
@@ -415,11 +454,11 @@ def generate_skill(source, home, release_root, *, chrome=False):
     return generated
 
 
-def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, chrome=False, environ=None):
+def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, chrome=False, setup_command=None, environ=None):
     """Delegate registration and return phase failures."""
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
-    skill_source = generate_skill(source, home, release_root, chrome=chrome)
+    skill_source = generate_skill(source, home, release_root, chrome=chrome, setup_command=setup_command)
     resources = installed_app_resources(release_root)
     original_plugins = resources / 'plugins/openai-bundled'
     cwd = project if scope == 'project' else home
@@ -546,6 +585,9 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
         raise ValueError('Export destination already exists; choose a new directory.')
     if not (source / 'SKILL.md').is_file():
         raise ValueError('Complete LCU skill missing.')
+    policy = host_policy(release_root)
+    # Re-run flags shared by the bootstrap doc and destinationSetup metadata.
+    setup_flags = ('--chrome ' if chrome else '') + ('--audio ' if audio else '')
     # Portable exports carry only LCU-authored bootstrap guidance. The original
     # application and its instruction files are resolved on the target machine.
     files = {'SKILL.md': (source / 'SKILL.md').read_bytes()}
@@ -589,7 +631,7 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
                                  'args': portable_command[1:]}}}
     changes = [Change(destination / 'plugin.json', None, (json.dumps(manifest, indent=2) + '\n').encode()),
                Change(destination / 'mcp.json', None, (json.dumps(mcp, indent=2) + '\n').encode()),
-               Change(destination / 'host-contract.json', None, (json.dumps(host_policy(release_root), indent=2) + '\n').encode())]
+               Change(destination / 'host-contract.json', None, (json.dumps(policy, indent=2) + '\n').encode())]
     bootstrap_metadata = {
         'requiresInstalledApplication': True,
         'computerAudioOptIn': ('Enabled in the registered MCP command with --audio. The original optional recording API may require its own approval. A saved audio file does not mean the selected model receives audio. LCU does not add audio-specific instructions.'
@@ -605,7 +647,7 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
                f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome'] if chrome else []),
         ],
         'destinationSetup': ('Install the matching thin LCU archive and selected application, then run '
-                             'lcu setup --export /new/path ' + ('--chrome ' if chrome else '') + ('--audio ' if audio else '')
+                             'lcu setup --export /new/path ' + setup_flags
                              + '--yes on the destination account. Import the newly generated export and its local full skill.'),
         'runtimePrefix': 'Set LCU_PREFIX for a nondefault destination prefix: /opt/lcu on Linux, $HOME/.local/share/lcu on macOS.',
         'sessionMode': 'Linux defaults to XFCE discovery; set LCU_SESSION_MODE=direct inside its desktop session. macOS defaults to direct.',
@@ -613,7 +655,6 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
     }
     changes.append(Change(destination / 'lcu-bootstrap.json', None,
                           (json.dumps(bootstrap_metadata, indent=2) + '\n').encode()))
-    policy = host_policy(release_root)
     codex = {'mcpServers': {'lcu': {**policy, 'command': portable_codex_command[0],
                                    'args': portable_codex_command[1:]}}}
     changes.append(Change(destination / 'codex.mcp.json', None, (json.dumps(codex, indent=2) + '\n').encode()))
@@ -624,7 +665,7 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
                 for name, data in export_files(portable_codex_command, original_plugins).items()]
     bootstrap = ("# LCU skill bootstrap\n\n"
                  "Install LCU and its selected application on this machine, then run "
-                 "`lcu setup --export /new/path " + ("--chrome " if chrome else "") + "--yes` here and import that new export. "
+                 "`lcu setup --export /new/path " + setup_flags + "--yes` here and import that new export. "
                  "Use the generated local full skill before the first computer-use call.\n")
     files['SKILL.md'] = bootstrap.encode()
     changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
@@ -645,7 +686,9 @@ def parser():
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
     p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
     p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
+    p.add_argument('--no-chrome', action='store_true', help='Disable Chrome control, overriding a saved opt-in')
     p.add_argument('--audio', action='store_true', help='Opt into the original optional computer-audio recording API')
+    p.add_argument('--no-audio', action='store_true', help='Disable computer-audio recording, overriding a saved opt-in')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true',
@@ -657,6 +700,10 @@ def parser():
 def validate(args):
     if args.browser_host:
         raise ValueError('--browser-host was removed; use `lcu setup --agent AGENT --chrome` for external Chrome. Embedded in-app browser hosting is not supported.')
+    if args.chrome and args.no_chrome:
+        raise ValueError('Use either --chrome or --no-chrome, not both.')
+    if args.audio and args.no_audio:
+        raise ValueError('Use either --audio or --no-audio, not both.')
     prefix = args.prefix
     if not prefix.is_absolute() or len(prefix.parts) < 3 or '..' in prefix.parts or any(ord(c) < 32 for c in str(prefix)):
         raise ValueError('Use a dedicated absolute prefix, such as /opt/lcu.')
@@ -707,8 +754,16 @@ def validate(args):
     return account, names
 
 
+# Native harness plugins are profile-scoped; project scope is unsupported.
+USER_ONLY_AGENTS = frozenset({'omp', 'hermes'})
+
+
+def agent_scopes(name):
+    return 'user' if name in USER_ONLY_AGENTS else 'user, project'
+
+
 def validate_agent_scope(names, scope):
-    if scope == 'project' and {'omp', 'hermes'} & set(names):
+    if scope == 'project' and USER_ONLY_AGENTS & set(names):
         raise ValueError('Oh My Pi and Hermes native plugins are profile-scoped. Use --scope user with the intended profile; project scope is not supported.')
 
 
@@ -753,9 +808,8 @@ def desktop_readiness_request(args, *, interactive, desktop_command):
     doctor = [*desktop_command, 'doctor']
     if mode == 'required':
         return mode, [*doctor, '--non-interactive', '--require-ready'], 50
-    if mode == 'guided':
-        # A person may need as long as they like to read settings guidance.
-        return mode, doctor, None
+    # Guided and deferred both run the plain doctor without a bounded timeout;
+    # a person may need as long as they like to read settings guidance.
     return mode, doctor, None
 
 
@@ -774,7 +828,7 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.list_agents:
         for name, client in CLIENTS.items():
-            print(f'{name:16} {client.label} (user, project)')
+            print(f'{name:16} {client.label} ({agent_scopes(name)})')
         print('Custom clients: --export /absolute/new/plugin-directory')
         return
     try:
@@ -827,10 +881,32 @@ def main(argv=None):
         if not args.export:
             installer_environment(home, names)
             installer_paths(tools_root)
+        setup_command = str(runtime)
         with setup_lock(home):
-            if not args.yes and not args.chrome and sys.stdin.isatty():
-                args.chrome = input('Enable Chrome browser control and its extension connector? [y/N] ').strip().lower() in ('y', 'yes')
-            runtime_flags = (['--chrome'] if args.chrome else []) + (['--audio'] if args.audio else [])
+            state = load_setup_state(home)
+            # Explicit flags win; otherwise a saved opt-in is kept.
+            if args.audio:
+                audio = True
+            elif args.no_audio:
+                audio = False
+            elif state['audio']:
+                audio = True
+                print('Keeping computer-audio recording enabled from the previous setup (use --no-audio to disable).')
+            else:
+                audio = False
+            if args.chrome:
+                chrome = True
+            elif args.no_chrome:
+                chrome = False
+            elif state['chrome']:
+                chrome = True
+                print('Keeping Chrome control enabled from the previous setup (use --no-chrome to disable).')
+            elif not args.yes and sys.stdin.isatty():
+                chrome = input('Enable Chrome browser control and its extension connector? [y/N] ').strip().lower() in ('y', 'yes')
+            else:
+                chrome = False
+            args.chrome, args.audio = chrome, audio
+            runtime_flags = (['--chrome'] if chrome else []) + (['--audio'] if audio else [])
             command = [*desktop_command, *runtime_flags]
             if args.export:
                 print(f'Export tools and skill to {args.export}')
@@ -860,25 +936,26 @@ def main(argv=None):
                 from .browser import install as install_browser_host
                 install_browser_host(release_root)
             if args.export:
-                local_skill = generate_skill(source, home, release_root, chrome=args.chrome)
-                export_bundle(args.export, source, command, release_root, chrome=args.chrome, audio=args.audio)
+                local_skill = generate_skill(source, home, release_root, chrome=chrome, setup_command=setup_command)
+                export_bundle(args.export, source, command, release_root, chrome=chrome, audio=audio)
                 print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
             else:
                 failures = configure(names, home, source, command, tools_root, release_root,
-                                     scope=args.scope, project=args.project, chrome=args.chrome)
+                                     scope=args.scope, project=args.project, chrome=chrome,
+                                     setup_command=setup_command)
                 if failures:
                     retry = [*direct_runtime, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
                     if args.project:
                         retry += ['--project', str(args.project)]
-                    if args.chrome:
-                        retry += ['--chrome']
-                    if args.audio:
-                        retry += ['--audio']
+                    retry += ['--chrome'] if chrome else ['--no-chrome']
+                    retry += ['--audio'] if audio else ['--no-audio']
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
+            # Remember opt-ins only after successful registration or export.
+            save_setup_state(home, chrome=chrome, audio=audio)
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.chrome:
             try:
@@ -891,9 +968,9 @@ def main(argv=None):
             except (OSError, subprocess.SubprocessError):
                 print('Browser status unavailable; run `lcu browser status` after setup.')
         else:
-            print('Chrome browser control not enabled; add it later with `lcu setup --agent AGENT --chrome`.')
+            print(f'Chrome browser control not enabled; add it later with `{setup_command} setup --agent AGENT --chrome`; other saved opt-ins are kept.')
         if not args.audio:
-            print('Computer-audio recording not enabled; add it later with `lcu setup --agent AGENT --audio`.')
+            print(f'Computer-audio recording not enabled; add it later with `{setup_command} setup --agent AGENT --audio`; other saved opt-ins are kept.')
         if args.export:
             print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
         mode, doctor, doctor_timeout = desktop_readiness_request(
