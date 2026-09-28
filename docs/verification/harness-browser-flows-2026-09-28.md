@@ -1,6 +1,6 @@
 # Harness browser flows, 2026-09-28
 
-These tests run the actual harness UI on macOS against an isolated Linux ARM64 browser desktop. They do not prove macOS native desktop control. The task-owned macOS guest is locked at its login screen; its new OMP/Hermes native tests remain pending.
+These tests run the actual harness UI on macOS against an isolated Linux ARM64 browser desktop. They do not prove macOS native desktop control. The task-owned macOS guest was unlocked on 2026-09-28 using its existing saved credential; its new OMP/Hermes native tests remain pending. The [reusable guest access procedure](macos-test-guest-access.md) records the verified login method.
 
 The disposable containers have no network, personal home, credentials, or host desktop mounts. They run official Chrome 154.0.8037.57 with the original extension 1.26.901.11451. A verified LCU 0.4.1 archive was installed offline into a fresh prefix, reusing the image's already-installed OpenAI app 26.915.31945 and original CUA runtime 0.0.16/20260915001755-492f19756c31. Chrome retains its sandbox. A host-loopback proxy provides bounded access to `glm-5.3-flash`; the provider credential remains in the host proxy and is never copied into the harness profiles or containers.
 
@@ -20,7 +20,7 @@ Official Hermes [v2026.9.24](https://github.com/NousResearch/hermes-agent/releas
 
 `tests/hermes_browser_live.py` uses fresh `HOME` and `HERMES_HOME`, the native plugin installer, the original MCP bridge, and the same local model proxy. A narrow observer in the disposable plugin copy records the successful cleanup response without replacing its execution or result handling. The browser action and tab-cleanup checks use independent container oracles. Private evidence is `/private/tmp/lcu-harness-full-20260928/hermes-browser-evidence.json`.
 
-Hermes' separate [seven-case approval TUI matrix](hermes-harness-2026-09-28.md) uses the newer `--tui` interface and a generated MCP fixture. It checks the exact once/session/always responses, explicit denial, timeout cancellation, a session-only request, and Ctrl+C denial. The CLI and newer TUI render different menus; the tests drive each actual interface. These results verify scope selection and transport, not persistence in the locked macOS guest.
+Hermes' separate [seven-case approval TUI matrix](hermes-harness-2026-09-28.md) uses the newer `--tui` interface and a generated MCP fixture. It checks the exact once/session/always responses, explicit denial, timeout cancellation, a session-only request, and Ctrl+C denial. The CLI and newer TUI render different menus; the tests drive each actual interface. These results verify scope selection and transport, not persistence in the original macOS runtime.
 
 ## Clean-source regression
 
@@ -28,4 +28,4 @@ The final source snapshot at commit `31fb398` passed `tests/run.sh linux/arm64` 
 
 Hermes repeated the browser flow from that clean snapshot and saved exact marker `hermes-browser-8545781ca719`. The actual origin selector appeared, `Stop` completed, and Chrome contained only two `about:blank` pages before process termination. Private evidence is `/private/tmp/lcu-harness-full-20260928/hermes-browser-clean-evidence.json`. The adapter source hash is `725896c2f0b5c193097c53a59745c035c48501f6e72637020250cf48b7c19452`. The final archive is `/private/tmp/lcu-harness-full-20260928/final-source/.verification/arm64.lRXwKC/lcu-0.4.1-linux-arm64.tar.gz`.
 
-macOS native actions and original-runtime session/permanent grant reuse through these two harnesses remain unverified. The existing disposable guest is running but locked as “LCU Verification Admin.” Neither browser containers nor generated MCP approval requests are substitutes for that native test.
+macOS native actions and original-runtime session/permanent grant reuse through these two harnesses remain unverified. The existing disposable guest is now accessible as “LCU Verification Admin”; the access problem is resolved. Neither browser containers nor generated MCP approval requests are substitutes for that native test.
