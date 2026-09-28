@@ -164,7 +164,7 @@ def _open_settings(url: str, label: str) -> None:
         print(f'Open it manually: {label}')
 
 
-def _mac_guidance(app: Path, retry) -> bool:
+def _mac_guidance(app: Path, retry) -> None:
     _mac_instructions(app)
     print('\nChoose a settings pane, retry the installed-runtime check, or finish:')
     print('  [a] Open Accessibility settings')
@@ -195,7 +195,6 @@ def _mac_guidance(app: Path, retry) -> bool:
             print('Choose a, s, r, or press Enter to finish.')
     print('Next: reconnect your agent, open a harmless window such as a blank TextEdit document, and ask it')
     print('to inspect that window with LCU and return a screenshot. Approve the original app request and macOS prompts.')
-    return False
 
 
 def _print_mac_status(probe: dict) -> bool:
@@ -205,7 +204,7 @@ def _print_mac_status(probe: dict) -> bool:
     else:
         print(f'Original Mac provider check failed. {_failure_text(provider)}')
     print('macOS privacy permissions: not verified by LCU.')
-    return False
+    return bool(provider.get('ok'))
 
 
 def _print_linux_status(probe: dict) -> bool:
@@ -309,13 +308,16 @@ def main(root: Path, argv=None, *, resolved=None, env=None) -> int:
             return 2
         return 0
     if target == 'mac':
-        _print_mac_status(probe)
+        provider_ok = _print_mac_status(probe)
         if interactive:
             _mac_guidance(app, lambda: _probe(runtime, env, target))
+        else:
+            _mac_instructions(app)
+            print('Next: reconnect your agent and make the first approved LCU screenshot call to verify access.')
+        if args.require_ready:
+            print('macOS permission grants cannot be verified by this check; readiness stays unconfirmed.')
             return 2
-        _mac_instructions(app)
-        print('Next: reconnect your agent and make the first approved LCU screenshot call to verify access.')
-        return 2
+        return 0 if provider_ok else 2
     provider = probe.get('provider') or {}
     print(f'Original desktop provider: could not verify. {_failure_text(provider)}')
     return 2

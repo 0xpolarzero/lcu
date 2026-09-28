@@ -63,7 +63,7 @@ class DoctorTests(unittest.TestCase):
              patch('lcu.doctor._open_settings') as open_settings, \
              patch('sys.stdout', output):
             status = doctor.main(self.root, [], resolved=self.resolved, env=self.env)
-        self.assertEqual(status, 2)
+        self.assertEqual(status, 0)
         self.assertIn('macOS privacy permissions: not verified by LCU.', output.getvalue())
         self.assertIn('Selected Computer Use', output.getvalue())
         self.assertIn('Selected ChatGPT', output.getvalue())
@@ -76,7 +76,7 @@ class DoctorTests(unittest.TestCase):
              patch('lcu.doctor._open_settings') as open_settings, \
              patch('sys.stdout', io.StringIO()):
             status = doctor.main(self.root, [], resolved=self.resolved, env=self.env)
-        self.assertEqual(status, 2)
+        self.assertEqual(status, 0)
         open_settings.assert_called_once_with(
             doctor.MAC_ACCESSIBILITY_SETTINGS,
             'System Settings > Privacy & Security > Accessibility')
@@ -91,6 +91,19 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(status, 2)
         open_settings.assert_not_called()
 
+    def test_mac_plain_check_fails_when_provider_did_not_load(self):
+        broken = {'target': 'mac', 'provider': {'ok': False,
+                  'error': {'message': 'sky service unavailable'}},
+                  'permissions': {'ok': False, 'unverified': True}}
+        output = io.StringIO()
+        with patch('lcu.doctor._probe', return_value=broken), \
+             patch('lcu.doctor.sys.stdin', io.StringIO()), \
+             patch('sys.stdout', output):
+            status = doctor.main(self.root, ['--non-interactive'],
+                                 resolved=self.resolved, env=self.env)
+        self.assertEqual(status, 2)
+        self.assertIn('Original Mac provider check failed.', output.getvalue())
+
     def test_noninteractive_mac_prints_actionable_guidance_without_opening_settings(self):
         output = io.StringIO()
         with patch('lcu.doctor._probe', return_value=self._mac_probe()), \
@@ -99,7 +112,7 @@ class DoctorTests(unittest.TestCase):
              patch('sys.stdout', output):
             status = doctor.main(self.root, ['--non-interactive'],
                                  resolved=self.resolved, env=self.env)
-        self.assertEqual(status, 2)
+        self.assertEqual(status, 0)
         self.assertIn('System Settings > Privacy & Security', output.getvalue())
         self.assertIn('reconnect your agent', output.getvalue())
         open_settings.assert_not_called()
