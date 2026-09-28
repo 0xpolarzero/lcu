@@ -7,3 +7,5 @@ Runtime changes require documented official-source evidence and real desktop int
 Run `tests/run.sh` in disposable containers. Unit tests alone cannot prove desktop behavior. Preserve caller sandbox and approval settings. Never test against the user's personal desktop or copy agent credentials into fixtures.
 
 Keep the installer compatible with the documented Luda-style options. Prefer upstream agent installers to new configuration adapters. Keep generated release archives in dist/ and out of Git. Test offline installation with the app already installed locally; development tests may prepare a verified package fixture before invoking LCU, then run setup with acquisition network access disabled. Browser/model services can still require network during use. Do not claim browser actions from discovery or an expected authentication failure.
+
+For the task-owned macOS verification guest, follow [`docs/verification/macos-test-guest-access.md`](docs/verification/macos-test-guest-access.md). Consult `.verification/private/README.md` before asking the user for guest credentials; keep the credential private.
