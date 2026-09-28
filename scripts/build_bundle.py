@@ -27,17 +27,17 @@ SHIPPED_DOCS = ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
 _LINK = re.compile(r'\]\(([^)]+)\)')
 
 
-def linked_verification_records(source):
-    """Verification records reachable by relative .md links from the shipped docs.
+def linked_docs(source):
+    """Documents under docs/ reachable by relative .md links from the shipped docs.
 
-    Shipping only the transitive closure keeps every relative verification link
-    in the archive resolvable while dropping records nothing links to.
+    Shipping only the transitive closure keeps every relative document link in
+    the archive resolvable while dropping records nothing links to.
     """
     source = Path(source)
-    verification = (source / 'docs/verification').resolve()
+    docs = (source / 'docs').resolve()
     roots = [source / 'README.md', source / 'skills/lcu/SKILL.md',
              *(source / 'docs' / name for name in SHIPPED_DOCS)]
-    seen, records, stack = set(), set(), [path.resolve() for path in roots]
+    seen, linked, stack = set(), set(), [path.resolve() for path in roots]
     while stack:
         path = stack.pop()
         if path in seen or not path.is_file():
@@ -48,10 +48,15 @@ def linked_verification_records(source):
             if not target or '://' in target or target.startswith('mailto:'):
                 continue
             resolved = (path.parent / target).resolve()
-            if resolved.suffix == '.md' and resolved.parent == verification:
-                records.add(resolved)
+            if resolved.suffix == '.md' and resolved.is_relative_to(docs):
+                linked.add(resolved)
                 stack.append(resolved)
-    return records
+    return linked
+
+
+def linked_verification_records(source):
+    verification = (Path(source) / 'docs/verification').resolve()
+    return {path for path in linked_docs(source) if path.parent == verification}
 
 
 def build(output, package=None, *, target='linux', app=None):
@@ -105,14 +110,15 @@ def build(output, package=None, *, target='linux', app=None):
         (release / 'docs').mkdir()
         for filename in SHIPPED_DOCS:
             shutil.copy2(SOURCE / 'docs' / filename, release / 'docs' / filename)
-        verification = release / 'docs/verification'
-        verification.mkdir()
-        # Ship only records the shipped docs link to (transitively), so every
-        # relative verification link resolves without carrying unlinked records.
-        for record in sorted(linked_verification_records(SOURCE)):
-            if record.is_symlink():
-                raise ValueError(f'Verification document cannot be a symlink: {record}')
-            shutil.copy2(record, verification / record.name)
+        # Ship only documents the shipped docs link to (transitively), so every
+        # relative document link resolves without carrying unlinked records.
+        docs = (SOURCE / 'docs').resolve()
+        for document in sorted(linked_docs(SOURCE)):
+            if document.is_symlink():
+                raise ValueError(f'Linked document cannot be a symlink: {document}')
+            shipped = release / 'docs' / document.relative_to(docs)
+            shipped.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(document, shipped)
         (release / 'skills/lcu').mkdir(parents=True)
         shutil.copy2(SOURCE / 'skills/lcu/SKILL.md', release / 'skills/lcu/SKILL.md')
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):

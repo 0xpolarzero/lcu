@@ -85,7 +85,7 @@ class BuildPlatformTests(unittest.TestCase):
                 manifest = json.load(bundle.extractfile(f'lcu-{VERSION}-linux-x64/bundle.json'))
                 self.assertEqual((manifest['platform'], manifest['architecture']), ('linux', 'x64'))
 
-    def test_shipped_verification_links_resolve_inside_the_release(self):
+    def test_shipped_document_links_resolve_inside_the_release(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with mock.patch.object(build_bundle, 'architecture', return_value='x64'), \
@@ -95,20 +95,17 @@ class BuildPlatformTests(unittest.TestCase):
             with _tarfile.open(archive) as bundle:
                 bundle.extractall(extracted, filter='data')
             release = extracted / f'lcu-{VERSION}-linux-x64'
-            verification = (release / 'docs/verification').resolve()
             link = re.compile(r'\]\(([^)]+)\)')
             checked = 0
-            for path in release.rglob('*.md'):
+            for path in [release / 'README.md', *(release / 'docs').rglob('*.md')]:
                 for match in link.finditer(path.read_text()):
                     target = match.group(1).split('#', 1)[0].strip()
                     if not target or '://' in target or target.startswith('mailto:'):
                         continue
                     resolved = (path.parent / target).resolve()
-                    # Every relative link into the shipped verification set must
-                    # resolve; the closure guarantees no dangling record link.
-                    if resolved.suffix == '.md' and resolved.parent == verification:
-                        self.assertTrue(resolved.is_file(),
-                                        f'dangling verification link {target} in {path}')
+                    # The closure guarantees no dangling relative document link.
+                    if resolved.suffix == '.md':
+                        self.assertTrue(resolved.is_file(), f'dangling document link {target} in {path}')
                         checked += 1
             self.assertGreater(checked, 0)
 
