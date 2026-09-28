@@ -227,9 +227,9 @@ There is no uninstall command; remove the registrations LCU created, then delete
 1. Remove each harness registration you added:
    - **Codex CLI:** remove the `lcu` MCP server (`codex mcp remove lcu`) and delete the LCU hook entries from `~/.codex/config.toml`.
    - **Claude Code:** remove the `lcu` MCP server (`claude mcp remove lcu`) and delete the LCU hooks and `mcp__lcu__*` permissions from `~/.claude/settings.json` (project scope: `.claude/settings.local.json`).
-   - **Pi:** remove the LCU extension that setup registered from `~/.local/share/lcu/pi/extension.mjs` (verify the exact command for your Pi version), then delete `~/.local/share/lcu/pi`.
-   - **Oh My Pi:** `omp plugin unlink` the linked LCU package (staged under `~/.local/share/lcu/omp`).
-   - **Hermes:** `hermes plugins disable lcu-cua`, then remove `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`.
+   - **Pi:** `pi remove "$HOME/.local/share/lcu/pi/extension.mjs"` (add `-l` in the project for project scope), then delete `~/.local/share/lcu/pi`.
+   - **Oh My Pi:** `omp plugin uninstall lcu-computer-use` (the linked package is staged under `~/.local/share/lcu/omp`).
+   - **Hermes:** `hermes plugins remove lcu-cua`; if `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua` remains, delete it.
 2. Remove the LCU skill copies the skill installer placed in each harness's skill location, and the generated references under `~/.local/share/lcu/skills`.
 3. If you ran `lcu browser install`, remove the LCU Chrome native-host manifest (`com.openai.codexextension.json`) from your Chrome profile's `NativeMessagingHosts` directory, along with the relay copy under `~/.local/share/lcu/browser` (macOS: `~/Library/Application Support/lcu/browser`).
 4. Delete the prefix (`/opt/lcu` or `~/.local/share/lcu`), `~/.local/share/lcu/skills`, and the saved opt-ins at `~/.local/state/lcu`.
