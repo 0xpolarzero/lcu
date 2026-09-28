@@ -220,6 +220,22 @@ Reclaim that space with `lcu prune [--keep N] [--yes]`. It removes old LCU relea
 
 The installer accepts the legacy positional prefix. --offline prohibits installation network calls and requires preinstalled system libraries with --skip-system; model and browser services can still need network during use. --yes confirms a selected noninteractive setup. See --help for the complete option list and [verification](VERIFICATION.md) for exact tested outcomes.
 
+## Uninstall
+
+There is no uninstall command; remove the registrations LCU created, then delete its files. Do this for the desktop account that ran setup.
+
+1. Remove each harness registration you added:
+   - **Codex CLI:** remove the `lcu` MCP server (`codex mcp remove lcu`) and delete the LCU hook entries from `~/.codex/config.toml`.
+   - **Claude Code:** remove the `lcu` MCP server (`claude mcp remove lcu`) and delete the LCU hooks and `mcp__lcu__*` permissions from `~/.claude/settings.json` (project scope: `.claude/settings.local.json`).
+   - **Pi:** remove the LCU extension that setup registered from `~/.local/share/lcu/pi/extension.mjs` (verify the exact command for your Pi version), then delete `~/.local/share/lcu/pi`.
+   - **Oh My Pi:** `omp plugin unlink` the linked LCU package (staged under `~/.local/share/lcu/omp`).
+   - **Hermes:** `hermes plugins disable lcu-cua`, then remove `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`.
+2. Remove the LCU skill copies the skill installer placed in each harness's skill location, and the generated references under `~/.local/share/lcu/skills`.
+3. If you ran `lcu browser install`, remove the LCU Chrome native-host manifest (`com.openai.codexextension.json`) from your Chrome profile's `NativeMessagingHosts` directory, along with the relay copy under `~/.local/share/lcu/browser` (macOS: `~/Library/Application Support/lcu/browser`).
+4. Delete the prefix (`/opt/lcu` or `~/.local/share/lcu`), `~/.local/share/lcu/skills`, and the saved opt-ins at `~/.local/state/lcu`.
+
+LCU never modified the ChatGPT/Codex app, so nothing there needs undoing.
+
 ## Windows 11 x64 candidate (deferred from this delivery)
 
 Windows is deferred from the current LCU delivery. The candidate requires the official `OpenAI.Codex` Store app to already be installed and registered for the current Windows account; LCU does not download or install it. It targets Windows 11 x64 and validates the registered package identity, publisher, Store signature, architecture, and required host layout. Install Python 3.12 or newer, then extract the matching thin Windows ZIP and run from its extracted release directory in PowerShell:
