@@ -1,5 +1,7 @@
 # LCU: pinned installed-app runtime and external-browser migration
 
+> **Historical planning record (2026-09). Superseded by [AGENTS.md](../AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** In particular, the app-download scope described below was retired: LCU never downloads or installs the ChatGPT/Codex app and reuses the locally installed app. `.verification/...` paths cited in these records are private local evidence and are not in the repository.
+
 This is an implementation handoff. Execute the work, validate the result, and leave a clean, usable library. Do not stop after an audit or a prototype. Keep the scope below fixed. Where a genuine dependency prevents completion, report its exact failing operation and required input; do not call discovery, matching files, or a matching failure successful browser operation.
 
 ## 1. Objective and agreed boundaries

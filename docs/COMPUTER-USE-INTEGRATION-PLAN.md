@@ -1,5 +1,7 @@
 # Headless computer-use integration status
 
+> **Historical planning record (2026-09-28). Superseded by [AGENTS.md](../AGENTS.md) and [docs/INSTALLATION.md](INSTALLATION.md); do not follow its instructions.** The `.verification/...` paths cited below are private local evidence and are not in the repository.
+
 Updated 2026-09-28 after guest recovery, macOS audio acceptance, and the live
 browser-tab picker check. The
 sections below distinguish proven behavior from remaining live integration
