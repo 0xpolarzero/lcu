@@ -93,6 +93,8 @@ class InstalledInstructionTests(unittest.TestCase):
             ([{'name': 'lcu', 'path': str(installed)}],
              'description: Read and operate Linux desktop windows using the LCU MCP computer-use tools.', 'removed'),
             ([{'name': 'lcu', 'path': str(installed)}], 'description: Someone else\'s unrelated skill.', 'kept'),
+            ([{'name': 'lcu', 'path': str(installed)}],
+             'description: My notes. See the original Codex computer-use runtime docs.\nname: other', 'kept'),
         )
         for listing, text, expected in cases:
             with self.subTest(expected=expected, text=text):

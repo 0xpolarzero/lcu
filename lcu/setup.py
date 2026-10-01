@@ -374,7 +374,10 @@ def remove_old_skill(node, skills, cwd, env, global_args):
         return 'none'
     skill = Path(str(entry.get('path', ''))) / 'SKILL.md'
     text = skill.read_text(errors='replace') if skill.is_file() else ''
-    if not any(marker in text for marker in OLD_SKILL_MARKERS):
+    frontmatter = text.split('---', 2)[1] if text.startswith('---') and text.count('---') >= 2 else ''
+    fields = dict(line.split(':', 1) for line in frontmatter.splitlines() if ':' in line)
+    if (fields.get('name', '').strip() != 'lcu'
+            or not any(marker in fields.get('description', '') for marker in OLD_SKILL_MARKERS)):
         return 'kept'
     installer('remove', 'lcu', '--yes')
     return 'removed'

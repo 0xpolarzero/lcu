@@ -1,8 +1,7 @@
 """Run latest OMP through the original LCU Chrome provider in an isolated container.
 
 This opt-in acceptance runner requires a loopback-only model proxy, the isolated
-Chrome fixture container started by harness_browser_session.sh, and its exported
-LCU skill. It drives OMP's real TUI and accepts only the one-time local-origin
+Chrome fixture container started by harness_browser_session.sh. It drives OMP's real TUI and accepts only the one-time local-origin
 approval selector. Evidence belongs outside the repository because OMP output
 can contain the original runtime instructions.
 """

@@ -1,13 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const required = ['PI_CLI_JS', 'LCU_TEST_PROJECT', 'LCU_TEST_EXTENSION', 'LCU_TEST_SKILL',
-  'LCU_TEST_WINDOW_TITLE'];
+const required = ['PI_CLI_JS', 'LCU_TEST_PROJECT', 'LCU_TEST_EXTENSION', 'LCU_TEST_WINDOW_TITLE'];
 const configured = required.every(name => process.env[name]);
 
 function chunk(model, delta, finishReason = null) {
@@ -28,12 +27,11 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
   { skip: !configured, timeout: 90_000 }, async () => {
     const project = process.env.LCU_TEST_PROJECT;
     const extension = process.env.LCU_TEST_EXTENSION;
-    const skill = process.env.LCU_TEST_SKILL;
-    const installedSkill = join(project, '.pi', 'skills', 'lcu', 'SKILL.md');
-    for (const path of [process.env.PI_CLI_JS, extension, skill, installedSkill]) {
+    for (const path of [process.env.PI_CLI_JS, extension]) {
       assert.ok(existsSync(path), `Missing installed test input: ${path}`);
     }
-    assert.match(readFileSync(installedSkill, 'utf8'), /Control Windows desktop windows/);
+    // Like official Codex computer use, LCU registers no skill.
+    assert.ok(!existsSync(join(project, '.pi', 'skills', 'lcu')), 'An LCU skill is still registered');
     const directory = mkdtempSync(join(tmpdir(), 'lcu-pi-windows-'));
     const agentDir = join(directory, 'agent');
     mkdirSync(agentDir);
@@ -111,7 +109,7 @@ test('registered Windows Pi extension uses original CUA with a scripted local pr
       const finalMessages = JSON.stringify(requests[4].messages);
       assert.match(finalMessages, new RegExp(`LCU_WINDOW_ID=\\d+;TITLE=${expectedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
         `Original native result omitted the task-owned window ${expectedTitle}`);
-      console.log('Pi project-registered Windows extension: original guide, skill, four CUA calls, native window ID/title verified.');
+      console.log('Pi project-registered Windows extension: original guide, no skill, four CUA calls, native window ID/title verified.');
       console.log('Print-mode output does not independently establish host-only turn_ended dispatch; adapter regression covers that separately.');
     } finally {
       await new Promise(resolve => server.close(resolve));

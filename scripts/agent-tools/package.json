@@ -2,7 +2,7 @@
   "name": "lcu-agent-installers",
   "version": "1.0.0",
   "private": true,
-  "description": "Upstream installers for registering LCU tools and skills in coding agents.",
+  "description": "Upstream installers for registering LCU tools in coding agents and removing the skill earlier LCU versions registered.",
   "license": "MIT",
   "repository": {
     "type": "git",
