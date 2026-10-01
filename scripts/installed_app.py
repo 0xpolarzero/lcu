@@ -51,7 +51,8 @@ def select(arch, *, existing_app=None, account=None, execute=True):
     existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
     if not existing_app.is_dir():
         raise ValueError(app_prerequisite_message(existing_app, alternate_location=True))
-    selected = resolve_installed_linux_app(existing_app, arch=arch)
+    selected = resolve_installed_linux_app(
+        existing_app, arch=arch, trusted_uids={account.pw_uid} if account is not None else None)
     if execute:
         _run_as([str(selected.runtime / 'bin/node'), '--version'], account, check=True,
                 capture_output=True, text=True, timeout=20)

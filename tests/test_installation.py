@@ -1,5 +1,6 @@
 import io
 import os
+import shutil
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -212,6 +213,53 @@ class InstallationTests(unittest.TestCase):
         app = _application_fixture(self.root / 'chatgpt', arch='x64')
         with self.assertRaisesRegex(ValueError, 'unsupported platform, architecture'):
             resolve_installed_linux_app(app, arch='arm64')
+
+    def test_app_tree_writable_by_other_accounts_is_rejected(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        resolve_installed_linux_app(app, arch='arm64')
+        directory = app / 'resources/cua_node/bin'
+        directory.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'not in a location only root and this account'):
+            resolve_installed_linux_app(app, arch='arm64')
+        directory.chmod(0o755)
+        (app / 'resources/cua_node/bin/node').chmod(0o757)
+        with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_app_tree_owned_by_another_account_is_rejected_unless_trusted(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        other = os.getuid()
+        with patch('lcu.platforms.os.getuid', return_value=other + 1), \
+             patch('lcu.platforms.os.geteuid', return_value=other + 1):
+            with self.assertRaisesRegex(ValueError, f'owned by uid {other}'):
+                resolve_installed_linux_app(app, arch='arm64')
+            self.assertEqual(resolve_installed_linux_app(app, arch='arm64', trusted_uids={other}).app,
+                             app.resolve())
+
+    def test_writable_ancestor_directory_is_rejected_but_sticky_is_allowed(self):
+        app = _application_fixture(self.root / 'shared/chatgpt')
+        (self.root / 'shared').chmod(0o775)  # group access is trusted only for gid 0
+        with self.assertRaisesRegex(ValueError, 'shared is writable'):
+            resolve_installed_linux_app(app, arch='arm64')
+        (self.root / 'shared').chmod(0o1777)
+        resolve_installed_linux_app(app, arch='arm64')
+
+    def test_runtime_path_that_escapes_the_app_tree_is_rejected(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        outside = _application_fixture(self.root / 'elsewhere')
+        shutil.rmtree(app / 'resources/cua_node/bin')
+        (app / 'resources/cua_node/bin').symlink_to(outside / 'resources/cua_node/bin',
+                                                    target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'outside the application'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_read_only_mount_owned_by_another_account_passes(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        app.chmod(0o777)
+        with patch('lcu.platforms.os.getuid', return_value=os.getuid() + 1), \
+             patch('lcu.platforms.os.geteuid', return_value=os.getuid() + 1), \
+             patch('lcu.platforms._read_only_mount', return_value=True):
+            self.assertEqual(resolve_installed_linux_app(app, arch='arm64').app, app.resolve())
 
     def test_install_links_the_installed_app_without_copying_it(self):
         prefix = self.root / 'lcu'

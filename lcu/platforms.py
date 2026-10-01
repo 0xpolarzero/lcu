@@ -9,6 +9,7 @@ from pathlib import Path
 import platform as host_platform
 import plistlib
 import re
+import stat
 import subprocess
 
 from .app_layout import locate_codex_tools
@@ -154,7 +155,73 @@ def _linux_version(app: Path, arch: str) -> str:
     raise ValueError('Cannot determine the selected app version from app.asar or its dpkg-owned path')
 
 
-def resolve_installed_linux_app(app_path: Path, *, arch: str) -> InstalledApplication:
+def _within(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _untrusted_entry(path: Path, info: os.stat_result, trusted: set[int]) -> str | None:
+    """Why this entry lets another account change what the desktop account executes."""
+    if info.st_uid not in trusted:
+        return f'owned by uid {info.st_uid}'
+    writable = info.st_mode & stat.S_IWOTH or (info.st_mode & stat.S_IWGRP and info.st_gid != 0)
+    if writable and not (stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX):
+        # A sticky directory (like /tmp) only lets accounts add entries; they cannot
+        # replace ones owned by someone else.
+        return 'writable by group or other accounts'
+    return None
+
+
+def _read_only_mount(path: Path) -> bool:
+    try:
+        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
+    except OSError:
+        return False
+
+
+def _check_trusted_tree(app: Path, runtime: Path, files: tuple[Path, ...], trusted: set[int]) -> None:
+    """Refuse a tree where accounts other than root and the desktop account could replace code.
+
+    Covers the executables and modules the runtime launches, every directory above them up to
+    `/`, and the CUA runtime tree. Content on a read-only mount is not writable by anyone.
+    """
+    problems = []
+    checked = set()
+
+    def check(path: Path, info=None):
+        if path in checked:
+            return
+        checked.add(path)
+        info = info or path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            real = path.resolve()
+            if not _within(real, app):
+                problems.append(f'{path} links outside the application ({real})')
+            return
+        if _read_only_mount(path):
+            return
+        reason = _untrusted_entry(path, info, trusted)
+        if reason:
+            problems.append(f'{path} is {reason}')
+
+    for path in files:
+        real = path.resolve(strict=True)
+        if not _within(real, app):
+            problems.append(f'{path} resolves outside the application ({real})')
+            continue
+        for candidate in (real, *real.parents):
+            check(candidate)
+    for directory, directories, names in os.walk(runtime):
+        for name in (*directories, *names):
+            check(Path(directory) / name)
+    if problems:
+        shown = '; '.join(problems[:3]) + (f'; and {len(problems) - 3} more' if len(problems) > 3 else '')
+        raise ValueError('The application is not in a location only root and this account can change: '
+                         f'{shown}. Install the app with a package manager or make it root-owned and not '
+                         'writable by other accounts')
+
+
+def resolve_installed_linux_app(app_path: Path, *, arch: str,
+                               trusted_uids: set[int] | None = None) -> InstalledApplication:
     """Validate an installed ChatGPT Linux app in place, without copying or modifying it."""
     app = Path(app_path).expanduser()
     if not app.is_dir():
@@ -190,5 +257,9 @@ def resolve_installed_linux_app(app_path: Path, *, arch: str) -> InstalledApplic
                  tools.cli, tools.code_mode_host, extension_host):
         if not os.access(path, os.X_OK):
             raise ValueError(f'Application executable is not executable: {path}')
+    trusted = {0, os.getuid(), os.geteuid()} | set(trusted_uids or ())
+    modules = runtime / 'lib/node_modules'
+    _check_trusted_tree(app, runtime.resolve(strict=True),
+                        (*required, *((modules,) if modules.exists() else ())), trusted)
     return InstalledApplication(app, resources, runtime, 'linux', _linux_version(app, arch), arch,
                                 tools.cli, tools.code_mode_host, runtime_version)
