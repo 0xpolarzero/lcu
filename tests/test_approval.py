@@ -75,9 +75,32 @@ class ClaudeApprovalTests(unittest.TestCase):
         self.assertEqual(self.user.read_bytes(), before)
 
     def test_ask_keeps_other_lcu_tool_rules_and_other_servers(self):
-        self.write(self.user, {'permissions': {'allow': ['mcp__lcu__js', 'mcp__other', 'mcp__lcu']}})
+        self.write(self.user, {'permissions': {'allow': ['mcp__lcu__js', 'mcp__other']}})
+        approval.apply_claude('auto', self.home)
         approval.apply_claude('ask', self.home)
         self.assertEqual(self.read(self.user)['permissions']['allow'], ['mcp__lcu__js', 'mcp__other'])
+
+    def test_ask_keeps_a_rule_the_user_wrote_before_auto(self):
+        original = {'permissions': {'allow': ['Read', 'mcp__lcu']}}
+        self.write(self.user, original)
+        self.assertTrue(approval.apply_claude('auto', self.home).startswith('unchanged'))
+        self.assertIn('kept your own', approval.apply_claude('ask', self.home))
+        self.assertEqual(self.read(self.user), original)
+
+    def test_ask_without_a_record_never_removes_an_identical_rule(self):
+        original = {'permissions': {'allow': ['mcp__lcu']}}
+        self.write(self.user, original)
+        approval.apply_claude('ask', self.home)
+        self.assertEqual(self.read(self.user), original)
+
+    def test_records_are_per_settings_path(self):
+        self.write(self.local, {'permissions': {'allow': ['mcp__lcu']}})
+        approval.apply_claude('auto', self.home)  # user scope: added
+        approval.apply_claude('auto', self.home, project=self.project)  # project: user's own rule
+        approval.apply_claude('ask', self.home, project=self.project)
+        self.assertEqual(self.read(self.local), {'permissions': {'allow': ['mcp__lcu']}})
+        approval.apply_claude('ask', self.home)
+        self.assertEqual(self.read(self.user), {})
 
     def test_host_only_tools_stay_denied_alongside_the_allow_rule(self):
         claude_visibility.install(self.home)
@@ -128,10 +151,15 @@ class FakeOmpConfig:
 
 
 class OmpApprovalTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name).resolve()
+
     def apply(self, mode, fake, env=None):
         with patch('lcu.approval.shutil.which', return_value='/bin/omp'), \
              patch('lcu.approval.subprocess.run', side_effect=fake) as run:
-            outcome = approval.apply_omp(mode, Path('/home/fixture'), env={'PATH': '/bin', **(env or {})})
+            outcome = approval.apply_omp(mode, self.home, env={'PATH': '/bin', **(env or {})})
         self.fake_run = run
         return outcome
 
@@ -152,15 +180,39 @@ class OmpApprovalTests(unittest.TestCase):
         self.assertIn('kept your `js: deny`', outcome)
 
     def test_ask_removes_only_the_allow_entries_it_added(self):
-        fake = FakeOmpConfig({'bash': 'prompt', 'js': 'allow', 'js_reset': 'allow'})
+        fake = FakeOmpConfig({'bash': 'prompt'})
+        self.apply('auto', fake)
         self.apply('ask', fake)
         self.assertEqual(fake.value, {'bash': 'prompt'})
-        fake = FakeOmpConfig({'js': 'deny', 'js_reset': 'allow'})
+        fake = FakeOmpConfig({'js': 'deny'})
+        self.apply('auto', fake)
         self.apply('ask', fake)
         self.assertEqual(fake.value, {'js': 'deny'})
 
-    def test_ask_resets_the_setting_when_nothing_else_remains(self):
+    def test_ask_keeps_preexisting_allow_entries(self):
+        fake = FakeOmpConfig({'js': 'allow', 'bash': 'prompt'})
+        self.apply('auto', fake)
+        self.assertEqual(fake.value, {'js': 'allow', 'js_reset': 'allow', 'bash': 'prompt'})
+        self.apply('ask', fake)
+        self.assertEqual(fake.value, {'js': 'allow', 'bash': 'prompt'})
+        # And with no auto at all, an allow entry is never LCU's to remove.
         fake = FakeOmpConfig({'js': 'allow', 'js_reset': 'allow'})
+        self.apply('ask', fake)
+        self.assertEqual(fake.writes, [])
+
+    def test_omp_records_are_per_profile(self):
+        fake = FakeOmpConfig()
+        self.apply('auto', fake, env={'OMP_PROFILE': 'blue'})
+        other = FakeOmpConfig({'js': 'allow', 'js_reset': 'allow'})
+        self.apply('ask', other, env={'OMP_PROFILE': 'green'})
+        self.assertEqual(other.writes, [])
+        self.apply('ask', fake, env={'OMP_PROFILE': 'blue'})
+        self.assertEqual(fake.value, {})
+
+    def test_ask_resets_the_setting_when_nothing_else_remains(self):
+        fake = FakeOmpConfig()
+        self.apply('auto', fake)
+        fake.calls.clear()
         self.apply('ask', fake)
         self.assertEqual(fake.writes, [['reset', 'tools.approval']])
         self.assertEqual(self.apply('ask', fake), 'unchanged')
@@ -173,12 +225,12 @@ class OmpApprovalTests(unittest.TestCase):
     def test_missing_omp_and_unexpected_output_fail_clearly(self):
         with patch('lcu.approval.shutil.which', return_value=None):
             with self.assertRaisesRegex(ValueError, 'not on the target account PATH'):
-                approval.apply_omp('auto', Path('/h'), env={'PATH': '/bin'})
+                approval.apply_omp('auto', self.home, env={'PATH': '/bin'})
         bad = lambda argv, **kw: subprocess.CompletedProcess(argv, 0, '[]', '')
         with patch('lcu.approval.shutil.which', return_value='/bin/omp'), \
              patch('lcu.approval.subprocess.run', side_effect=bad):
             with self.assertRaisesRegex(ValueError, 'unexpected'):
-                approval.apply_omp('auto', Path('/h'), env={'PATH': '/bin'})
+                approval.apply_omp('auto', self.home, env={'PATH': '/bin'})
 
     @unittest.skipUnless(shutil.which('omp'), 'OMP is not installed')
     def test_real_omp_round_trip_in_an_isolated_profile(self):
@@ -201,10 +253,64 @@ class OmpApprovalTests(unittest.TestCase):
 
 
 class CodexApprovalTests(unittest.TestCase):
-    def test_policy_is_only_present_for_auto(self):
-        self.assertEqual(approval.codex_policy('auto'), {'default_tools_approval_mode': 'approve'})
-        self.assertEqual(approval.codex_policy('ask'), {})
-        self.assertEqual(approval.codex_policy(None), {})
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.home = self.root / 'home'
+        self.project = self.root / 'project'
+        self.home.mkdir()
+        self.project.mkdir()
+        self.config = self.home / '.codex/config.toml'
+
+    def plan(self, mode, scope='user'):
+        return approval.codex_plan(mode, self.home, scope=scope, project=self.project,
+                                   env={'HOME': str(self.home)})
+
+    def write(self, text, path=None):
+        path = path or self.config
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def cycle(self, mode, scope='user'):
+        plan = self.plan(mode, scope)
+        approval.apply(mode, 'codex', self.home, scope=scope, project=self.project,
+                       env={'HOME': str(self.home)}, plan=plan)
+        return plan
+
+    def test_policy_is_only_present_for_auto_when_nothing_was_there(self):
+        self.assertEqual(self.plan('auto')['policy'], {'default_tools_approval_mode': 'approve'})
+        self.assertEqual(self.plan('ask')['policy'], {})
+        self.assertEqual(self.plan(None)['policy'], {})
+
+    def test_ask_restores_the_previous_value_auto_replaced(self):
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "prompt"\n')
+        self.assertEqual(self.cycle('auto')['policy'], {'default_tools_approval_mode': 'approve'})
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "approve"\n')
+        # Reapplying auto keeps the original prior value.
+        self.cycle('auto')
+        restored = self.plan('ask')
+        self.assertEqual(restored['policy'], {'default_tools_approval_mode': 'prompt'})
+        self.cycle('ask')
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "prompt"\n')
+        self.assertFalse(approval.load_record(self.home))  # nothing recorded now: the value is the user's
+
+    def test_ask_after_auto_with_no_prior_value_registers_without_one(self):
+        self.cycle('auto')
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "approve"\n')
+        self.assertEqual(self.plan('ask')['policy'], {})
+
+    def test_value_not_recorded_by_lcu_is_preserved_by_ask_and_default(self):
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "approve"\n')
+        for mode in ('ask', None):
+            self.assertEqual(self.plan(mode)['policy'], {'default_tools_approval_mode': 'approve'})
+
+    def test_project_scope_reads_and_records_the_project_config(self):
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "prompt"\n')
+        self.write('[mcp_servers.lcu]\ndefault_tools_approval_mode = "never"\n', self.project / '.codex/config.toml')
+        self.cycle('auto', 'project')
+        self.assertEqual(self.plan('ask', 'user')['policy'], {'default_tools_approval_mode': 'prompt'})
+        self.assertEqual(self.plan('ask', 'project')['policy'], {'default_tools_approval_mode': 'never'})
 
     def register(self, mode):
         temporary = tempfile.TemporaryDirectory()

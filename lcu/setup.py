@@ -404,11 +404,11 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
     global_args = ['--global'] if scope == 'user' else []
     failures = []
 
-    def apply_approval(name, client):
+    def apply_approval(name, client, plan=None):
         if approval is None:
             return
         try:
-            outcome = approvals.apply(approval, name, home, scope=scope, project=project, env=env)
+            outcome = approvals.apply(approval, name, home, scope=scope, project=project, env=env, plan=plan)
             print(f'{client.label}: approval {approval}: {outcome}.')
         except (ValueError, OSError, subprocess.SubprocessError) as exc:
             failures.append((name, 'approval', str(exc)))
@@ -434,6 +434,7 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
             continue
         mcp_command = command
         mcp_setup_error = None
+        codex_plan = None
         if name == 'claude-code':
             adapter = release_root / 'adapters/claude.mjs'
             if not adapter.is_file():
@@ -452,6 +453,8 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
             from .codex_hooks import require_cli_hook_support
             try:
                 require_cli_hook_support(env)
+                # Registration replaces `[mcp_servers.lcu]`; read the previous approval value first.
+                codex_plan = approvals.codex_plan(approval, home, scope=scope, project=project, env=env)
             except ValueError as exc:
                 failures.append((name, 'host', str(exc)))
                 print(f'{client.label}: host failed: {exc}', file=sys.stderr)
@@ -470,7 +473,7 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
             commands = (('old skill cleanup', cleanup_command),
                         ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
                                  client.mcp_agent, scope, json.dumps(mcp_command),
-                                 json.dumps({**host_policy(release_root), **approvals.codex_policy(approval)})]))
+                                 json.dumps({**host_policy(release_root), **(codex_plan['policy'] if codex_plan else {})})]))
         for phase, argv in commands:
             try:
                 if phase == 'old skill cleanup':
@@ -526,7 +529,7 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
                     hide_host_only_tools(home, project=project if scope == 'project' else None)
                 print(f'{client.label}: {phase} registered.')
                 if phase == name_final_phase(name):
-                    apply_approval(name, client)
+                    apply_approval(name, client, codex_plan)
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))
                 print(f'{client.label}: {phase} failed: {exc}', file=sys.stderr)
