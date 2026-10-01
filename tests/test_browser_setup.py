@@ -126,6 +126,52 @@ class BrowserSetupTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][0], '/fake/node')
             self.assertTrue((destination / 'chrome/scripts/installManifest.mjs').is_file())
 
+    def test_same_path_app_upgrade_refreshes_the_private_plugin_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / 'release'
+            home = base / 'home'
+            resources = root / 'app/Contents/Resources'
+            source = resources / 'plugins/openai-bundled/plugins/chrome'
+            (source / 'scripts').mkdir(parents=True)
+            installer = source / 'scripts/installManifest.mjs'
+            installer.write_text('version one')
+            host = source / 'extension-host/macos/arm64/ChatGPT for Chrome'
+            host.parent.mkdir(parents=True)
+            host.write_text('host one')
+            relay_source = root / 'lcu/native_host.py'
+            relay_source.parent.mkdir(parents=True)
+            relay_source.write_text('#!/usr/bin/env python3\n')
+            home.mkdir()
+            env = {'HOME': str(home), 'NODE_REPL_NODE_PATH': '/fake/node',
+                   'CODEX_CLI_PATH': '/fake/codex', 'CUA_REPL_NODE_REPL_PATH': '/fake/repl'}
+            manifest = home / 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json'
+
+            def original_installer(*args, **kwargs):
+                private = next((home / 'Library/Application Support/lcu/browser').iterdir()) / 'chrome'
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_text(json.dumps({
+                    'path': str(private / 'extension-host/macos/arm64/ChatGPT for Chrome')}))
+
+            with mock.patch('lcu.browser.platform.system', return_value='Darwin'), \
+                    mock.patch.dict(os.environ, {'HOME': str(home)}), \
+                    mock.patch('lcu.runtime.paths', return_value=(root / 'app', resources, None, {})), \
+                    mock.patch('lcu.runtime.environment', return_value=env), \
+                    mock.patch('lcu.browser.subprocess.run', side_effect=original_installer):
+                first = install(root)
+                self.assertEqual((first / 'chrome/scripts/installManifest.mjs').read_text(), 'version one')
+                unchanged = (first / 'chrome').stat().st_ino
+                self.assertEqual(install(root), first)
+                self.assertEqual((first / 'chrome').stat().st_ino, unchanged)
+                installer.write_text('version two')  # apt upgrade at the same path
+                host.write_text('host two')
+                second = install(root)
+            self.assertEqual(second, first)
+            self.assertEqual((second / 'chrome/scripts/installManifest.mjs').read_text(), 'version two')
+            self.assertEqual((second / 'chrome/extension-host/macos/arm64/ChatGPT for Chrome').read_text(), 'host two')
+            self.assertEqual({p.name for p in second.iterdir()},
+                             {'chrome', 'lcu-native-host', '.lcu-browser-host', '.lcu-browser-plugin'})
+
     def test_macos_missing_original_manifest_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
@@ -164,6 +210,9 @@ class BrowserStatusTests(unittest.TestCase):
         self.host_dir = self.root / 'private-host'
         self.host_dir.mkdir()
         (self.host_dir / '.lcu-browser-host').write_text(str((self.root / 'app').resolve()) + '\n')
+        from lcu.browser import _plugin_digest
+        (self.host_dir / '.lcu-browser-plugin').write_text(_plugin_digest(
+            resources / 'plugins/openai-bundled/plugins/chrome') + '\n')
         self.relay = self.host_dir / 'lcu-native-host'
         self.relay.write_text('fixture relay')
         self.relay.chmod(0o700)

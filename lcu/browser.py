@@ -18,6 +18,26 @@ _MACOS_NATIVE_HOST_DIRS = (
 )
 
 
+_PLUGIN_DIGEST = '.lcu-browser-plugin'
+
+
+def _plugin_digest(plugin):
+    """Content identity of the upstream Chrome plugin directory (paths, modes, bytes, links)."""
+    plugin = Path(plugin)
+    digest = hashlib.sha256()
+    for path in sorted(plugin.rglob('*')):
+        relative = path.relative_to(plugin).as_posix()
+        if path.is_symlink():
+            digest.update(f'L {relative} {os.readlink(path)}\0'.encode())
+        elif path.is_file():
+            with path.open('rb') as stream:
+                digest.update(f'F {relative} {path.stat().st_mode & 0o111} '
+                              f'{hashlib.file_digest(stream, "sha256").hexdigest()}\0'.encode())
+        elif path.is_dir():
+            digest.update(f'D {relative}\0'.encode())
+    return digest.hexdigest()
+
+
 def _manifest_paths(env, system):
     home = Path(env.get('USERPROFILE', Path.home())) if system == 'Windows' else Path(env.get('HOME', Path.home()))
     name = 'com.openai.codexextension.json'
@@ -76,18 +96,36 @@ def install(root, directory=None):
     # Runtime selection returns the original resource tree. Linux stores it
     # under app/resources; macOS stores it under app/Contents/Resources.
     source = selected[1] / 'plugins/openai-bundled/plugins/chrome'
+    if not (source / 'scripts/installManifest.mjs').is_file():
+        raise ValueError('The complete upstream Chrome plugin is missing from this bundle.')
+    # The app can be upgraded in place at the same path, so the private copy follows the
+    # content of the selected plugin, not only the app path.
+    plugin_digest = _plugin_digest(source)
+    stamp = destination / _PLUGIN_DIGEST
     if not destination.exists():
-        if not (source / 'scripts/installManifest.mjs').is_file():
-            raise ValueError('The complete upstream Chrome plugin is missing from this bundle.')
         destination.parent.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix='.lcu-browser-', dir=destination.parent))
         try:
             shutil.copytree(source, scratch / 'chrome', symlinks=True)
             (scratch / '.lcu-browser-host').write_text(expected)
+            (scratch / _PLUGIN_DIGEST).write_text(plugin_digest + '\n')
             scratch.rename(destination)
         finally:
             if scratch.exists():
                 shutil.rmtree(scratch)
+    elif not stamp.is_file() or stamp.is_symlink() or stamp.read_text().strip() != plugin_digest:
+        scratch = Path(tempfile.mkdtemp(prefix='.lcu-browser-', dir=destination))
+        try:
+            shutil.copytree(source, scratch / 'chrome', symlinks=True)
+            previous = destination / 'chrome'
+            retired = destination / '.chrome-previous'
+            shutil.rmtree(retired, ignore_errors=True)
+            previous.rename(retired)
+            (scratch / 'chrome').rename(previous)
+            shutil.rmtree(retired, ignore_errors=True)
+            stamp.write_text(plugin_digest + '\n')
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
     relay_source = root / 'lcu/native_host.py'
     if not relay_source.is_file():
         raise ValueError('The LCU Chrome native-host relay is missing from this release.')
@@ -212,6 +250,7 @@ def status(root, family='chrome'):
                 and source_matches
                 and (directory / '.lcu-browser-host').read_text() == str(
                     selected[0] if system == 'windows' else (root / 'app').resolve()) + '\n'
+                and (directory / _PLUGIN_DIGEST).read_text().strip() == _plugin_digest(plugin)
                 and host.is_file() and os.access(host, os.X_OK))
         except (KeyError, OSError, ValueError):
             pass
