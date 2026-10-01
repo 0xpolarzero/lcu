@@ -831,6 +831,8 @@ def main(argv=None):
                 print('Computer audio selected: enable the original optional recording API and its approval flow. A saved audio file is not model audio input.')
             if sys.platform == 'win32' and 'claude-code' in names:
                 print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave native helpers active.')
+            from .tested import report as report_tested_pair
+            report_tested_pair(release_root)
             if not args.yes:
                 if not sys.stdin.isatty():
                     raise ValueError('Review the selection above, then rerun with --yes for noninteractive setup.')

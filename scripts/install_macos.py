@@ -62,6 +62,10 @@ def main(argv=None):
     runtime = args.prefix / 'current/bin/lcu'
     print(f'LCU installed: {runtime}')
     print('The signed application is reused in place. Compatible updates are detected automatically.')
+    if args.runtime_only:
+        # Agent setup reports this itself, before applying anything.
+        from lcu.tested import report as report_tested_pair
+        report_tested_pair(args.prefix / 'current')
     if not args.runtime_only:
         forwarded = ['--prefix', str(args.prefix), '--user', account.pw_name, '--scope', args.scope,
                      '--session', 'direct']

@@ -174,6 +174,10 @@ def main(argv=None):
     install(prefix, app_package=None, existing_app=args.existing_app,
             offline=args.offline, account=account)
     print(f'LCU installed: {prefix}/current/bin/lcu')
+    if args.runtime_only:
+        # Agent setup reports this itself, before applying anything.
+        from lcu.tested import report as report_tested_pair
+        report_tested_pair(prefix / 'current')
     if not args.runtime_only:
         forwarded = ['--prefix', str(prefix), '--user', account.pw_name, '--scope', args.scope, '--session', args.session]
         for name in args.agent:

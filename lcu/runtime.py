@@ -13,6 +13,7 @@ USAGE = ('Usage: lcu [--chrome] [--audio] [--mcp-discovery-compat]\n'
          '       lcu browser status\n'
          '       lcu prune [--keep N] [--yes]\n'
          '       lcu doctor\n'
+         '       lcu status [--json]\n'
          '       lcu --version')
 
 
@@ -273,6 +274,10 @@ def main(root, argv):
     if argv[:1] == ['browser']:
         from .browser import main as browser
         browser(root, argv[1:])
+        return
+    if argv[:1] == ['status']:
+        from .status import main as status
+        status(root, argv[1:])
         return
     if argv[:1] == ['prune']:
         from .maintenance import main as maintenance

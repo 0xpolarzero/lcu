@@ -45,6 +45,10 @@ Run adapter checks with `npm test --prefix adapters`. [Mac runtime verification]
 
 Before publishing, inspect the tar member list and unpacked tree. They must contain LCU-owned launchers, lock/installer metadata and redistributable registration dependencies only. They must not contain app binaries, upstream instruction copies, generated app fragments, profiles or tokens. Portable exports have the same no-OpenAI-payload requirement.
 
+## Tested version record
+
+[tested-versions.json](../tested-versions.json) lists the app and CUA runtime pairs that checked-in verification covers; [tested app versions](INSTALLATION.md#tested-app-versions) describes how LCU reports it. It is informational and is never used to select or refuse an app. Add an entry only after the pair itself passed: for Linux, `tests/run.sh` against that package on both architectures, with the package's SHA-256 as `app_sha256`; for macOS, the installed-app and desktop checks in the release notes. Set `lcu_version` to the release whose gates covered it, point `evidence` at the release notes or verification record, and never record a pair that only installed. `tests/test_tested_versions.py` checks that every entry is well formed, unique and points at an existing file.
+
 ## Install and exercise an isolated fixture
 
 Prepare a disposable Ubuntu 24.04-compatible Linux desktop and account. A test may use a verified local official .deb as input, but extract it into the disposable fixture before invoking LCU:

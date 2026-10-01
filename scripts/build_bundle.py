@@ -91,7 +91,8 @@ def build(output, package=None, *, target='linux', app=None):
         (release / 'lcu').mkdir()
         modules = ('__init__.py', 'app_layout.py', 'asar.py', 'runtime.py', 'setup.py',
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py', 'doctor.py',
-                         'maintenance.py', 'native_host.py', 'claude_visibility.py', 'harness_setup.py')
+                         'maintenance.py', 'native_host.py', 'claude_visibility.py', 'harness_setup.py',
+                         'tested.py', 'status.py')
         if target != 'windows':
             modules += ('session.py', 'platforms.py')
         for filename in modules:
@@ -117,7 +118,7 @@ def build(output, package=None, *, target='linux', app=None):
             shipped = release / 'docs' / document.relative_to(docs)
             shipped.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(document, shipped)
-        for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
+        for filename in ('README.md', 'LICENSE', 'runtime.lock.json', 'tested-versions.json'):
             shutil.copy2(SOURCE / filename, release / filename)
         (release / 'scripts').mkdir()
         scripts = (('bundle.py',) if target == 'windows'
@@ -132,7 +133,7 @@ def build(output, package=None, *, target='linux', app=None):
         provision_agents(release, SOURCE / 'scripts/agent-tools', target=target,
                          mac_node=selected_node, adapters_source=SOURCE / 'adapters')
         # The installer selects and validates the matching app before registration.
-        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.doctor, lcu.codex_hooks, lcu.maintenance'
+        imports = 'import lcu.runtime, lcu.setup, lcu.browser, lcu.doctor, lcu.codex_hooks, lcu.maintenance, lcu.tested, lcu.status'
         if target != 'windows':
             imports += ', lcu.session'
         subprocess.run([sys.executable, '-B', '-c', imports],

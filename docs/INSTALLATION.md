@@ -208,6 +208,35 @@ Readiness is staged: package installed, desktop ready, extension discovered, the
 
 Custom harnesses must deliver the original instructions and images, present site approvals, and send completion/interruption events. The shared client and Pi reference adapter are documented in [adapters](ADAPTERS.md). Earlier OpenCode and Goose experiments remain in the [verification record](verification/installed-app-2026-09-23.md); neither is an advertised release integration.
 
+## Tested app versions
+
+App versions are date stamps (`26.928.31416`) and the CUA runtime is `0.0.x`, so neither signals compatibility. Each release ships [tested-versions.json](../tested-versions.json), a record of the exact platform, architecture, app version and CUA runtime pairs that LCU's checked-in verification covers. Each entry names the LCU version that tested it and its evidence; Linux entries also carry the SHA-256 of the official `.deb` the pair was tested from. The installed tree is not hashed, so that digest is informational and is not matched at run time.
+
+The record never selects or refuses an app. `lcu setup` (before it asks to apply), the installer's `--runtime-only` mode, `lcu doctor` and `lcu status` compare the app they observe with it and report one of three states. An untested or unknown pair prints a warning and the command carries on:
+
+| Status | Meaning |
+| --- | --- |
+| `tested` | The exact pair is listed for this platform and architecture. |
+| `untested` | The record is readable and does not list this pair. The warning names the tested pairs; LCU still uses the app. |
+| `unknown` | The record is missing or unreadable, so LCU cannot say. The warning says so; LCU still uses the app. |
+
+`lcu status --json` prints the same state without needing a desktop session, for tools that manage LCU. `compatibility.tested` is `true`, `false` or `null`; `warning` is `null` for a tested pair:
+
+~~~json
+{
+  "lcu_version": "0.8.0",
+  "platform": "linux",
+  "architecture": "arm64",
+  "app": {"path": "/usr/lib/chatgpt", "version": "26.928.31416", "runtime": "0.0.27/20260927214556-b77d38801cca"},
+  "compatibility": {
+    "status": "tested", "tested": true, "tested_with_lcu": "0.8.0", "app_sha256": "...",
+    "warning": null, "tested_pairs": [{"app_version": "26.928.31416", "runtime": "...", "lcu_version": "0.8.0"}]
+  }
+}
+~~~
+
+The version and runtime are read from the installed app each time, so an app updated in place is judged by what is installed now. Restart agents after an update. See [Development](DEVELOPMENT.md#tested-version-record) for how entries are added.
+
 ## Upgrades and rollback
 
 Reinstall with the same prefix. The installer keeps LCU generations under releases/ (and, on Windows, app generations under apps/), and atomically changes current only after validating the new release. Agent registrations point at current and should be reloaded after a switch. A failed setup can leave completed agent registrations even when another agent fails; its error lists which to retry. Old generations are retained so live processes do not lose their files.
