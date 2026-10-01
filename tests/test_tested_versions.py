@@ -101,7 +101,8 @@ class TestedVersionTests(unittest.TestCase):
         resolved = (self.root / 'app', self.root / 'app/resources', self.root / 'app/resources/cua_node',
                     metadata or {'version': PAIR['app_version'], 'runtime': PAIR['runtime']})
         out = io.StringIO()
-        with patch('lcu.runtime.paths', return_value=resolved), contextlib.redirect_stdout(out):
+        with patch('lcu.runtime.paths', return_value=resolved), patch.object(status, 'saved_setup', return_value=None), \
+             contextlib.redirect_stdout(out):
             status.main(self.root, list(argv))
         return out.getvalue()
 

@@ -390,11 +390,19 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('--audio', audio_metadata['destinationSetup'])
 
     def test_setup_state_round_trips_and_rejects_malformed(self):
-        self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False})
+        self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False, 'approval': 'ask'})
         save_setup_state(self.home, chrome=True, audio=False)
-        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False})
+        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask'})
         self.assertEqual(json.loads(setup_state_path(self.home).read_text()),
-                         {'chrome': True, 'audio': False})
+                         {'chrome': True, 'audio': False, 'approval': 'ask'})
+        save_setup_state(self.home, chrome=True, audio=False, approval='auto')
+        self.assertEqual(load_setup_state(self.home)['approval'], 'auto')
+        # A state file from before approval modes existed means ask.
+        setup_state_path(self.home).write_text('{"chrome": true, "audio": false}')
+        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask'})
+        setup_state_path(self.home).write_text('{"chrome": true, "audio": false, "approval": "yolo"}')
+        with self.assertRaisesRegex(ValueError, 'Malformed LCU setup state'):
+            load_setup_state(self.home)
         setup_state_path(self.home).write_text('{ not json')
         with self.assertRaisesRegex(ValueError, 'Malformed LCU setup state'):
             load_setup_state(self.home)
@@ -451,14 +459,14 @@ class InstalledInstructionTests(unittest.TestCase):
 
         drive(['--chrome', '--yes'])
         self.assertEqual(json.loads((self.home / '.local/state/lcu/setup.json').read_text()),
-                         {'chrome': True, 'audio': False})
+                         {'chrome': True, 'audio': False, 'approval': 'ask'})
         self.assertIn('--chrome', captured[-1])
         drive(['--yes'])
         self.assertIn('--chrome', captured[-1])
         drive(['--no-chrome', '--yes'])
         self.assertNotIn('--chrome', captured[-1])
         self.assertEqual(json.loads((self.home / '.local/state/lcu/setup.json').read_text()),
-                         {'chrome': False, 'audio': False})
+                         {'chrome': False, 'audio': False, 'approval': 'ask'})
         # A saved decline is a choice: an interactive rerun does not prompt again.
         prompts = []
 

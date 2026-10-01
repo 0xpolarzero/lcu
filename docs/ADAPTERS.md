@@ -95,4 +95,16 @@ The corrected installed relay passed guarded registration and original Chrome St
 
 The supported native-app and external Chrome flows have not produced generic schema-field or URL-mode approval requests. Those unobserved shapes are not baseline parity failures. Current tests preserve the original message, origin, and requested native-app persistence scope; a host that cannot present a request fails closed.
 
+Harness approval of LCU's own tools is separate from those requests and is the harness's decision by default. The optional [approval mode](INSTALLATION.md#approval-mode) (`lcu setup --approval auto|ask`) adds or removes only LCU's entries, reversibly:
+
+| Harness | Default | `auto` entry |
+| --- | --- | --- |
+| Claude Code | asks before each tool call | `permissions.allow: ["mcp__lcu"]`; host-only tools stay in `permissions.deny` |
+| Codex CLI | asks before each call (`codex exec` cannot run it under approval policy `never`) | `[mcp_servers.lcu] default_tools_approval_mode = "approve"` |
+| Oh My Pi | no prompt in the default `yolo` mode | `tools.approval.js` and `.js_reset` set to `allow`, for profiles in `always-ask` or `write` mode |
+| Pi | no permission system | none |
+| Hermes | no gate on plugin tools without a `pre_tool_call` hook, which LCU does not register | none |
+
+Manual checks outside the repository fixtures found that Claude Code 2.1.204 auto-approves `mcp__lcu__js` with that rule and denies it without, and that Codex CLI 0.159.3 prompts `Allow the lcu MCP server to run tool "js"?` by default, runs the tool without prompting with the setting, and prompts again once it is removed. `tests/codex_approval_mode.py` reproduces the Codex difference with a scripted provider and an isolated home (run on Codex CLI 0.159.1); the Claude Code and OMP entries are covered by unit tests and no scripted Claude Code or model-driven OMP run is recorded. OMP's key names come from its `tools.approval` setting, which the policy resolver reads by tool name. Entries changed by the mode never include native-app or Chrome approvals, so Chrome site approvals remain exact-origin only.
+
 The [contract audit](verification/harness-contract-audit-2026-09-25.md) records the primary-source review and scope boundaries. Full platform installation steps are in the [installation guide](INSTALLATION.md).

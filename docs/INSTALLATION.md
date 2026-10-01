@@ -19,7 +19,7 @@ Where a command below is written as `lcu ...`, run it through the installed path
 1. Check the OS, architecture, desktop account, and current harness. Adapters are `pi`, `codex`, `claude-code`, `omp` (Oh My Pi), and `hermes` (Hermes Agent); select the user's harness explicitly. OMP and Hermes are experimental; inspect their [verification limits](ADAPTERS.md) before claiming desktop behavior. If the harness has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
 2. Check the prerequisites below. The official desktop app, Python, and selected harness must already be installed. If anything is missing, report the prerequisite and its installation link; LCU does not install or authenticate them.
 3. Download the matching archive and SHA-256 sidecar from the latest release, verify the checksum, and extract it. Follow the installation section for that platform from inside the extracted directory.
-4. For unattended setup, add `--yes` to the command that selects the harness. Preserve the user's sandbox and approval settings. Enable Chrome or computer-audio recording only if the user requested it.
+4. For unattended setup, add `--yes` to the command that selects the harness. Preserve the user's sandbox and approval settings. Enable Chrome, computer-audio recording or `--approval auto` only if the user requested it.
 5. Report the installed path and tell the user to restart their harness and run the platform's `doctor` command from their desktop session. Installation and registration do not prove a desktop action worked; the user completes the first approved screenshot check.
 
 ## Prerequisites
@@ -185,7 +185,7 @@ On Linux, `doctor` calls the original runtime's `list_windows` and `get_screensh
 
 On Windows, the existing original window-list check remains available. `doctor` reports that screenshot and Windows permission readiness are unverified; a window list alone is not a screenshot-readiness claim. Across platforms, generic provider errors remain runtime/backend failures unless the original API gives a specific supported error.
 
-Setup remembers these opt-ins per account. After a successful setup or export it saves `{"chrome": bool, "audio": bool}` to `~/.local/state/lcu/setup.json` (Windows: `%LOCALAPPDATA%\LCU\setup.json`). Rerunning setup without `--chrome`/`--audio` keeps the saved values, so `setup --agent AGENT --audio` no longer drops a Chrome surface you enabled earlier. Use `--no-chrome` or `--no-audio` to disable a saved opt-in. The interactive Chrome prompt appears only when there is neither a flag nor a saved choice.
+Setup remembers these opt-ins per account. After a successful setup or export it saves `{"chrome": bool, "audio": bool, "approval": "ask"|"auto"}` to `~/.local/state/lcu/setup.json` (Windows: `%LOCALAPPDATA%\LCU\setup.json`); a file without `approval` means `ask`. Rerunning setup without `--chrome`/`--audio` keeps the saved values, so `setup --agent AGENT --audio` no longer drops a Chrome surface you enabled earlier. Use `--no-chrome` or `--no-audio` to disable a saved opt-in. `lcu status` prints the saved values. The interactive Chrome prompt appears only when there is neither a flag nor a saved choice.
 
 For computer-audio recording, explicitly opt in when registering the agent, then reconnect it. For example, run `lcu setup --agent pi --audio`. This enables the original recording API and approval flow. LCU adds no audio-specific instructions, and saving audio to a file does not deliver it to the model. See [the audio opt-in verification record](verification/audio-opt-in-2026-09-27.md).
 
@@ -207,6 +207,27 @@ The native-host manifest belongs to the Linux account, so other apps using this 
 Readiness is staged: package installed, desktop ready, extension discovered, then a browser action independently observed on a page under the intended no-sign-in policy. The installed ARM64 and x86-64 builds passed navigation, Unicode input, click, screenshot and tab close in disposable Ubuntu Chrome profiles; the local page observed `x-browser-agent` on browser requests. Site approval is still required. This local override does not reproduce a user-specific Codex feature-gate decision.
 
 Custom harnesses must deliver the original instructions and images, present site approvals, and send completion/interruption events. The shared client and Pi reference adapter are documented in [adapters](ADAPTERS.md). Earlier OpenCode and Goose experiments remain in the [verification record](verification/installed-app-2026-09-23.md); neither is an advertised release integration.
+
+## Approval mode
+
+By default each harness keeps its own approval behavior for LCU's tools. Claude Code and Codex CLI ask before each `js` call; Oh My Pi's default `yolo` mode does not ask, but a profile set to `always-ask` or `write` does. `lcu setup --approval auto` adds only LCU's own entries so that none of those harness prompts appear; `--approval ask` (the default) removes exactly what `auto` added and leaves everything else as it was:
+
+| Harness | `auto` adds | Where |
+| --- | --- | --- |
+| Claude Code | `"mcp__lcu"` in `permissions.allow` | `~/.claude/settings.json`; project scope `.claude/settings.local.json` |
+| Codex CLI | `default_tools_approval_mode = "approve"` in `[mcp_servers.lcu]` | the config setup registers LCU in (`$CODEX_HOME/config.toml`, default `~/.codex`; project scope `.codex/config.toml`) |
+| Oh My Pi | `js: allow` and `js_reset: allow` in `tools.approval` | the selected profile's `config.yml`, through `omp config` (`OMP_PROFILE` and `PI_CODING_AGENT_DIR` apply) |
+| Pi | nothing: Pi has no permission system | |
+| Hermes | nothing: Hermes gates only plugin tools through a `pre_tool_call` hook, which LCU does not register | |
+
+~~~sh
+/opt/lcu/current/bin/lcu setup --agent claude-code --agent codex --approval auto --session direct
+/opt/lcu/current/bin/lcu setup --agent claude-code --agent codex --approval ask --session direct
+~~~
+
+The mode applies to the harnesses and scope selected in that run. It is remembered per account, and a later setup that does not name `--approval` keeps `auto` and applies it to whatever it registers; only an explicit `--approval ask` removes entries. Without `--approval` a setup whose remembered mode is `ask` leaves your harness settings alone, except that Codex setup rewrites the whole `[mcp_servers.lcu]` table, which LCU owns, so a hand-added `default_tools_approval_mode` there does not survive. Entries are only touched when they match what `auto` writes: an OMP `js: deny` or `js: prompt` you set is kept, reported, and not removed by `ask`. `--approval` cannot be combined with `--export` or the installer's `--runtime-only`.
+
+This removes only the harness's own prompt about calling LCU. Claude Code's host-only tools stay denied (deny rules win over allow). Native-app permission requests, the original runtime's own approvals and Chrome site approvals come from the original runtime and are unchanged; Chrome stays exact-origin only and nothing here widens `LCU_APPROVED_ORIGINS`. Choose `auto` only for a machine you control, such as a disposable VM. `tests/codex_approval_mode.py` shows the Codex difference with a scripted local provider, and the other harnesses' entries are covered by `tests/test_approval.py`. See the [approval boundary](ADAPTERS.md#approval-boundary).
 
 ## Tested app versions
 

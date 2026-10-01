@@ -174,7 +174,46 @@ browser_only_export = home / 'portable-chrome-only'
 subprocess.run([command, 'setup', '--user', account, '--export', str(browser_only_export),
                 '--session', 'direct', '--no-audio', '--yes'], check=True)
 assert json.loads((browser_only_export / 'mcp.json').read_text())['mcpServers']['lcu']['args'][-1] == '--chrome'
-assert json.loads((home / '.local/state/lcu/setup.json').read_text()) == {'chrome': True, 'audio': False}
+assert json.loads((home / '.local/state/lcu/setup.json').read_text()) == {
+    'chrome': True, 'audio': False, 'approval': 'ask'}
+
+# Approval mode adds only LCU's own entries and ask removes exactly them, in both scopes.
+def approval_state():
+    return (tomllib.loads(codex.read_text())['mcp_servers']['lcu'],
+            tomllib.loads((project / '.codex/config.toml').read_text())['mcp_servers']['lcu'],
+            json.loads(claude_settings.read_text())['permissions'],
+            json.loads(project_claude_settings.read_text())['permissions'])
+
+def approval_setup(mode, scope):
+    args = [command, 'setup', '--user', account, '--agent', 'codex', '--agent', 'claude-code', '--agent', 'pi',
+            '--session', 'direct', '--approval', mode, '--yes']
+    if scope == 'project':
+        args += ['--scope', 'project', '--project', str(project)]
+    subprocess.run(args, check=True)
+
+key = 'default_tools_approval_mode'
+assert key not in approval_state()[0] and key not in approval_state()[1]
+user_before, project_before = approval_state()[2], approval_state()[3]
+for scope in ('user', 'project'):
+    approval_setup('auto', scope)
+    codex_user, codex_project, claude_user, claude_project = approval_state()
+    assert (codex_user if scope == 'user' else codex_project)[key] == 'approve', scope
+    assert (claude_user if scope == 'user' else claude_project)['allow'][-1] == 'mcp__lcu', scope
+    approval_setup('auto', scope)  # idempotent
+    fresh = approval_state()
+    assert fresh[2 if scope == 'user' else 3]['allow'].count('mcp__lcu') == 1, scope
+assert json.loads((home / '.local/state/lcu/setup.json').read_text())['approval'] == 'auto'
+# A later setup that does not name --approval keeps the remembered auto.
+subprocess.run([command, 'setup', '--user', account, '--agent', 'codex', '--session', 'direct', '--yes'], check=True)
+assert approval_state()[0][key] == 'approve'
+for scope in ('user', 'project'):
+    approval_setup('ask', scope)
+codex_user, codex_project, claude_user, claude_project = approval_state()
+assert key not in codex_user and key not in codex_project
+assert claude_user == user_before and claude_project == project_before, (claude_user, claude_project)
+assert 'keep-me' in codex.read_text() and 'my-model' in codex.read_text()
+assert json.loads(claude_settings.read_text())['model'] == 'keep-me'
+assert json.loads((home / '.local/state/lcu/setup.json').read_text())['approval'] == 'ask'
 # A malformed existing supported-agent config must be left byte-for-byte intact.
 claude = home / '.claude.json'
 before = claude.read_bytes()

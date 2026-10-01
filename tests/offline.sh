@@ -7,13 +7,19 @@ cd "$(dirname -- "$archive")"
 name=$(basename -- "$archive")
 sha256sum -c "$name.sha256"
 python3 -c 'from pathlib import Path; assert {p.name for p in Path("/sys/class/net").iterdir()} == {"lo"}, "Test requires --network none"'
-python3 - "$package" /src/runtime.lock.json <<'PY'
+python3 - "$package" /src/runtime.lock.json /src/tested-versions.json <<'PY'
 import hashlib, json, platform, sys
 from pathlib import Path
 arch = {'aarch64': 'arm64', 'x86_64': 'x64'}[platform.machine()]
 lock = json.loads(Path(sys.argv[2]).read_text())
+recorded = json.loads(Path(sys.argv[3]).read_text())['entries']
+# The package is the pinned development input, or a Linux package whose pair is
+# recorded as tested for this architecture.
+accepted = {lock['architectures'][arch]['sha256']} | {
+    e['app_sha256'] for e in recorded
+    if e['platform'] == 'linux' and e['architecture'] == arch and 'app_sha256' in e}
 with open(sys.argv[1], 'rb') as stream:
-    assert hashlib.file_digest(stream, 'sha256').hexdigest() == lock['architectures'][arch]['sha256']
+    assert hashlib.file_digest(stream, 'sha256').hexdigest() in accepted
 PY
 tar -xzf "$name" -C /opt
 bundle="/opt/${name%.tar.gz}"

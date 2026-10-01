@@ -7,6 +7,17 @@ import sys
 from . import tested
 
 
+def saved_setup():
+    """The signed-in account's remembered opt-ins, or None when none are saved or readable."""
+    from .setup import load_setup_state, setup_state_path
+    try:
+        if not setup_state_path(Path.home()).is_file():
+            return None
+        return load_setup_state(Path.home())
+    except (ValueError, OSError, RuntimeError):
+        return None
+
+
 def collect(root):
     """Machine-readable status for one release; raises ValueError if the app cannot be read."""
     root = Path(root)
@@ -26,6 +37,7 @@ def collect(root):
         'architecture': observed['architecture'],
         'app': {'path': str(resolved[0]), 'version': observed['app_version'], 'runtime': observed['runtime']},
         'compatibility': tested.assess(root, **observed),
+        'setup': saved_setup(),
     }
 
 
@@ -48,3 +60,7 @@ def main(root, argv=None):
     print(f"LCU {status['lcu_version']} ({status['platform']} {status['architecture']}).")
     print(f"Original app: ChatGPT {app['version']} (CUA {app['runtime']}) at {app['path']}.")
     print('\n'.join(tested.status_lines(status['compatibility'])))
+    saved = status['setup']
+    if saved:
+        print(f"Saved setup: chrome {'on' if saved['chrome'] else 'off'}, audio {'on' if saved['audio'] else 'off'}, "
+              f"approval {saved['approval']}.")

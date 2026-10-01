@@ -142,19 +142,21 @@ def load_setup_state(home):
     path = setup_state_path(home)
     data = read_file(path)
     if data is None:
-        return {'chrome': False, 'audio': False}
+        return {'chrome': False, 'audio': False, 'approval': 'ask'}
     try:
         parsed = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.') from exc
-    if not isinstance(parsed, dict) or not all(isinstance(parsed.get(key), bool) for key in ('chrome', 'audio')):
+    # `approval` was added after `chrome` and `audio`; an older file means "ask".
+    if (not isinstance(parsed, dict) or not all(isinstance(parsed.get(key), bool) for key in ('chrome', 'audio'))
+            or parsed.get('approval', 'ask') not in ('ask', 'auto')):
         raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.')
-    return {'chrome': parsed['chrome'], 'audio': parsed['audio']}
+    return {'chrome': parsed['chrome'], 'audio': parsed['audio'], 'approval': parsed.get('approval', 'ask')}
 
 
-def save_setup_state(home, *, chrome, audio):
+def save_setup_state(home, *, chrome, audio, approval='ask'):
     atomic_write(setup_state_path(home),
-                 (json.dumps({'chrome': chrome, 'audio': audio}, indent=2) + '\n').encode())
+                 (json.dumps({'chrome': chrome, 'audio': audio, 'approval': approval}, indent=2) + '\n').encode())
 
 
 def installer_environment(home, names, environ=None):
@@ -383,8 +385,17 @@ def remove_old_skill(node, skills, cwd, env, global_args):
     return 'removed'
 
 
-def configure(names, home, command, tools_root, release_root, *, scope='user', project=None, setup_command=None, environ=None):
-    """Delegate registration and return phase failures."""
+def name_final_phase(name):
+    """The registration phase after which a harness's approval mode is applied."""
+    return 'extension' if name == 'pi' else 'MCP'
+
+
+def configure(names, home, command, tools_root, release_root, *, scope='user', project=None, setup_command=None, environ=None, approval=None):
+    """Delegate registration and return phase failures.
+
+    approval is None (leave harness approval settings alone), "auto" or "ask" (see lcu.approval).
+    """
+    from . import approval as approvals
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
     resources = installed_app_resources(release_root)
@@ -392,6 +403,17 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
     cwd = project if scope == 'project' else home
     global_args = ['--global'] if scope == 'user' else []
     failures = []
+
+    def apply_approval(name, client):
+        if approval is None:
+            return
+        try:
+            outcome = approvals.apply(approval, name, home, scope=scope, project=project, env=env)
+            print(f'{client.label}: approval {approval}: {outcome}.')
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            failures.append((name, 'approval', str(exc)))
+            print(f'{client.label}: approval failed: {exc}', file=sys.stderr)
+
     for name in names:
         client = CLIENTS[name]
         if name in ('omp', 'hermes'):
@@ -407,6 +429,8 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, 'plugin', str(exc)))
                 print(f'{client.label}: plugin failed: {exc}', file=sys.stderr)
+                continue
+            apply_approval(name, client)
             continue
         mcp_command = command
         mcp_setup_error = None
@@ -445,7 +469,8 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
         else:
             commands = (('old skill cleanup', cleanup_command),
                         ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
-                                 client.mcp_agent, scope, json.dumps(mcp_command), json.dumps(host_policy(release_root))]))
+                                 client.mcp_agent, scope, json.dumps(mcp_command),
+                                 json.dumps({**host_policy(release_root), **approvals.codex_policy(approval)})]))
         for phase, argv in commands:
             try:
                 if phase == 'old skill cleanup':
@@ -500,6 +525,8 @@ def configure(names, home, command, tools_root, release_root, *, scope='user', p
                     from .claude_visibility import install as hide_host_only_tools
                     hide_host_only_tools(home, project=project if scope == 'project' else None)
                 print(f'{client.label}: {phase} registered.')
+                if phase == name_final_phase(name):
+                    apply_approval(name, client)
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, phase, str(exc)))
                 print(f'{client.label}: {phase} failed: {exc}', file=sys.stderr)
@@ -595,6 +622,9 @@ def parser():
     p.add_argument('--no-chrome', action='store_true', help='Disable Chrome control, overriding a saved opt-in')
     p.add_argument('--audio', action='store_true', help='Opt into the original optional computer-audio recording API')
     p.add_argument('--no-audio', action='store_true', help='Disable computer-audio recording, overriding a saved opt-in')
+    p.add_argument('--approval', choices=['ask', 'auto'],
+                   help='auto adds only LCU\'s own harness approval entries so its tools run without a per-call prompt; '
+                        'ask removes exactly those entries and leaves harness defaults (the default, kept from the previous setup)')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true',
@@ -641,6 +671,8 @@ def validate(args):
         raise ValueError('--project requires --scope project.')
     if args.export and args.agent:
         raise ValueError('Choose --export or --agent, not both.')
+    if args.export and args.approval:
+        raise ValueError('--approval configures a harness; it cannot be combined with --export.')
     if args.export:
         if not args.export.is_absolute():
             raise ValueError('--export requires an absolute path.')
@@ -812,6 +844,16 @@ def main(argv=None):
             else:
                 chrome = False
             args.chrome, args.audio = chrome, audio
+            # `ask` keeps harness defaults. A saved `auto` is reapplied to each harness and scope
+            # selected now; an explicit `--approval ask` is the only thing that removes entries.
+            if args.approval:
+                approval_mode = args.approval
+            elif state['approval'] == 'auto':
+                approval_mode = 'auto'
+                print('Keeping automatic approval of LCU tools from the previous setup (use --approval ask to restore harness defaults).')
+            else:
+                approval_mode = 'ask'
+            approval_action = 'auto' if approval_mode == 'auto' else ('ask' if args.approval == 'ask' else None)
             runtime_flags = (['--chrome'] if chrome else []) + (['--audio'] if audio else [])
             command = [*desktop_command, *runtime_flags]
             if args.export:
@@ -827,6 +869,17 @@ def main(argv=None):
                     print('Claude Code: original turn cleanup runs on normal Stop and active MCP-call cancellation. Esc during model wait after a tool completes has no cleanup event and may leave temporary tabs open; Chrome remains experimental.')
             else:
                 print('Native desktop control selected; Chrome connector and guidance are excluded.')
+            if approval_mode == 'auto' and not args.export:
+                entries = {'claude-code': 'Claude Code: allow `mcp__lcu`',
+                           'codex': 'Codex: `default_tools_approval_mode = "approve"` on `[mcp_servers.lcu]`',
+                           'omp': 'Oh My Pi: `tools.approval` `js` and `js_reset` set to `allow`'}
+                chosen = [entries[name] for name in names if name in entries]
+                print('Approval mode auto: add only LCU\'s own entries so its tools run without a per-call harness prompt'
+                      + (': ' + '; '.join(chosen) if chosen else '') + '. '
+                      + ('Pi and Hermes have no such gate. ' if {'pi', 'hermes'} & set(names) else '')
+                      + 'Native-app and Chrome approvals from the original runtime are unchanged.')
+            elif approval_action == 'ask' and not args.export:
+                print('Approval mode ask: remove only the entries `--approval auto` added, restoring harness defaults.')
             if args.audio:
                 print('Computer audio selected: enable the original optional recording API and its approval flow. A saved audio file is not model audio input.')
             if sys.platform == 'win32' and 'claude-code' in names:
@@ -849,7 +902,7 @@ def main(argv=None):
             else:
                 failures = configure(names, home, command, tools_root, release_root,
                                      scope=args.scope, project=args.project,
-                                     setup_command=setup_command)
+                                     setup_command=setup_command, approval=approval_action)
                 if failures:
                     retry = [*direct_runtime, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
@@ -857,12 +910,13 @@ def main(argv=None):
                         retry += ['--project', str(args.project)]
                     retry += ['--chrome'] if chrome else ['--no-chrome']
                     retry += ['--audio'] if audio else ['--no-audio']
+                    retry += ['--approval', approval_mode]
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
             # Remember opt-ins only after successful registration or export.
-            save_setup_state(home, chrome=chrome, audio=audio)
+            save_setup_state(home, chrome=chrome, audio=audio, approval=approval_mode)
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.chrome:
             try:
