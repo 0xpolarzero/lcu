@@ -271,8 +271,14 @@ def main(root: Path, argv=None, *, resolved=None, env=None) -> int:
     target = 'mac' if platform_name == 'darwin' else platform_name
     interactive = sys.stdin.isatty() and not args.non_interactive
     print(f"Original app: ChatGPT {metadata['version']} (CUA {metadata['runtime']}).")
-    from .tested import report as report_tested_pair
+    from .tested import changed_since_install, report as report_tested_pair
     report_tested_pair(root, metadata=metadata)
+    try:
+        changed = changed_since_install(json.loads((root / 'installation.json').read_text()), metadata)
+    except (OSError, ValueError):
+        changed = None
+    if changed:
+        print(f'Warning: {changed}')
     if target == 'linux' and (not env.get('DISPLAY') or not env.get('DBUS_SESSION_BUS_ADDRESS')):
         message = ('A live X11 DISPLAY and DBUS_SESSION_BUS_ADDRESS are required. '
                    'Use lcu-session or run inside the desktop session.')

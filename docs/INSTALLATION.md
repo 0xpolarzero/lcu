@@ -118,7 +118,7 @@ From the extracted release directory, run this in a terminal owned by the existi
 sudo ./scripts/install.sh --user "$(id -un)" --runtime-only
 ~~~
 
-For an app installed elsewhere, add `--existing-app /absolute/path`. LCU uses that installation in place; it does not copy the app.
+For an app installed elsewhere, add `--existing-app /absolute/path`. LCU uses that installation in place; it does not copy the app. Because the desktop account runs the app's executables, LCU refuses a tree whose runtime executables, modules, the directories above them or the CUA runtime tree are owned by or writable by any account other than root and the installing/desktop account, or whose runtime paths link outside the app. A root-owned package install or a read-only mount passes. This is a structural check at validation time, not authentication of the app's content.
 
 Then, from a terminal inside the active X11 desktop session, register your harness as the desktop account, without `sudo`. Replace `codex` with `pi` or `claude-code`:
 
@@ -136,7 +136,11 @@ Restart your harness from the desktop session and ask it to use LCU to take a sc
 
 If Codex setup reports unsupported `mcp_tool` hooks, update the public standalone CLI for that account with `npm install -g @openai/codex@latest`, check `codex --version`, and rerun setup. See [Codex CLI setup](ADAPTERS.md#codex-cli).
 
-The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT. Each LCU release links to the installed app and runs it in place; the prefix holds only LCU itself. Updating the app through apt updates what LCU uses, and `lcu --version` reports the version it observes. Restart agents after an app update so no session keeps the old files.
+The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT. Each LCU release links to the installed app and runs it in place; the prefix holds only LCU itself. `lcu --version`, `lcu status` and `lcu doctor` report the version it observes.
+
+### Updating the in-place app
+
+Stop every agent that uses LCU before upgrading the ChatGPT package (for example with apt), then restart them afterward. LCU validates the app once when it launches the runtime and then runs from the app's live paths. An upgrade replaces those files while a session is running, so a live session can end up mixing the old and new runtime generations (executables, modules and helper processes from different versions). After the upgrade, `lcu status` and `lcu doctor` print a warning when the app on disk differs from the version and runtime recorded at install; rerun the installer to update that record, and refresh the Chrome host with `lcu browser install` if you use it (`lcu browser status` reports a stale copy).
 
 System library installation is a separate apt operation and cannot be rolled back as a single transaction with the LCU selection. Failed app validation or release selection leaves the previous current symlink in place. Existing running processes may still hold old LCU generations; do not remove them until they have exited.
 

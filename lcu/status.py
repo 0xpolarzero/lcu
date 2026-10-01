@@ -30,6 +30,8 @@ def collect(root):
     from .runtime import paths
     resolved = paths(root, descriptor)
     observed = tested.observe(root, descriptor, resolved[3])
+    changed = tested.changed_since_install(descriptor, {'version': observed['app_version'],
+                                                         'runtime': observed['runtime']})
     return {
         'lcu_version': version,
         'release': str(root),
@@ -37,6 +39,7 @@ def collect(root):
         'architecture': observed['architecture'],
         'app': {'path': str(resolved[0]), 'version': observed['app_version'], 'runtime': observed['runtime']},
         'compatibility': tested.assess(root, **observed),
+        'changed_since_install': changed,
         'setup': saved_setup(),
     }
 
@@ -60,6 +63,8 @@ def main(root, argv=None):
     print(f"LCU {status['lcu_version']} ({status['platform']} {status['architecture']}).")
     print(f"Original app: ChatGPT {app['version']} (CUA {app['runtime']}) at {app['path']}.")
     print('\n'.join(tested.status_lines(status['compatibility'])))
+    if status['changed_since_install']:
+        print(f"Warning: {status['changed_since_install']}")
     saved = status['setup']
     if saved:
         print(f"Saved setup: chrome {'on' if saved['chrome'] else 'off'}, audio {'on' if saved['audio'] else 'off'}, "

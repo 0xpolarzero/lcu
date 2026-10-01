@@ -87,6 +87,21 @@ def observe(root, descriptor=None, metadata=None):
             'app_version': metadata['version'], 'runtime': metadata['runtime']}
 
 
+def changed_since_install(descriptor, metadata):
+    """Describe an app that differs from the one recorded at install, or return None.
+
+    The Linux app is used in place, so a package upgrade changes it under running agents.
+    """
+    recorded = (descriptor.get('package_version'), descriptor.get('runtime'))
+    observed = (metadata.get('version'), metadata.get('runtime'))
+    if not all(isinstance(value, str) and value for value in recorded) or recorded == observed:
+        return None
+    return (f'The app on disk (ChatGPT {observed[0]}, CUA {observed[1]}) differs from the one recorded when LCU '
+            f'was installed (ChatGPT {recorded[0]}, CUA {recorded[1]}). Agents that started before the change '
+            'may be running a mix of old and new files: stop them, restart them, and rerun the LCU installer '
+            'to update the record.')
+
+
 def assess_release(root, descriptor=None, metadata=None):
     observed = observe(root, descriptor, metadata)
     return assess(root, **observed)

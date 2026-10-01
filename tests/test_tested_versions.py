@@ -146,6 +146,24 @@ class TestedVersionTests(unittest.TestCase):
         self.assertIn('Warning: ChatGPT 27.1.1 with CUA', out.getvalue())
         self.assertIn('LCU will still use it', out.getvalue())
 
+    def test_status_and_doctor_report_an_app_changed_since_install(self):
+        self.make_release()
+        self.record(entry())
+        descriptor = json.loads((self.root / 'installation.json').read_text())
+        descriptor.update(package_version=PAIR['app_version'], runtime=PAIR['runtime'])
+        (self.root / 'installation.json').write_text(json.dumps(descriptor))
+        self.assertIsNone(json.loads(self.run_status('--json'))['changed_since_install'])
+        upgraded = {'version': '27.2.0', 'runtime': PAIR['runtime']}
+        report = json.loads(self.run_status('--json', metadata=upgraded))
+        self.assertIn('differs from the one recorded', report['changed_since_install'])
+        self.assertIn(PAIR['app_version'], report['changed_since_install'])
+        self.assertIn('stop them, restart them', self.run_status(metadata=upgraded))
+        out = io.StringIO()
+        resolved = (self.root / 'app', self.root / 'app/resources', self.root / 'app/resources/cua_node', upgraded)
+        with contextlib.redirect_stdout(out):
+            doctor.main(self.root, ['--non-interactive'], resolved=resolved, env={})
+        self.assertIn('differs from the one recorded', out.getvalue())
+
     def test_setup_reports_an_untested_pair_and_still_registers(self):
         prefix = self.root / 'prefix'
         current = prefix / 'current'
