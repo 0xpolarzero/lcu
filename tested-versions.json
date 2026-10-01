@@ -21,6 +21,24 @@
       "evidence": "docs/releases/0.7.0.md"
     },
     {
+      "platform": "linux",
+      "architecture": "arm64",
+      "app_version": "26.928.31416",
+      "runtime": "0.0.27/20260927214556-b77d38801cca",
+      "app_sha256": "b3c3f37dedfc57db72e810a1dc5be7b22586f0b99b7d4875868b06bdd855ba86",
+      "lcu_version": "0.8.0",
+      "evidence": "docs/releases/0.8.0.md"
+    },
+    {
+      "platform": "linux",
+      "architecture": "x64",
+      "app_version": "26.928.31416",
+      "runtime": "0.0.27/20260927214556-b77d38801cca",
+      "app_sha256": "c463727f1ed5dced78338c8e2a65d889bd153276ff373fd77698ccb9af32d181",
+      "lcu_version": "0.8.0",
+      "evidence": "docs/releases/0.8.0.md"
+    },
+    {
       "platform": "darwin",
       "architecture": "arm64",
       "app_version": "26.917.62051",
