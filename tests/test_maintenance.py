@@ -119,6 +119,24 @@ class PruneTests(unittest.TestCase):
                          {'0.5.0-aaaaaaaaaaaa'})
         self.assertEqual({p.name for p in (self.prefix / 'apps').iterdir()}, {'a' * 64})
 
+    def test_in_place_linux_release_reclaims_copies_from_earlier_versions(self):
+        self._gen('1.0.0-x64-0123456789abcdef')
+        installed = Path(self.temp.name).resolve() / 'usr/lib/chatgpt'
+        installed.mkdir(parents=True)
+        cur = self.prefix / 'releases' / '0.8.0-aaaaaaaaaaaa'
+        cur.mkdir(parents=True)
+        (cur / 'app').symlink_to(installed, target_is_directory=True)
+        (cur / 'installation.json').write_text(json.dumps(
+            {'app': str(installed), 'architecture': 'x64', 'package_version': '1.0.0', 'runtime': 'r'}))
+        os.utime(cur, (300, 300))
+        self._release('0.7.0-bbbbbbbbbbbb', '1.0.0-x64-0123456789abcdef', 200)
+        self._current_posix(cur.name)
+        self._run(cur, ['--keep', '1', '--yes'])
+        self.assertEqual({p.name for p in (self.prefix / 'releases').iterdir()},
+                         {'0.8.0-aaaaaaaaaaaa'})
+        self.assertEqual(list((self.prefix / 'apps').iterdir()), [])
+        self.assertTrue(installed.is_dir())
+
     def test_macos_has_no_app_generations(self):
         cur = self.prefix / 'releases' / '0.5.0-aaaaaaaaaaaa'
         cur.mkdir(parents=True)

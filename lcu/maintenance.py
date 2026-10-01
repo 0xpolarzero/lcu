@@ -1,10 +1,12 @@
 """`lcu prune`: drop superseded release and app generations to reclaim space.
 
-Each install publishes a new `<prefix>/releases/<name>` and, on Linux/Windows,
-a private app generation under `<prefix>/apps/`; nothing removes the old ones.
-Pruning keeps the current release plus the most recent others and every app
-generation a kept release still references, refusing to touch anything that
-does not match the layout the installers create.
+Each install publishes a new `<prefix>/releases/<name>`. Windows also keeps a
+private app generation under `<prefix>/apps/`; LCU 0.7.0 and earlier did the
+same on Linux, which now uses the installed app in place. Nothing removes old
+generations automatically. Pruning keeps the current release plus the most
+recent others and every app generation a kept release still references, so
+it also reclaims Linux app copies left by earlier versions. It refuses to
+touch anything that does not match the layout the installers create.
 """
 import argparse
 import json
@@ -80,6 +82,8 @@ def _generation_dir(release, apps, windows):
     app = descriptor.get('app')
     if not isinstance(app, str) or not app:
         raise ValueError(f'Release {release.name} has no app descriptor.')
+    if not windows and Path(app).is_absolute() and 'sha256' not in descriptor:
+        return None  # Linux release using the installed app in place.
     resolved = (Path(app) if windows else (release / app)).resolve()
     apps = apps.resolve()
     for candidate in (resolved, *resolved.parents):

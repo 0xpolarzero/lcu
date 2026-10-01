@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lcu.runtime import environment, main
+from lcu.runtime import environment, main, paths
 from lcu.browser import install
 
 
@@ -19,45 +19,17 @@ class UpstreamRuntimeTests(unittest.TestCase):
         base = Path(self.temporary.name)
         self.root = base / 'releases/release'
         self.root.mkdir(parents=True)
-        version = '26.924.22138'
-        runtime_version = 'fixture-runtime-new'
-        tree_digest = 'a' * 64
-        generation = base / 'apps' / f'{version}-arm64-{tree_digest[:16]}'
-        actual_app = generation / 'payload/usr/lib/chatgpt'
-        resources = actual_app / 'resources'
-        runtime = resources / 'cua_node'
-        for relative in (
-            'bin/node', 'bin/node_repl',
-            'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
-        ):
-            path = runtime / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('fixture')
-            path.chmod(0o755)
-        for relative in (
-            'codex', 'codex-code-mode-host',
-            'plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
-            'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json',
-        ):
-            path = resources / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('fixture')
-            path.chmod(0o755)
-        (runtime / 'manifest.json').write_text(json.dumps({
-            'platform': 'linux', 'arch': 'arm64', 'runtime_archive_version': runtime_version,
-        }))
-        (generation / 'installed.json').write_text(json.dumps({
-            'package_version': version, 'runtime': runtime_version, 'architecture': 'arm64',
-            'sha256': tree_digest, 'application': 'payload/usr/lib/chatgpt',
-        }))
-        (self.root / 'app').symlink_to(os.path.relpath(actual_app, self.root), target_is_directory=True)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_installation import _application_fixture
+        self.app = _application_fixture(base / 'usr/lib/chatgpt', runtime_version='fixture-runtime-new').resolve()
+        (self.root / 'app').symlink_to(self.app, target_is_directory=True)
         (self.root / 'runtime.lock.json').write_text(json.dumps({
             'runtime': 'fixture-runtime', 'version': '26.915.31945',
             'architectures': {'arm64': {'sha256': 'fixture-digest'}},
         }))
         (self.root / 'installation.json').write_text(json.dumps({
-            'app': 'app', 'architecture': 'arm64', 'package_version': version,
-            'runtime': runtime_version, 'sha256': tree_digest,
+            'app': str(self.app), 'architecture': 'arm64', 'package_version': '26.924.22138',
+            'runtime': 'fixture-runtime-new',
         }))
 
     def tearDown(self):
@@ -259,13 +231,21 @@ class UpstreamRuntimeTests(unittest.TestCase):
                 main(self.root, [])
         execute.assert_not_called()
 
-    def test_selected_linux_metadata_must_match_managed_marker_and_manifest(self):
-        marker = self.root / 'app'
-        resolved_marker = marker.resolve().parents[3] / 'installed.json'
-        data = json.loads(resolved_marker.read_text())
-        data['runtime'] = 'another-runtime'
-        resolved_marker.write_text(json.dumps(data))
-        with self.assertRaisesRegex(ValueError, 'identity does not match'):
+    def test_selected_linux_app_is_used_in_place_and_reports_observed_runtime(self):
+        manifest = self.app / 'resources/cua_node/manifest.json'
+        data = json.loads(manifest.read_text())
+        data['runtime_archive_version'] = 'upgraded-runtime'
+        manifest.write_text(json.dumps(data))
+        resolved = paths(self.root)
+        self.assertEqual(resolved[0].resolve(), self.app)
+        self.assertEqual(resolved[3], {'version': '26.924.22138', 'runtime': 'upgraded-runtime'})
+
+    def test_selected_linux_app_from_another_architecture_is_rejected(self):
+        manifest = self.app / 'resources/cua_node/manifest.json'
+        data = json.loads(manifest.read_text())
+        data['arch'] = 'x64'
+        manifest.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, 'unsupported platform, architecture.*Rerun'):
             environment(self.root)
 
     def test_removed_embedded_browser_flag_has_migration_error(self):

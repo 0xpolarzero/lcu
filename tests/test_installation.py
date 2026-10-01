@@ -1,10 +1,8 @@
 import io
 import os
-import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,9 +18,8 @@ from lcu.runtime import environment
 from lcu.session import discover
 from lcu.setup import Change, apply_changes, regular_path
 from install import checked_prefix, install, main as install_main
-from installed_app import (_cached_package, _check_package_identity, _validate_app,
-                           _download, preflight as preflight_app, provision as provision_app,
-                           _tree_inventory, _inventory_digest)
+from installed_app import _download, select as select_app
+from lcu.platforms import resolve_installed_linux_app
 from bundle import seal
 
 
@@ -81,14 +78,9 @@ def _application_fixture(root, *, version='26.924.22138', runtime_version='runti
     return app
 
 
-def _provisioned_generation(root, application):
-    generation = Path(root) / 'apps' / ('26.924.22138-arm64-' + 'b' * 16)
-    generation.mkdir(parents=True)
-    (generation / 'installed.json').write_text(json.dumps({
-        'package_version': '26.924.22138', 'runtime': 'runtime-new', 'architecture': 'arm64',
-        'sha256': 'b' * 64, 'application': 'payload/usr/lib/chatgpt',
-    }))
-    return application, generation
+def _selected(application):
+    return application, {'package_version': '26.924.22138', 'runtime': 'runtime-new',
+                         'architecture': 'arm64'}
 
 
 class InstallationTests(unittest.TestCase):
@@ -130,19 +122,13 @@ class InstallationTests(unittest.TestCase):
             _download({'source': source.as_uri()}, {'deb_arch': 'arm64', 'sha256': '0' * 64},
                       self.root / 'download')
 
-    def test_missing_installed_app_fails_before_prefix_writes_or_download(self):
+    def test_missing_installed_app_fails_before_prefix_writes(self):
         prefix = self.root / 'lcu'
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
-                'source': 'https://invalid/{deb_arch}.deb',
-                'architectures': {'arm64': {'deb_arch': 'arm64', 'sha256': 'a' * 64}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
         missing = self.root / 'missing-chatgpt'
-        for operation in (preflight_app, provision_app):
-            with patch('installed_app.DEFAULT_APP_PATH', missing), \
-                 patch('installed_app._download', side_effect=AssertionError('network reached')):
-                with self.assertRaisesRegex(ValueError, 'chatgpt.com/download/'):
-                    operation(prefix, 'arm64', offline=True, root=self.root)
-            self.assertFalse(prefix.exists())
+        with patch('installed_app.DEFAULT_APP_PATH', missing):
+            with self.assertRaisesRegex(ValueError, 'chatgpt.com/download/'):
+                select_app('arm64', execute=False)
+        self.assertFalse(prefix.exists())
 
     def test_missing_installed_app_fails_before_apt_or_prefix_writes(self):
         prefix = self.root / 'lcu'
@@ -175,7 +161,7 @@ class InstallationTests(unittest.TestCase):
             with patch('install.DEFAULT_APP_PATH', existing_app), \
                  patch('install.setup.validate', return_value=(account, ['pi'])), \
                  patch('install.architecture', return_value='arm64'), \
-                 patch('install.verify'), patch('install.preflight_app'), \
+                 patch('install.verify'), patch('install.select_app'), \
                  patch('install.install'), patch('install.setup.installer_environment'), \
                  patch('install.subprocess.run') as run:
                 run.return_value.returncode = 0
@@ -197,7 +183,7 @@ class InstallationTests(unittest.TestCase):
             with patch('install.DEFAULT_APP_PATH', existing_app), \
                  patch('install.setup.validate', return_value=(account, ['pi'])), \
                  patch('install.architecture', return_value='arm64'), \
-                 patch('install.verify'), patch('install.preflight_app'), \
+                 patch('install.verify'), patch('install.select_app'), \
                  patch('install.install'), patch('install.setup.installer_environment'), \
                  patch('install.subprocess.run') as run, \
                  patch('sys.stderr', io.StringIO()) as stderr:
@@ -209,169 +195,43 @@ class InstallationTests(unittest.TestCase):
             self.assertIn('agent registration failed', stderr.getvalue())
             self.assertIn(str(base / 'lcu' / 'current/bin/lcu'), stderr.getvalue())
 
-    def test_validated_package_cache_is_reused_offline_and_corruption_fails_closed(self):
-        prefix = self.root / 'lcu'
-        prefix.mkdir()
-        source = self.root / 'official.deb'
-        source.write_bytes(b'pinned package bytes')
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        lock = {'version': '26.915.31945'}
-        entry = {'sha256': digest}
-        with patch('installed_app._package_identity', return_value='26.915.31945'):
-            cached = _cached_package(prefix, 'arm64', lock, entry, package=source)
-            self.assertEqual(cached.read_bytes(), source.read_bytes())
-            self.assertEqual(_cached_package(prefix, 'arm64', lock, entry, offline=True), cached)
-        cached.write_bytes(b'corrupt cache')
-        with patch('installed_app._package_identity', return_value='26.915.31945'), \
-             self.assertRaisesRegex(ValueError, 'Cached application package is corrupt'):
-            _cached_package(prefix, 'arm64', lock, entry, offline=True)
-
-    def test_interrupted_package_staging_recovers_without_network(self):
-        prefix = self.root / 'lcu'
-        prefix.mkdir()
-        source = self.root / 'official.deb'
-        source.write_bytes(b'pinned package bytes')
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
-        lock = {'version': '26.915.31945', 'source': 'https://invalid/{deb_arch}.deb'}
-        entry = {'sha256': digest, 'deb_arch': 'arm64'}
-        name = f"chatgpt_{lock['version']}_arm64_{digest[:16]}.deb"
-        cache = prefix / 'cache'
-        cache.mkdir()
-        stage = cache / ('.' + name + '.stage')
-        stage.write_bytes(b'interrupted copy')
-        with patch('installed_app._package_identity', return_value=lock['version']):
-            cached = _cached_package(prefix, 'arm64', lock, entry, package=source)
-        self.assertEqual(cached.read_bytes(), source.read_bytes())
-        self.assertFalse(stage.exists())
-        cached.unlink()
-        download = cache / ('.' + name + '.download')
-        download.write_bytes(source.read_bytes())
-        with patch('installed_app._download', side_effect=AssertionError('network used')), \
-             patch('installed_app._package_identity', return_value=lock['version']):
-            self.assertEqual(_cached_package(prefix, 'arm64', lock, entry, offline=True), cached)
-        self.assertEqual(cached.read_bytes(), source.read_bytes())
-        self.assertFalse(download.exists())
-
-    def test_wrong_local_package_is_rejected_before_deb_extraction(self):
-        prefix = self.root / 'lcu'
-        package = self.root / 'wrong.deb'
-        prefix.mkdir()
-        package.write_bytes(b'not the pinned package')
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
-                'source': 'https://invalid/{deb_arch}.deb',
-                'architectures': {'arm64': {'deb_arch': 'arm64', 'sha256': 'a' * 64}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        with patch('installed_app._package_identity',
-                   side_effect=ValueError('Unexpected ChatGPT package identity')):
-            with self.assertRaisesRegex(ValueError, 'Unexpected ChatGPT package identity'):
-                provision_app(prefix, 'arm64', package=package, root=self.root)
-        self.assertEqual(list((prefix / 'apps').iterdir()), [])
-
-    def test_existing_app_accepts_its_actual_app_and_runtime_versions(self):
+    def test_existing_app_is_selected_in_place_with_its_actual_versions(self):
         app = _application_fixture(self.root / 'chatgpt', relocated=True)
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
-                'architectures': {'arm64': {'sha256': 'a' * 64,
-                                            'components': {'resources/app.asar': '0' * 64}}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        application, generation = provision_app(
-            self.root / 'lcu', 'arm64', existing_app=app, offline=True, root=self.root)
-        installed = json.loads((generation / 'installed.json').read_text())
-        self.assertEqual(application, generation / 'payload/usr/lib/chatgpt')
-        self.assertEqual(installed['package_version'], '26.924.22138')
-        self.assertEqual(installed['runtime'], 'runtime-new')
-        self.assertEqual(installed['architecture'], 'arm64')
-        self.assertEqual(installed['sha256'], _inventory_digest(_tree_inventory(application)))
-        self.assertEqual(generation.name, f"26.924.22138-arm64-{installed['sha256'][:16]}")
-        self.assertEqual(installed['package_sha256'], None)
+        application, descriptor = select_app('arm64', existing_app=app, execute=False)
+        self.assertEqual(application, app.resolve())
+        self.assertEqual(descriptor, {'package_version': '26.924.22138', 'runtime': 'runtime-new',
+                                      'architecture': 'arm64'})
 
-    def test_missing_required_runtime_file_rejects_a_different_app_version(self):
+    def test_missing_required_runtime_file_rejects_the_app(self):
         app = _application_fixture(self.root / 'chatgpt')
         (app / 'resources/cua_node/bin/node_repl').unlink()
         with self.assertRaisesRegex(ValueError, 'Application payload is incomplete'):
-            _validate_app(app, 'arm64', execute=False)
+            resolve_installed_linux_app(app, arch='arm64')
 
-    def test_managed_generation_inventory_drift_is_rejected(self):
+    def test_wrong_architecture_app_is_rejected(self):
+        app = _application_fixture(self.root / 'chatgpt', arch='x64')
+        with self.assertRaisesRegex(ValueError, 'unsupported platform, architecture'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_install_links_the_installed_app_without_copying_it(self):
+        prefix = self.root / 'lcu'
         app = _application_fixture(self.root / 'chatgpt')
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
-                'architectures': {'arm64': {'sha256': 'a' * 64}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        prefix = self.root / 'lcu'
-        _, generation = provision_app(prefix, 'arm64', existing_app=app, root=self.root)
-        managed_app = generation / 'payload/usr/lib/chatgpt'
-        (managed_app / 'resources/plugins/openai-bundled/plugins/browser/install.js').write_text('changed')
-        with self.assertRaisesRegex(ValueError, 'incomplete or corrupt'):
-            preflight_app(prefix, 'arm64', existing_app=app, root=self.root)
-
-    def test_local_package_uses_observed_version_runtime_and_content_identity(self):
-        prefix = self.root / 'lcu'
-        package = self.root / 'newer-chatgpt.deb'
-        package.write_bytes(b'local package bytes unlike the pinned download')
-        app = _application_fixture(self.root / 'package-app', version='26.924.22138',
-                                   runtime_version='runtime-new', relocated=True)
-        inventory = _tree_inventory(app)
-        manifest = json.loads((app / 'resources/cua_node/manifest.json').read_text())
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin',
-                'source': 'https://invalid/{deb_arch}',
-                'architectures': {'arm64': {'deb_arch': 'arm64', 'sha256': 'a' * 64}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        package_sha = hashlib.sha256(package.read_bytes()).hexdigest()
-        real_run = subprocess.run
-
-        def extract_selected(command, **options):
-            if command[:2] == ['dpkg-deb', '--extract']:
-                target = Path(command[3]) / 'usr/lib/chatgpt'
-                target.parent.mkdir(parents=True)
-                shutil.copytree(app, target, symlinks=True)
-                return subprocess.CompletedProcess(command, 0)
-            return real_run(command, **options)
-
-        with patch('installed_app._package_identity', return_value='26.924.22138'), \
-             patch('installed_app._package_inventory',
-                   return_value=('26.924.22138', manifest, inventory)) as package_inventory, \
-             patch('installed_app.subprocess.run', side_effect=extract_selected):
-            preflight_app(prefix, 'arm64', package=package, root=self.root)
-            application, generation = provision_app(prefix, 'arm64', package=package, root=self.root)
-        installed = json.loads((generation / 'installed.json').read_text())
-        self.assertEqual(installed['package_version'], '26.924.22138')
-        self.assertEqual(installed['runtime'], 'runtime-new')
-        self.assertEqual(installed['sha256'], _inventory_digest(inventory))
-        self.assertEqual(installed['package_sha256'], package_sha)
-        self.assertEqual(installed['source'], 'local-package')
-        self.assertEqual(generation.name, f"26.924.22138-arm64-{installed['sha256'][:16]}")
-        self.assertEqual(package_inventory.call_count, 2)
-        with patch('installed_app._package_identity', return_value='26.924.22138'), \
-             patch('installed_app._package_inventory', side_effect=AssertionError('re-extracted package')):
-            reused_app, reused_generation = provision_app(
-                prefix, 'arm64', package=package, offline=True, root=self.root)
-        self.assertEqual(reused_app, application)
-        self.assertEqual(reused_generation, generation)
-
-    def test_offline_existing_app_does_not_require_an_unrelated_pinned_package(self):
-        app = _application_fixture(self.root / 'chatgpt')
-        lock = {'version': '26.915.31945', 'runtime': 'runtime-pin', 'source': 'unused',
-                'architectures': {'arm64': {'deb_arch': 'arm64', 'sha256': 'a' * 64}}}
-        (self.root / 'runtime.lock.json').write_text(json.dumps(lock))
-        prefix = self.root / 'lcu'
-        preflight_app(prefix, 'arm64', existing_app=app, offline=True, root=self.root)
+        source = self.root / 'bundle'
+        source.mkdir()
+        (source / 'payload').write_text('new version')
+        (source / 'runtime.lock.json').write_text(json.dumps({
+            'version': '26.915.31945', 'architectures': {'arm64': {'sha256': '0' * 64}}}))
+        seal(source, 'arm64')
+        with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
+             patch('install.validate_release'):
+            release = install(prefix, existing_app=app)
+        self.assertEqual(os.readlink(release / 'app'), str(app.resolve()))
+        descriptor = json.loads((release / 'installation.json').read_text())
+        self.assertEqual(descriptor, {'package_version': '26.924.22138', 'runtime': 'runtime-new',
+                                      'architecture': 'arm64', 'app': str(app.resolve())})
+        self.assertFalse((prefix / 'apps').exists())
         self.assertFalse((prefix / 'cache').exists())
-
-    def test_dpkg_deb_labeled_identity_output_is_parsed_exactly(self):
-        lock = {'version': '26.915.31945'}
-        _check_package_identity(
-            'Package: chatgpt\nVersion: 26.915.31945\nArchitecture: arm64\n', 'arm64', lock)
-        with self.assertRaisesRegex(ValueError, 'Unexpected ChatGPT package identity'):
-            _check_package_identity(
-                'Package: unrelated\nVersion: 26.915.31945\nArchitecture: arm64\n', 'arm64', lock)
-
-    def test_local_package_accepts_a_different_chatgpt_version(self):
-        version = _check_package_identity(
-            'Package: chatgpt\nVersion: 26.924.22138\nArchitecture: arm64\n', 'arm64')
-        self.assertEqual(version, '26.924.22138')
-
-    def test_package_version_cannot_escape_cache_or_generation_paths(self):
-        with self.assertRaisesRegex(ValueError, 'unsafe path characters'):
-            _check_package_identity(
-                'Package: chatgpt\nVersion: ../../outside\nArchitecture: arm64\n', 'arm64')
+        self.assertEqual((prefix / 'current').resolve(), release.resolve())
 
     def test_failed_upgrade_preserves_active_release(self):
         prefix = self.root / 'lcu'
@@ -388,9 +248,9 @@ class InstallationTests(unittest.TestCase):
         seal(source, 'arm64')
         application = self.root / 'chatgpt'
         application.mkdir()
-        provided = _provisioned_generation(self.root, application)
+        provided = _selected(application)
         with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
-             patch('install.provision_app', return_value=provided), \
+             patch('install.select_app', return_value=provided), \
              patch('install.validate_release', side_effect=ValueError('runtime validation failed')):
             with self.assertRaisesRegex(ValueError, 'runtime validation failed'):
                 install(prefix, existing_app=application)
@@ -413,7 +273,7 @@ class InstallationTests(unittest.TestCase):
         seal(source, 'arm64')
         application = self.root / 'chatgpt'
         application.mkdir()
-        provided = _provisioned_generation(self.root, application)
+        provided = _selected(application)
 
         start = threading.Barrier(2)
         state_lock = threading.Lock()
@@ -438,7 +298,7 @@ class InstallationTests(unittest.TestCase):
                 errors.append(exc)
 
         with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
-             patch('install.provision_app', return_value=provided), \
+             patch('install.select_app', return_value=provided), \
              patch('install.validate_release', side_effect=validate):
             threads = [threading.Thread(target=run_install) for _ in range(2)]
             for thread in threads:
@@ -467,7 +327,7 @@ class InstallationTests(unittest.TestCase):
              patch('install.setup.validate', return_value=(None, [])), \
              patch('install.checked_prefix', return_value=prefix), \
              patch('install.architecture', return_value='arm64'), \
-             patch('install.verify'), patch('install.preflight_app'), \
+             patch('install.verify'), patch('install.select_app'), \
              patch('install.os.getuid', return_value=0), patch('install.shutil.which', return_value='/usr/bin/apt-get'), \
              patch('install.subprocess.run', side_effect=[None, failure]) as run, \
              patch('install.install', side_effect=AssertionError('release install reached')):
@@ -497,10 +357,10 @@ class InstallationTests(unittest.TestCase):
         seal(source, 'arm64')
         application = self.root / 'chatgpt'
         application.mkdir()
-        provided = _provisioned_generation(self.root, application)
+        provided = _selected(application)
 
         with patch('install.SOURCE', source), patch('install.architecture', return_value='arm64'), \
-             patch('install.provision_app', return_value=provided), \
+             patch('install.select_app', return_value=provided), \
              patch('install.validate_release'):
             with self.assertRaisesRegex(ValueError, 'Unexpected .next path'):
                 install(prefix, existing_app=application)
@@ -510,25 +370,14 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(list((prefix / 'releases').iterdir()), [old])
 
     def test_caller_security_settings_survive(self):
-        source_app = _application_fixture(self.root / 'source-app')
-        inventory = _tree_inventory(source_app)
-        digest = _inventory_digest(inventory)
-        version = '26.924.22138'
-        generation = self.root / 'apps' / f'{version}-arm64-{digest[:16]}'
-        app = generation / 'payload/usr/lib/chatgpt'
-        app.parent.mkdir(parents=True)
-        shutil.copytree(source_app, app, symlinks=True)
-        (generation / 'installed.json').write_text(json.dumps({
-            'package_version': version, 'runtime': 'runtime-new', 'architecture': 'arm64',
-            'sha256': digest, 'application': 'payload/usr/lib/chatgpt', 'inventory': inventory,
-        }))
-        (self.root / 'app').symlink_to(os.path.relpath(app, self.root), target_is_directory=True)
+        app = _application_fixture(self.root / 'chatgpt').resolve()
+        (self.root / 'app').symlink_to(app, target_is_directory=True)
         (self.root / 'runtime.lock.json').write_text(json.dumps({
             'runtime': 'runtime-pin', 'version': '26.915.31945',
             'architectures': {'arm64': {'sha256': 'pinned-digest'}}}))
         (self.root / 'installation.json').write_text(json.dumps({
-            'app': 'app', 'architecture': 'arm64',
-            'package_version': version, 'runtime': 'runtime-new', 'sha256': digest}))
+            'app': str(app), 'architecture': 'arm64',
+            'package_version': '26.924.22138', 'runtime': 'runtime-new'}))
         settings = {'NODE_REPL_FORCE_STRICT_AUTO_REVIEW': '1', 'NODE_REPL_ENFORCE_MODEL_CHECK': '1',
                     'CODEX_CLI_PATH': '/trusted/codex', 'NODE_REPL_ENABLE_NETWORK_ISOLATION': '1',
                     'NODE_REPL_JS_BANNER': 'configured startup', 'NODE_REPL_TRUSTED_SERVICES': 'configured services'}

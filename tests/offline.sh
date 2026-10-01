@@ -54,7 +54,7 @@ test "$(readlink -f /opt/lcu/current)" = "$selected"
 test -f "$selected/bin/lcu"
 
 # Exercise separate Python/installer processes racing on the same prefix. Both
-# reuse the managed copy of the already selected app above.
+# link the same installed app in place.
 "$bundle/scripts/install.sh" --prefix /opt/lcu --user lcutester \
   --runtime-only --skip-system --existing-app "$app" --offline --yes \
   >/tmp/lcu-install-a.log 2>&1 &
@@ -93,12 +93,10 @@ package_version = subprocess.run(
 assert descriptor['package_version'] == package_version, 'selected app version differs from the local DEB'
 runtime_manifest = json.loads((application / 'resources/cua_node/manifest.json').read_text())
 assert descriptor['runtime'] == runtime_manifest['runtime_archive_version'], 'selected runtime metadata differs from the app'
-generation = application.parents[3]
-installed = json.loads((generation / 'installed.json').read_text())
-for field in ('package_version', 'runtime', 'architecture', 'sha256'):
-    assert descriptor[field] == installed[field], f'installation descriptor differs from managed marker: {field}'
-assert installed['source'] == 'existing-app' and installed['package_sha256'] is None
-assert generation.name == f"{descriptor['package_version']}-{descriptor['architecture']}-{descriptor['sha256'][:16]}"
+assert application == Path('/tmp/lcu-offline-app/usr/lib/chatgpt'), 'release does not use the installed app in place'
+assert os.readlink(release / 'app') == descriptor['app'] == str(application)
+assert 'sha256' not in descriptor
+assert not (prefix / 'apps').exists(), 'installer copied the application'
 actual = {}
 for path in sorted(release.rglob('*')):
     relative = path.relative_to(release).as_posix()
@@ -118,11 +116,11 @@ for path in sorted(release.rglob('*')):
         raise AssertionError(f'unsupported release entry: {relative}')
 assert actual == manifest['files'], 'selected release does not match its bundle manifest'
 assert (application / 'resources/cua_node/manifest.json').is_file()
-print(f"Selected ChatGPT {descriptor['package_version']}; CUA {descriptor['runtime']}; generation {generation.name}")
+print(f"Selected ChatGPT {descriptor['package_version']}; CUA {descriptor['runtime']}; in place at {application}")
 PY
 test ! -e /opt/lcu/.next
 test -z "$(find /opt/lcu/releases -maxdepth 1 -name '.build-*' -print -quit)"
-test -z "$(find /opt/lcu/apps -maxdepth 1 -name '.app-stage-*' -print -quit)"
+test ! -e /opt/lcu/apps
 test ! -e /opt/lcu/cache
 python3 -m unittest discover -b -s /src/tests -p 'test_*.py' -q
 python3 /src/tests/registration.py

@@ -1,10 +1,10 @@
 # Installed application inventory
 
-LCU's source and thin archives carry the [pin and selected component hashes](../runtime.lock.json), not a copy of the official application. Installation verifies the exact architecture-specific official `.deb` SHA-256 before extraction. The package supplies the complete application, including its original CUA runtime, CLI, Chrome plugin, instructions, notices and optional code that LCU does not expose.
+LCU's source and thin archives carry the [pin and selected component hashes](../runtime.lock.json), not a copy of the official application. Development tests verify the exact architecture-specific official `.deb` SHA-256 before extraction; the installer never downloads or extracts a package. The package supplies the complete application, including its original CUA runtime, CLI, Chrome plugin, instructions, notices and optional code that LCU does not expose.
 
 ## Local verification
 
-[The installer](../scripts/installed_app.py) checks package identity, runtime manifest, required executables, links, modes and component hashes. It derives an inventory of every file, directory and symlink from the verified package. A supplied existing app must match that inventory before selection. The managed generation stores its inventory locally and is checked on reuse; it is shared by agents and retained across LCU upgrades. The inventory is not redistributed.
+[The installer](../scripts/installed_app.py) checks the runtime manifest, architecture, required files and executables, and reads the app version from `app.asar` or its dpkg ownership. It uses the installed app in place and keeps no Linux app copy or tree inventory; LCU 0.7.0 and earlier copied the app into a managed generation under `<prefix>/apps`, which `lcu prune` now removes.
 
 [Setup](../lcu/setup.py) registers no skill and copies no original documents: the original runtime delivers its instructions through the tool, as in official Codex. It removes the `lcu` skill that earlier versions registered. [Installation tests](../tests/test_installation.py), [instruction tests](../tests/test_instructions.py) and the [source-distribution test](../tests/test_distribution.py) cover the corresponding boundaries.
 

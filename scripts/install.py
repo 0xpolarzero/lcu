@@ -15,8 +15,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE))
 from lcu import setup
 from bundle import VERSION, architecture, verify
-from installed_app import (DEFAULT_APP_PATH, preflight as preflight_app,
-                           provision as provision_app)
+from installed_app import DEFAULT_APP_PATH, select as select_app
 
 
 # Ubuntu 24.04 names for the pinned official application's Depends, plus LCU's
@@ -82,18 +81,11 @@ def install(prefix, *, app_package=None, existing_app=None, offline=False, accou
     if app_package is not None:
         raise ValueError('--app-package cannot install an app for you. ' +
                          setup.app_prerequisite_message(alternate_location=True))
-    existing_app = Path(existing_app).expanduser() if existing_app is not None else DEFAULT_APP_PATH
-    if not existing_app.is_dir():
-        raise ValueError(setup.app_prerequisite_message(existing_app, alternate_location=True))
     arch = architecture()
     verify(SOURCE, arch)
+    application, descriptor = select_app(arch, existing_app=existing_app, account=account)
     prefix.mkdir(parents=True, exist_ok=True)
-    application, generation = provision_app(prefix, arch, package=None,
-                                           existing_app=existing_app, offline=offline, root=SOURCE,
-                                           account=account)
-    installed = json.loads((generation / 'installed.json').read_text())
-    descriptor = {key: installed[key] for key in
-                  ('package_version', 'runtime', 'architecture', 'sha256')}
+    (prefix / '.lcu-install').touch(exist_ok=True)
     return select_release(prefix, arch, application, descriptor, account=account)
 
 
@@ -110,10 +102,10 @@ def select_release(prefix, arch, application, descriptor, *, account=None,
         try:
             shutil.copytree(source, release, dirs_exist_ok=True, symlinks=True)
             verify(release, arch, target)
-            app_relative = str(application) if target == 'darwin' else os.path.relpath(application, release)
-            (release / 'app').symlink_to(app_relative, target_is_directory=True)
+            # The release links to the installed app; no app files are copied.
+            (release / 'app').symlink_to(str(application), target_is_directory=True)
             (release / 'installation.json').write_text(json.dumps(
-                {**descriptor, 'app': app_relative}, indent=2) + '\n')
+                {**descriptor, 'app': str(application)}, indent=2) + '\n')
             validate_release(release, account)
             current = prefix / 'current'
             if current.exists() and not current.is_symlink():
@@ -173,8 +165,7 @@ def main(argv=None):
         setup.installer_environment(Path(account.pw_dir), names, {} if os.getuid() == 0 and account.pw_uid else os.environ)
     # Refuse absent, corrupt, or wrong-architecture payloads before apt or any writes.
     verify(SOURCE, arch)
-    preflight_app(prefix, arch, package=None, existing_app=args.existing_app,
-                  offline=args.offline, root=SOURCE, account=account)
+    select_app(arch, existing_app=args.existing_app, account=account, execute=False)
     if not args.skip_system:
         if os.getuid() != 0 or not shutil.which('apt-get'):
             raise ValueError('Automatic system provisioning requires root and apt-get; otherwise provision dependencies and use --skip-system')

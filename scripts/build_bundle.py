@@ -93,11 +93,10 @@ def build(output, package=None, *, target='linux', app=None):
                          'setup_clients.py', 'codex_hooks.py', 'app_server.py', 'browser.py', 'doctor.py',
                          'maintenance.py', 'native_host.py', 'claude_visibility.py', 'harness_setup.py')
         if target != 'windows':
-            modules += ('session.py',)
+            modules += ('session.py', 'platforms.py')
         for filename in modules:
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
         if target == 'darwin':
-            shutil.copy2(SOURCE / 'lcu/platforms.py', release / 'lcu/platforms.py')
             shutil.copy2(SOURCE / 'lcu/macos_host.py', release / 'lcu/macos_host.py')
             shutil.copy2(SOURCE / 'lcu/macos_sky_service.mjs', release / 'lcu/macos_sky_service.mjs')
         elif target == 'windows':

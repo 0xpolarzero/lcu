@@ -118,7 +118,7 @@ From the extracted release directory, run this in a terminal owned by the existi
 sudo ./scripts/install.sh --user "$(id -un)" --runtime-only
 ~~~
 
-For an app installed elsewhere, add `--existing-app /absolute/path`. LCU leaves that installation in place and keeps a private managed copy under `/opt/lcu`.
+For an app installed elsewhere, add `--existing-app /absolute/path`. LCU uses that installation in place; it does not copy the app.
 
 Then, from a terminal inside the active X11 desktop session, register your harness as the desktop account, without `sudo`. Replace `codex` with `pi` or `claude-code`:
 
@@ -136,9 +136,9 @@ Restart your harness from the desktop session and ask it to use LCU to take a sc
 
 If Codex setup reports unsupported `mcp_tool` hooks, update the public standalone CLI for that account with `npm install -g @openai/codex@latest`, check `codex --version`, and rerun setup. See [Codex CLI setup](ADAPTERS.md#codex-cli).
 
-The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT: the existing app is copied into a private managed generation under the LCU prefix, and LCU leaves the source installation in place.
+The default managed prefix is `/opt/lcu`. Use `--prefix /absolute/dedicated/path` for another location. A user-owned prefix needs system libraries preinstalled and `--skip-system`; `--offline` also requires `--skip-system`. Without `--skip-system`, apt installs LCU's Ubuntu system dependencies. This does not install ChatGPT. Each LCU release links to the installed app and runs it in place; the prefix holds only LCU itself. Updating the app through apt updates what LCU uses, and `lcu --version` reports the version it observes. Restart agents after an app update so no session keeps the old files.
 
-System library installation is a separate apt operation and cannot be rolled back as a single transaction with the LCU selection. Failed app validation or release selection leaves the previous current symlink in place. Existing running processes may still hold old generations; do not remove old app or LCU generations until they have exited.
+System library installation is a separate apt operation and cannot be rolled back as a single transaction with the LCU selection. Failed app validation or release selection leaves the previous current symlink in place. Existing running processes may still hold old LCU generations; do not remove them until they have exited.
 
 The original package's AppArmor profile names /usr/lib/chatgpt/ChatGPT, its Electron UI. LCU directly launches the selected app's Node and CUA REPL, so that profile does not apply to LCU's native path and is not an LCU install requirement. The [ARM64 and x86-64 Ubuntu AppArmor tests](verification/installed-app-2026-09-23.md) passed native computer use and Chrome actions with AppArmor active; they recorded process labels and nonblocking `bwrap` denials. The x86-64 guest ran under KVM on physical AMD hardware. Keep the browser sandbox enabled; do not alter the system AppArmor policy to make a test pass.
 
@@ -210,9 +210,9 @@ Custom harnesses must deliver the original instructions and images, present site
 
 ## Upgrades and rollback
 
-Reinstall with the same prefix. The installer keeps app generations under apps/, LCU generations under releases/, and atomically changes current only after validating the new release. Agent registrations point at current and should be reloaded after a switch. A failed setup can leave completed agent registrations even when another agent fails; its error lists which to retry. Old generations are retained so live processes do not lose their files.
+Reinstall with the same prefix. The installer keeps LCU generations under releases/ (and, on Windows, app generations under apps/), and atomically changes current only after validating the new release. Agent registrations point at current and should be reloaded after a switch. A failed setup can leave completed agent registrations even when another agent fails; its error lists which to retry. Old generations are retained so live processes do not lose their files.
 
-Reclaim that space with `lcu prune [--keep N] [--yes]`. It removes old LCU release directories under `<prefix>/releases` and, on Linux and Windows, the private app generations under `<prefix>/apps` that the kept releases no longer use. It keeps the current release plus the `N-1` most recent (default `--keep 2`). Without `--yes` it is a dry run that lists the paths and sizes it would remove. Stop or restart any agents still using an older release before pruning, so a live process does not lose its files.
+Reclaim that space with `lcu prune [--keep N] [--yes]`. It removes old LCU release directories under `<prefix>/releases` and the private app generations under `<prefix>/apps` that the kept releases no longer use: Windows copies, and Linux copies made by LCU 0.7.0 and earlier. After upgrading on Linux, prune to reclaim the old app copy. It keeps the current release plus the `N-1` most recent (default `--keep 2`). Without `--yes` it is a dry run that lists the paths and sizes it would remove. Stop or restart any agents still using an older release before pruning, so a live process does not lose its files.
 
 ~~~sh
 /opt/lcu/current/bin/lcu prune --keep 2

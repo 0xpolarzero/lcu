@@ -2,7 +2,6 @@
 import json
 import ntpath
 import os
-import re
 from pathlib import Path
 import subprocess
 import sys
@@ -75,56 +74,17 @@ def paths(root, descriptor=None):
             'version': resolved.version, 'runtime': resolved.runtime_version}
     if target != 'linux':
         raise ValueError(f'Unsupported installed application platform: {target}')
-    if (not selected or selected.is_absolute() or
-            (root / selected).resolve() != app.resolve() or
-            arch not in lock['architectures']):
-        raise ValueError('Selected application descriptor does not match the supported architecture and app link.')
-    version = descriptor.get('package_version')
-    runtime_version = descriptor.get('runtime')
-    tree_digest = descriptor.get('sha256')
-    if (not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.+:~_-]*', version) or
-            not isinstance(runtime_version, str) or not runtime_version.strip() or
-            not isinstance(tree_digest, str) or not re.fullmatch(r'[0-9a-f]{64}', tree_digest)):
-        raise ValueError('Selected Linux application descriptor is incomplete or unsupported.')
-    resolved_app = app.resolve(strict=True)
-    if len(resolved_app.parents) < 4:
-        raise ValueError('Selected Linux application is not under a managed generation.')
-    generation = resolved_app.parents[3]
-    apps = generation.parent
-    marker = generation / 'installed.json'
-    expected_generation = f'{version}-{arch}-{tree_digest[:16]}'
-    if (apps.name != 'apps' or generation.name != expected_generation or
-            any(path.is_symlink() for path in (apps, generation, marker)) or
-            not marker.is_file()):
-        raise ValueError('Selected Linux application is not the described managed generation.')
+    if (not selected.is_absolute() or arch not in lock['architectures'] or
+            selected.resolve() != app.resolve()):
+        raise ValueError('Selected application descriptor does not match the supported architecture and app link. '
+                         'Rerun scripts/install.sh.')
+    from .platforms import resolve_installed_linux_app
     try:
-        installed = json.loads(marker.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError('Managed Linux application marker is invalid.') from exc
-    expected = {'package_version': version, 'runtime': runtime_version,
-                'architecture': arch, 'sha256': tree_digest,
-                'application': 'payload/usr/lib/chatgpt'}
-    if any(installed.get(key) != value for key, value in expected.items()):
-        raise ValueError('Managed Linux application identity does not match its release descriptor.')
-    required = (
-        runtime / 'bin/node', runtime / 'bin/node_repl',
-        runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
-        resources / 'plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
-        resources / 'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json',
-    )
-    from .app_layout import locate_codex_tools
-    tools = locate_codex_tools(resources)
-    required += (tools.cli, tools.code_mode_host)
-    if not app.is_dir() or any(not path.is_file() for path in required):
-        raise ValueError(f'Selected official application is incomplete: {app}. Rerun scripts/install.sh.')
-    if any(not os.access(path, os.X_OK) for path in
-           (runtime / 'bin/node', runtime / 'bin/node_repl', tools.cli, tools.code_mode_host)):
-        raise ValueError(f'Selected official application has non-executable tools: {app}. Rerun scripts/install.sh.')
-    manifest = json.loads((runtime / 'manifest.json').read_text())
-    if (manifest.get('platform') != 'linux' or manifest.get('arch') != arch or
-            manifest.get('runtime_archive_version') != runtime_version):
-        raise ValueError('Selected application runtime does not match its release descriptor.')
-    return app, resources, runtime, {'version': version, 'runtime': runtime_version}
+        resolved = resolve_installed_linux_app(selected, arch=arch)
+    except ValueError as exc:
+        raise ValueError(f'{exc}. Rerun scripts/install.sh.') from exc
+    # Launch through the release's link, as before; it resolves to the installed app.
+    return app, resources, runtime, {'version': resolved.version, 'runtime': resolved.runtime_version}
 
 
 def environment(root, resolved=None, *, chrome=False, audio=False, platform=None):

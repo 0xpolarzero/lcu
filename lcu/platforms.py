@@ -1,4 +1,4 @@
-"""Validate an installed signed macOS application for the original CUA runtime."""
+"""Validate an installed official application for the original CUA runtime."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ import os
 from pathlib import Path
 import platform as host_platform
 import plistlib
+import re
 import subprocess
 
 from .app_layout import locate_codex_tools
+from .asar import read_asar_members
 
 
 MAC_BUNDLE_ID = 'com.openai.codex'
@@ -115,4 +117,78 @@ def resolve_installed_mac_app(app_path: Path, *, arch: str | None = None) -> Ins
     _verify_signature(app, MAC_BUNDLE_ID)
     _verify_signature(helper, MAC_HELPER_ID)
     return InstalledApplication(app, resources, runtime, 'mac', version, architecture,
+                                tools.cli, tools.code_mode_host, runtime_version)
+
+
+LINUX_APP_PATH = Path('/usr/lib/chatgpt')
+_VERSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9.+:~_-]*')
+
+
+def _linux_version(app: Path, arch: str) -> str:
+    """Read the selected app version, or confirm that dpkg owns its exact path."""
+    try:
+        package = json.loads(read_asar_members(app / 'resources/app.asar', ('package.json',))['package.json'])
+        version = package.get('version')
+        if isinstance(version, str) and _VERSION.fullmatch(version):
+            return version
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        pass
+    executable = app / 'ChatGPT'
+    try:
+        ownership = subprocess.run(['dpkg-query', '-S', '--', str(executable)],
+                                   check=True, capture_output=True, text=True, timeout=20)
+        owners = [owner for owner, separator, path in
+                  (line.partition(': ') for line in ownership.stdout.splitlines())
+                  if separator and Path(path) == executable and owner.split(':', 1)[0] == 'chatgpt']
+        if len(owners) != 1:
+            raise ValueError('No unique chatgpt package owns the selected executable path')
+        fields = subprocess.run(['dpkg-query', '-W', '--showformat=%v %a', owners[0]],
+                                check=True, capture_output=True, text=True, timeout=20).stdout.split()
+        expected_arch = 'arm64' if arch == 'arm64' else 'amd64'
+        if len(fields) != 2 or fields[1] != expected_arch:
+            raise ValueError('The selected dpkg-owned ChatGPT path has the wrong architecture')
+        if _VERSION.fullmatch(fields[0]):
+            return fields[0]
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError('Cannot determine the selected app version from app.asar or its dpkg-owned path') from exc
+    raise ValueError('Cannot determine the selected app version from app.asar or its dpkg-owned path')
+
+
+def resolve_installed_linux_app(app_path: Path, *, arch: str) -> InstalledApplication:
+    """Validate an installed ChatGPT Linux app in place, without copying or modifying it."""
+    app = Path(app_path).expanduser()
+    if not app.is_dir():
+        raise ValueError(f'Expected an installed ChatGPT application directory: {app}')
+    app = app.resolve(strict=True)
+    resources = app / 'resources'
+    runtime = resources / 'cua_node'
+    manifest_path = runtime / 'manifest.json'
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError(f'Application runtime manifest is missing: {manifest_path}')
+    manifest = json.loads(manifest_path.read_text())
+    runtime_version = manifest.get('runtime_archive_version')
+    if (manifest.get('platform') != 'linux' or manifest.get('arch') != arch or
+            not isinstance(runtime_version, str) or not runtime_version.strip()):
+        raise ValueError('Application runtime manifest has an unsupported platform, architecture, or version')
+    tools = locate_codex_tools(resources)
+    extension_host = resources / f'plugins/openai-bundled/plugins/chrome/extension-host/linux/{arch}/extension-host'
+    required = (
+        app / 'ChatGPT', runtime / 'bin/node', runtime / 'bin/node_repl',
+        runtime / 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs',
+        tools.cli, tools.code_mode_host, resources / 'app.asar',
+        resources / 'plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json',
+        extension_host,
+        resources / 'plugins/openai-bundled/plugins/unified-computer-use/.mcp.json',
+    )
+    missing = [str(path) for path in required if path.is_symlink() or not path.is_file()]
+    browser_plugin = resources / 'plugins/openai-bundled/plugins/browser'
+    if browser_plugin.is_symlink() or not browser_plugin.is_dir():
+        missing.append(str(browser_plugin))
+    if missing:
+        raise ValueError('Application payload is incomplete: ' + ', '.join(missing))
+    for path in (app / 'ChatGPT', runtime / 'bin/node', runtime / 'bin/node_repl',
+                 tools.cli, tools.code_mode_host, extension_host):
+        if not os.access(path, os.X_OK):
+            raise ValueError(f'Application executable is not executable: {path}')
+    return InstalledApplication(app, resources, runtime, 'linux', _linux_version(app, arch), arch,
                                 tools.cli, tools.code_mode_host, runtime_version)
