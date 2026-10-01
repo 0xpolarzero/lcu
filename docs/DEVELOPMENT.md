@@ -62,7 +62,7 @@ dpkg-deb --extract /absolute/chatgpt.deb /absolute/test-app-root
 
 Root is required only for apt and another account's setup; the target app/REPL must be exercised as that unprivileged desktop account. Use an isolated HOME, CODEX_HOME, X11 session and browser profile. Keep the untouched original package baseline independent of LCU helpers, then compare observable GTK/X11/file/clipboard outcomes. Do not count a matching failure, tools/list, browser inventory or extension discovery as a successful browser action.
 
-Run `tests/run.sh` and focused checks inside disposable containers. For focused checks during implementation, run these in the container:
+Run `tests/run.sh` and focused checks inside disposable containers. Besides the writable-extraction gate (`tests/offline.sh`), it runs `tests/offline-readonly.sh`: the package's app is copied into a Docker volume that is mounted read-only at two `/opt/silo/chatgpt/<version>` folders, LCU is installed with `--existing-app` at the first, the GTK desktop suite runs as the target account, and a reinstall at the second path must follow it. The volume is removed afterward. For focused checks during implementation, run these in the container:
 
 ~~~sh
 python3 -m unittest discover -b -s tests -p 'test_*.py'

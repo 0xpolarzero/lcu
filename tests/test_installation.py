@@ -227,6 +227,8 @@ class InstallationTests(unittest.TestCase):
             resolve_installed_linux_app(app, arch='arm64')
 
     def test_app_tree_owned_by_another_account_is_rejected_unless_trusted(self):
+        if os.getuid() == 0:
+            self.skipTest('root-owned files are always trusted')
         app = _application_fixture(self.root / 'chatgpt')
         other = os.getuid()
         with patch('lcu.platforms.os.getuid', return_value=other + 1), \
@@ -238,7 +240,7 @@ class InstallationTests(unittest.TestCase):
 
     def test_writable_ancestor_directory_is_rejected_but_sticky_is_allowed(self):
         app = _application_fixture(self.root / 'shared/chatgpt')
-        (self.root / 'shared').chmod(0o775)  # group access is trusted only for gid 0
+        (self.root / 'shared').chmod(0o777)
         with self.assertRaisesRegex(ValueError, 'shared is writable'):
             resolve_installed_linux_app(app, arch='arm64')
         (self.root / 'shared').chmod(0o1777)
@@ -254,6 +256,8 @@ class InstallationTests(unittest.TestCase):
             resolve_installed_linux_app(app, arch='arm64')
 
     def test_read_only_mount_owned_by_another_account_passes(self):
+        if os.getuid() == 0:
+            self.skipTest('root-owned files are always trusted')
         app = _application_fixture(self.root / 'chatgpt')
         app.chmod(0o777)
         with patch('lcu.platforms.os.getuid', return_value=os.getuid() + 1), \

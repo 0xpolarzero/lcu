@@ -31,4 +31,18 @@ archive=$(find "$output" -maxdepth 1 -name '*.tar.gz' -print)
 docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$output:/bundles:ro" \
   -e PYTHONDONTWRITEBYTECODE=1 "$tag" \
   bash /src/tests/offline.sh "/bundles/$(basename -- "$archive")" /package.deb
+# The same app mounted read-only, in two version folders, as a system install would be.
+version=$(docker run --rm --platform "$platform" "${mounts[@]}" "$tag" dpkg-deb -f /package.deb Version)
+volume="lcu-readonly-app-$$"
+cleanup_volume() { docker volume rm -f "$volume" >/dev/null 2>&1 || true; }
+trap cleanup_volume EXIT
+docker volume create "$volume" >/dev/null
+docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$volume:/app" "$tag" \
+  bash -c 'dpkg-deb --extract /package.deb /tmp/extracted && cp -a /tmp/extracted/usr/lib/chatgpt/. /app/'
+first="/opt/silo/chatgpt/$version"
+second="/opt/silo/chatgpt/$version-moved"
+docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$output:/bundles:ro" \
+  -v "$volume:$first:ro" -v "$volume:$second:ro" \
+  -e PYTHONDONTWRITEBYTECODE=1 "$tag" \
+  bash /src/tests/offline-readonly.sh "/bundles/$(basename -- "$archive")" "$first" "$second"
 printf 'Archive and evidence: %s\n' "$output"
