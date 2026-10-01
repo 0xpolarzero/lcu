@@ -137,6 +137,26 @@ class PruneTests(unittest.TestCase):
         self.assertEqual(list((self.prefix / 'apps').iterdir()), [])
         self.assertTrue(installed.is_dir())
 
+    def test_in_place_release_using_an_old_generation_path_keeps_that_generation(self):
+        # `--existing-app <prefix>/apps/<old>/payload/usr/lib/chatgpt` after upgrading
+        # from 0.7.0 makes the current release absolute-path in place on a copy.
+        old = self._gen('1.0.0-x64-0123456789abcdef')
+        self._gen('1.1.0-x64-fedcba9876543210')
+        cur = self.prefix / 'releases' / '0.8.0-aaaaaaaaaaaa'
+        cur.mkdir(parents=True)
+        (cur / 'app').symlink_to(old, target_is_directory=True)
+        (cur / 'installation.json').write_text(json.dumps(
+            {'app': str(old), 'architecture': 'x64', 'package_version': '1.0.0', 'runtime': 'r'}))
+        os.utime(cur, (300, 300))
+        self._release('0.7.0-bbbbbbbbbbbb', '1.0.0-x64-0123456789abcdef', 200)
+        self._current_posix(cur.name)
+        self._run(cur, ['--keep', '1', '--yes'])
+        self.assertEqual({p.name for p in (self.prefix / 'releases').iterdir()},
+                         {'0.8.0-aaaaaaaaaaaa'})
+        self.assertEqual({p.name for p in (self.prefix / 'apps').iterdir()},
+                         {'1.0.0-x64-0123456789abcdef'})
+        self.assertTrue((old / 'blob').is_file())
+
     def test_macos_has_no_app_generations(self):
         cur = self.prefix / 'releases' / '0.5.0-aaaaaaaaaaaa'
         cur.mkdir(parents=True)

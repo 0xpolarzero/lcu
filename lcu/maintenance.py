@@ -82,13 +82,16 @@ def _generation_dir(release, apps, windows):
     app = descriptor.get('app')
     if not isinstance(app, str) or not app:
         raise ValueError(f'Release {release.name} has no app descriptor.')
-    if not windows and Path(app).is_absolute() and 'sha256' not in descriptor:
-        return None  # Linux release using the installed app in place.
     resolved = (Path(app) if windows else (release / app)).resolve()
     apps = apps.resolve()
     for candidate in (resolved, *resolved.parents):
         if candidate.parent == apps:
             return candidate
+    if not windows and Path(app).is_absolute() and 'sha256' not in descriptor:
+        # Linux release using an installed app in place, outside <prefix>/apps. An
+        # absolute path that resolves under <prefix>/apps (for example an app copy
+        # left by 0.7.0 and passed to --existing-app) is a generation to keep.
+        return None
     raise ValueError(f'Release {release.name} references an app outside {apps}.')
 
 
