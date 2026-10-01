@@ -118,7 +118,7 @@ From the extracted release directory, run this in a terminal owned by the existi
 sudo ./scripts/install.sh --user "$(id -un)" --runtime-only
 ~~~
 
-For an app installed elsewhere, add `--existing-app /absolute/path`. LCU uses that installation in place; it does not copy the app. Because the desktop account runs the app's executables, LCU refuses a tree whose runtime executables, modules, the directories above them or the CUA runtime tree are owned by or writable by any account other than root and the installing/desktop account, or whose runtime paths link outside the app. A root-owned package install or a read-only mount passes. This is a structural check at validation time, not authentication of the app's content.
+For an app installed elsewhere, add `--existing-app /absolute/path`. LCU uses that installation in place; it does not copy the app. Because the desktop account runs the app's executables, LCU validates the whole tree it executes from: the runtime executables and modules, the directories above them, the complete CUA runtime tree, and the complete Chrome, browser and computer-use plugin trees (including the scripts `lcu browser install` and `lcu browser status` run). Every file and directory must be owned by root or the installing/desktop account and not writable by anyone else. Group write counts only when every account in that group is trusted, and POSIX ACL entries (read from the `system.posix_acl_access` attribute on Linux) that give another user or group write access are refused; group membership is read from the local account database and ACLs from that attribute only, so members supplied by a directory service and ACLs on filesystems that do not expose it are not seen. A link may only point inside the app; its target and the target's contents are validated too, and a link that leaves the app is refused. A read-only mount is checked the same way, because another account could write through a writable view of the same source; a root-owned package install or a root-owned read-only mount (such as Silo's `/opt/silo/chatgpt/<version>-<arch>`) passes. This is a structural check at validation time, not authentication of the app's content.
 
 Then, from a terminal inside the active X11 desktop session, register your harness as the desktop account, without `sudo`. Replace `codex` with `pi` or `claude-code`:
 
@@ -200,6 +200,8 @@ For Chrome, explicitly opt in when registering the agent, then reconnect it. For
 /opt/lcu/current/bin/lcu browser status
 ~~~
 
+The private plugin copy under `~/.local/share/lcu/browser` follows the selected app's Chrome plugin content. `lcu browser install` serializes refreshes with a lock, stages the new copy and its digest, publishes it by rename and recovers an interrupted refresh on the next run. `lcu browser status` reports a connector as outdated when the copy no longer matches the app, and a copy made by 0.8.0 reports outdated until `lcu browser install` is rerun.
+
 The official ChatGPT extension is how the original runtime reads and controls external Chrome tabs. It is required even when LCU runs without Codex sign-in. Desktop applications do not need it. Use your intended Chrome profile; a separate test profile is not an LCU requirement.
 
 `browser install` invokes the original plugin's native-host installer from a user-local copy, then points the account's host manifest at LCU's relay. This command alone does not enable Chrome in an MCP process; direct clients must start `lcu --chrome`. It does not install or enable the Web Store extension. The relay locally enables the official extension's `x-browser-agent` label so Chrome actions do not require Codex sign-in. Sites can see that label; it is not a login credential. Enable the official extension in the intended Chrome profile using [OpenAI's extension setup instructions](https://learn.chatgpt.com/docs/chrome-extension). `browser status` uses the original diagnostics to report whether the extension is enabled and the connector points to this LCU installation; it changes nothing and does not claim a live connection. Complete the check by asking your agent to use LCU to list Chrome tabs.
@@ -214,7 +216,7 @@ Custom harnesses must deliver the original instructions and images, present site
 
 ## Approval mode
 
-By default each harness keeps its own approval behavior for LCU's tools. Claude Code and Codex CLI ask before each `js` call; Oh My Pi's default `yolo` mode does not ask, but a profile set to `always-ask` or `write` does. `lcu setup --approval auto` adds only LCU's own entries so that none of those harness prompts appear; `--approval ask` (the default) removes exactly what `auto` added and leaves everything else as it was:
+By default each harness keeps its own approval behavior for LCU's tools. Claude Code and Codex CLI ask before each `js` call; Oh My Pi's default `yolo` mode does not ask, but a profile set to `always-ask` or `write` does. `lcu setup --approval auto` adds only LCU's own entries so that none of those harness prompts appear; `--approval ask` (the default) reverses exactly what `auto` changed and leaves everything else as it was. LCU records each change (per config path, OMP profile and scope, and the previous Codex value) in `~/.local/state/lcu/approval.json` (Windows: `%LOCALAPPDATA%\LCU\approval.json`) and `ask` undoes only that: an `mcp__lcu` rule or an OMP `allow` entry that was already there is left in place, and a Codex `default_tools_approval_mode` you had set is restored. A 0.8.0 `auto` left no record, so `ask` cannot tell those entries from yours and leaves them; remove them by hand (see [Uninstall](#uninstall)).
 
 | Harness | `auto` adds | Where |
 | --- | --- | --- |
@@ -229,7 +231,7 @@ By default each harness keeps its own approval behavior for LCU's tools. Claude 
 /opt/lcu/current/bin/lcu setup --agent claude-code --agent codex --approval ask --session direct
 ~~~
 
-The mode applies to the harnesses and scope selected in that run. It is remembered per account, and a later setup that does not name `--approval` keeps `auto` and applies it to whatever it registers; only an explicit `--approval ask` removes entries. Without `--approval` a setup whose remembered mode is `ask` leaves your harness settings alone, except that Codex setup rewrites the whole `[mcp_servers.lcu]` table, which LCU owns, so a hand-added `default_tools_approval_mode` there does not survive. Entries are only touched when they match what `auto` writes: an OMP `js: deny` or `js: prompt` you set is kept, reported, and not removed by `ask`. `--approval` cannot be combined with `--export` or the installer's `--runtime-only`.
+The mode applies to the harnesses and scope selected in that run. It is remembered per account, and a later setup that does not name `--approval` keeps `auto` and applies it to whatever it registers; only an explicit `--approval ask` removes entries. Without `--approval` a setup whose remembered mode is `ask` leaves your harness settings alone; Codex setup rewrites the `[mcp_servers.lcu]` table but carries a `default_tools_approval_mode` you set through it. Only recorded additions are removed: an OMP `js: deny`, `js: prompt` or pre-existing `js: allow` you set is kept, reported, and not removed by `ask`. `--approval` cannot be combined with `--export` or the installer's `--runtime-only`.
 
 This removes only the harness's own prompt about calling LCU. Claude Code's host-only tools stay denied (deny rules win over allow). Native-app permission requests, the original runtime's own approvals and Chrome site approvals come from the original runtime and are unchanged; Chrome stays exact-origin only and nothing here widens `LCU_APPROVED_ORIGINS`. Choose `auto` only for a machine you control, such as a disposable VM. `tests/codex_approval_mode.py` shows the Codex difference with a scripted local provider, and the other harnesses' entries are covered by `tests/test_approval.py`. See the [approval boundary](ADAPTERS.md#approval-boundary).
 
@@ -278,15 +280,16 @@ The installer accepts the legacy positional prefix. --offline prohibits installa
 
 There is no uninstall command; remove the registrations LCU created, then delete its files. Do this for the desktop account that ran setup.
 
-1. Remove each harness registration you added:
+1. If you ever used `--approval auto`, run `lcu setup --approval ask` for each harness, scope (and project) and OMP profile you used it with, before unregistering. It removes only what LCU recorded adding: the exact `mcp__lcu` rule in Claude Code's `permissions.allow`, the OMP `js`/`js_reset` `allow` entries in the selected profile's `tools.approval` (set `OMP_PROFILE` or `PI_CODING_AGENT_DIR` as for setup), and it restores or drops Codex's `default_tools_approval_mode`. A rule you wrote yourself stays. Any LCU-written entry that remains (for example from 0.8.0) can be removed by hand.
+2. Remove each harness registration you added:
    - **Codex CLI:** remove the `lcu` MCP server (`codex mcp remove lcu`) and delete the LCU hook entries from `~/.codex/config.toml`.
-   - **Claude Code:** remove the `lcu` MCP server (`claude mcp remove lcu`) and delete the LCU hooks and `mcp__lcu__*` permissions from `~/.claude/settings.json` (project scope: `.claude/settings.local.json`).
+   - **Claude Code:** remove the `lcu` MCP server (`claude mcp remove lcu`) and delete the LCU hooks and any `mcp__lcu__*` permissions from `~/.claude/settings.json` (project scope: `.claude/settings.local.json`). The exact `mcp__lcu` rule belongs to approval mode, so reverse that first (below).
    - **Pi:** `pi remove "$HOME/.local/share/lcu/pi/extension.mjs"` (add `-l` in the project for project scope), then delete `~/.local/share/lcu/pi`.
    - **Oh My Pi:** `omp plugin uninstall lcu-computer-use` (the linked package is staged under `~/.local/share/lcu/omp`).
    - **Hermes:** `hermes plugins remove lcu-cua`; if `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua` remains, delete it.
-2. If you set up LCU 0.6.0 or earlier, remove the `lcu` skill copies the skill installer placed in each harness's skill location, and `~/.local/share/lcu/skills`. Running setup from a newer LCU removes them for the selected harnesses.
-3. If you ran `lcu browser install`, remove the LCU Chrome native-host manifest (`com.openai.codexextension.json`) from your Chrome profile's `NativeMessagingHosts` directory, along with the relay copy under `~/.local/share/lcu/browser` (macOS: `~/Library/Application Support/lcu/browser`).
-4. Delete the prefix (`/opt/lcu` or `~/.local/share/lcu`), `~/.local/share/lcu/skills`, and the saved opt-ins at `~/.local/state/lcu`.
+3. If you set up LCU 0.6.0 or earlier, remove the `lcu` skill copies the skill installer placed in each harness's skill location, and `~/.local/share/lcu/skills`. Running setup from a newer LCU removes them for the selected harnesses.
+4. If you ran `lcu browser install`, remove the LCU Chrome native-host manifest (`com.openai.codexextension.json`) from your Chrome profile's `NativeMessagingHosts` directory, along with the relay copy under `~/.local/share/lcu/browser` (macOS: `~/Library/Application Support/lcu/browser`).
+5. Delete the prefix (`/opt/lcu` or `~/.local/share/lcu`), `~/.local/share/lcu/skills`, and the saved opt-ins at `~/.local/state/lcu`.
 
 LCU never modified the ChatGPT/Codex app, so nothing there needs undoing.
 
