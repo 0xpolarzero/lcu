@@ -42,7 +42,7 @@ class BrowserSetupTests(unittest.TestCase):
             def original_install(command, **_options):
                 if command[0] == 'reg.exe':
                     return subprocess.CompletedProcess(command, 0, stdout=f'{manifest} REG_SZ {manifest}')
-                private = next((local / 'lcu/browser').iterdir()) / 'chrome'
+                private = next(d for d in (local / 'lcu/browser').iterdir() if d.is_dir()) / 'chrome'
                 selected_host = private / 'extension-host/windows/x64/extension-host.exe'
                 manifest.parent.mkdir(parents=True)
                 manifest.write_text(json.dumps({'name': 'com.openai.codexextension',
@@ -98,7 +98,7 @@ class BrowserSetupTests(unittest.TestCase):
 
             def original_installer(*args, **kwargs):
                 destination = home / 'Library/Application Support/lcu/browser'
-                plugin = next(destination.iterdir()) / 'chrome'
+                plugin = next(d for d in destination.iterdir() if d.is_dir()) / 'chrome'
                 selected_host = str(plugin / 'extension-host/macos/arm64/ChatGPT for Chrome')
                 for path, selected in ((chrome_manifest, selected_host),
                                        (edge_manifest, selected_host),
@@ -148,7 +148,7 @@ class BrowserSetupTests(unittest.TestCase):
             manifest = home / 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json'
 
             def original_installer(*args, **kwargs):
-                private = next((home / 'Library/Application Support/lcu/browser').iterdir()) / 'chrome'
+                private = next(d for d in (home / 'Library/Application Support/lcu/browser').iterdir() if d.is_dir()) / 'chrome'
                 manifest.parent.mkdir(parents=True, exist_ok=True)
                 manifest.write_text(json.dumps({
                     'path': str(private / 'extension-host/macos/arm64/ChatGPT for Chrome')}))
@@ -194,6 +194,152 @@ class BrowserSetupTests(unittest.TestCase):
                     mock.patch('lcu.browser.subprocess.run'):
                 with self.assertRaisesRegex(ValueError, 'produced no manifest'):
                     install(root)
+
+
+class PluginCopyRefreshTests(unittest.TestCase):
+    """The private Chrome plugin copy and its digest are published together and recoverable."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.root = base / 'release'
+        self.home = base / 'home'
+        self.home.mkdir()
+        resources = self.root / 'app/Contents/Resources'
+        self.source = resources / 'plugins/openai-bundled/plugins/chrome'
+        (self.source / 'scripts').mkdir(parents=True)
+        self.installer = self.source / 'scripts/installManifest.mjs'
+        self.installer.write_text('version one')
+        host = self.source / 'extension-host/macos/arm64/ChatGPT for Chrome'
+        host.parent.mkdir(parents=True)
+        host.write_text('host')
+        relay = self.root / 'lcu/native_host.py'
+        relay.parent.mkdir(parents=True)
+        relay.write_text('#!/usr/bin/env python3\n')
+        support = self.home / 'Library/Application Support'
+        self.destinations = support / 'lcu/browser'
+        manifest = support / 'Google/Chrome/NativeMessagingHosts/com.openai.codexextension.json'
+        env = {'HOME': str(self.home), 'NODE_REPL_NODE_PATH': '/fake/node',
+               'CODEX_CLI_PATH': '/fake/codex', 'CUA_REPL_NODE_REPL_PATH': '/fake/repl'}
+
+        def original_installer(*args, **kwargs):
+            private = next(d for d in self.destinations.iterdir() if d.is_dir()) / 'chrome'
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text(json.dumps({'path': str(private / 'extension-host/macos/arm64/ChatGPT for Chrome')}))
+            return subprocess.CompletedProcess(args, 0)
+
+        for patcher in (mock.patch('lcu.browser.platform.system', return_value='Darwin'),
+                        mock.patch.dict(os.environ, {'HOME': str(self.home)}),
+                        mock.patch('lcu.runtime.paths', return_value=(self.root / 'app', resources, None, {})),
+                        mock.patch('lcu.runtime.environment', return_value=env),
+                        mock.patch('lcu.browser.subprocess.run', side_effect=original_installer)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def private(self, destination):
+        return (destination / 'chrome/scripts/installManifest.mjs').read_text()
+
+    def consistent(self, destination):
+        from lcu.browser import _plugin_digest
+        self.assertEqual((destination / '.lcu-browser-plugin').read_text().strip(), _plugin_digest(self.source))
+        self.assertEqual(self.private(destination), self.installer.read_text())
+        self.assertEqual([p.name for p in destination.glob('.chrome-previous')], [])
+        self.assertEqual([p.name for p in destination.iterdir() if p.name.startswith('.lcu-browser-')
+                          and p.name not in ('.lcu-browser-host', '.lcu-browser-plugin')], [])
+
+    def test_stamp_symlink_is_replaced_not_followed(self):
+        destination = install(self.root)
+        victim = self.home / 'victim'
+        victim.write_text('precious')
+        stamp = destination / '.lcu-browser-plugin'
+        stamp.unlink()
+        stamp.symlink_to(victim)
+        self.installer.write_text('version two')
+        install(self.root)
+        self.assertEqual(victim.read_text(), 'precious')
+        self.assertFalse(stamp.is_symlink())
+        self.consistent(destination)
+
+    def test_stamp_symlink_with_a_current_copy_is_also_repaired(self):
+        destination = install(self.root)
+        victim = self.home / 'victim'
+        victim.write_text('precious')
+        stamp = destination / '.lcu-browser-plugin'
+        stamp.unlink()
+        stamp.symlink_to(victim)
+        install(self.root)
+        self.assertEqual(victim.read_text(), 'precious')
+        self.assertFalse(stamp.is_symlink())
+        self.consistent(destination)
+
+    def test_interrupted_between_the_renames_is_recovered(self):
+        destination = install(self.root)
+        (destination / 'chrome').rename(destination / '.chrome-previous')  # chrome missing, copy retired
+        self.installer.write_text('version two')
+        self.assertEqual(install(self.root), destination)
+        self.consistent(destination)
+
+    def test_missing_copy_without_a_retired_one_is_rebuilt(self):
+        destination = install(self.root)
+        import shutil
+        shutil.rmtree(destination / 'chrome')
+        install(self.root)
+        self.consistent(destination)
+
+    def test_failed_staging_leaves_the_published_copy_and_digest_untouched(self):
+        destination = install(self.root)
+        self.installer.write_text('version two')
+        with mock.patch('lcu.browser.shutil.copytree', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                install(self.root)
+        self.assertEqual(self.private(destination), 'version one')
+        install(self.root)
+        self.consistent(destination)
+
+    def test_interrupted_before_the_digest_is_written_converges(self):
+        destination = install(self.root)
+        self.installer.write_text('version two')
+        with mock.patch('lcu.browser._write_stamp', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                install(self.root)
+        self.assertEqual(self.private(destination), 'version two')
+        install(self.root)
+        self.consistent(destination)
+
+    def test_concurrent_refreshes_publish_one_matching_copy_and_digest(self):
+        import threading
+        destination = install(self.root)
+        self.installer.write_text('version two')
+        start = threading.Barrier(6)
+        errors = []
+        active, overlaps = [0], []
+        real = __import__('lcu.browser', fromlist=['x'])._refresh_plugin
+
+        def tracked(source, target):
+            active[0] += 1
+            overlaps.append(active[0])
+            try:
+                real(source, target)
+            finally:
+                active[0] -= 1
+
+        def work():
+            try:
+                start.wait()
+                install(self.root)
+            except BaseException as exc:  # pragma: no cover - reported below
+                errors.append(exc)
+
+        with mock.patch('lcu.browser._refresh_plugin', side_effect=tracked):
+            threads = [threading.Thread(target=work) for _ in range(6)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(max(overlaps), 1)
+        self.consistent(destination)
 
 
 class BrowserStatusTests(unittest.TestCase):

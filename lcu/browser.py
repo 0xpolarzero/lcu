@@ -1,5 +1,6 @@
 """Connect installed Chromium browsers using OpenAI's original native host."""
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -62,6 +63,83 @@ def _manifest_paths(env, system):
     return paths
 
 
+@contextlib.contextmanager
+def _destination_lock(destination):
+    """Serialize everything that changes one private host copy."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    path = destination.parent / f'.{destination.name}.lock'
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+    try:
+        if sys.platform == 'win32':
+            import msvcrt
+            os.write(fd, b'0')
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        if sys.platform == 'win32':
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        os.close(fd)
+
+
+def _write_stamp(destination, digest):
+    """Replace the digest with a staged regular file; a symlink at the name is replaced, never followed."""
+    fd, staged = tempfile.mkstemp(prefix='.lcu-browser-stamp-', dir=destination)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(digest + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged, destination / _PLUGIN_DIGEST)
+    finally:
+        Path(staged).unlink(missing_ok=True)
+
+
+def _refresh_plugin(source, destination):
+    """Publish the private plugin copy for `source` and its digest; recover interrupted updates.
+
+    Must run under `_destination_lock`. The new copy is staged completely first and moved
+    into place by rename. An interruption between the two renames leaves `chrome` missing
+    and `.chrome-previous` present, which the next run restores before deciding what to do.
+    The digest is written last, so a copy and digest that disagree only cause one more refresh.
+    """
+    plugin, retired = destination / 'chrome', destination / '.chrome-previous'
+    if not plugin.exists() and retired.exists():
+        retired.rename(plugin)
+    elif plugin.exists():
+        shutil.rmtree(retired, ignore_errors=True)
+    for leftover in destination.glob('.lcu-browser-*'):
+        if leftover.name in ('.lcu-browser-host', _PLUGIN_DIGEST):
+            continue
+        if leftover.is_dir() and not leftover.is_symlink():
+            shutil.rmtree(leftover, ignore_errors=True)  # scratch from an interrupted refresh
+        else:
+            leftover.unlink(missing_ok=True)
+    digest = _plugin_digest(source)
+    stamp = destination / _PLUGIN_DIGEST
+    current = (plugin.is_dir() and not plugin.is_symlink() and (plugin / 'scripts/installManifest.mjs').is_file()
+               and stamp.is_file() and not stamp.is_symlink() and stamp.read_text().strip() == digest)
+    if current:
+        return
+    scratch = Path(tempfile.mkdtemp(prefix='.lcu-browser-', dir=destination))
+    try:
+        shutil.copytree(source, scratch / 'chrome', symlinks=True)
+        if plugin.exists() or plugin.is_symlink():
+            if plugin.is_symlink():
+                plugin.unlink()
+            else:
+                plugin.rename(retired)
+        (scratch / 'chrome').rename(plugin)
+        shutil.rmtree(retired, ignore_errors=True)
+        _write_stamp(destination, digest)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
 def install(root, directory=None):
     from .runtime import environment, paths
 
@@ -81,6 +159,13 @@ def install(root, directory=None):
     selected_app = paths(root)[0] if system == 'Windows' else (root / 'app').resolve()
     identity = hashlib.sha256(str(selected_app).encode()).hexdigest()[:16]
     destination = Path(directory).expanduser().absolute() if directory else data / 'lcu/browser' / identity
+    with _destination_lock(destination):
+        return _install_locked(root, system, destination, selected_app)
+
+
+def _install_locked(root, system, destination, selected_app):
+    from .runtime import environment, paths
+
     marker = destination / '.lcu-browser-host'
     expected = str(selected_app) + '\n'
     if destination.is_symlink():
@@ -88,9 +173,6 @@ def install(root, directory=None):
     if destination.exists():
         if not marker.is_file() or marker.is_symlink() or marker.read_text() != expected:
             raise ValueError('The browser host directory belongs to another installation; select an empty directory.')
-        installed_plugin = destination / 'chrome'
-        if not (installed_plugin / 'scripts/installManifest.mjs').is_file():
-            raise ValueError('The private browser host copy is incomplete or corrupt; remove it and run `lcu browser install` again.')
     selected = paths(root)
     env = environment(root, selected)
     # Runtime selection returns the original resource tree. Linux stores it
@@ -100,32 +182,18 @@ def install(root, directory=None):
         raise ValueError('The complete upstream Chrome plugin is missing from this bundle.')
     # The app can be upgraded in place at the same path, so the private copy follows the
     # content of the selected plugin, not only the app path.
-    plugin_digest = _plugin_digest(source)
-    stamp = destination / _PLUGIN_DIGEST
     if not destination.exists():
-        destination.parent.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix='.lcu-browser-', dir=destination.parent))
         try:
             shutil.copytree(source, scratch / 'chrome', symlinks=True)
             (scratch / '.lcu-browser-host').write_text(expected)
-            (scratch / _PLUGIN_DIGEST).write_text(plugin_digest + '\n')
+            (scratch / _PLUGIN_DIGEST).write_text(_plugin_digest(source) + '\n')
             scratch.rename(destination)
         finally:
             if scratch.exists():
                 shutil.rmtree(scratch)
-    elif not stamp.is_file() or stamp.is_symlink() or stamp.read_text().strip() != plugin_digest:
-        scratch = Path(tempfile.mkdtemp(prefix='.lcu-browser-', dir=destination))
-        try:
-            shutil.copytree(source, scratch / 'chrome', symlinks=True)
-            previous = destination / 'chrome'
-            retired = destination / '.chrome-previous'
-            shutil.rmtree(retired, ignore_errors=True)
-            previous.rename(retired)
-            (scratch / 'chrome').rename(previous)
-            shutil.rmtree(retired, ignore_errors=True)
-            stamp.write_text(plugin_digest + '\n')
-        finally:
-            shutil.rmtree(scratch, ignore_errors=True)
+    else:
+        _refresh_plugin(source, destination)
     relay_source = root / 'lcu/native_host.py'
     if not relay_source.is_file():
         raise ValueError('The LCU Chrome native-host relay is missing from this release.')
