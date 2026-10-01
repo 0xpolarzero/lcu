@@ -159,60 +159,182 @@ def _within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
-def _untrusted_entry(path: Path, info: os.stat_result, trusted: set[int]) -> str | None:
-    """Why this entry lets another account change what the desktop account executes."""
-    if info.st_uid not in trusted:
-        return f'owned by uid {info.st_uid}'
-    writable = info.st_mode & stat.S_IWOTH or (info.st_mode & stat.S_IWGRP and info.st_gid != 0)
-    if writable and not (stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX):
-        # A sticky directory (like /tmp) only lets accounts add entries; they cannot
-        # replace ones owned by someone else.
-        return 'writable by group or other accounts'
+_ACL_ACCESS = 'system.posix_acl_access'
+_ACL_USER, _ACL_GROUP, _ACL_MASK = 0x02, 0x08, 0x10
+_ACL_WRITE = 0x02
+
+
+def _group_members(gid: int) -> set[int] | None:
+    """Every account that holds `gid` as its primary or a supplementary group (None: unknown)."""
+    try:
+        import grp
+        import pwd
+    except ImportError:
+        return None
+    members = set()
+    try:
+        for name in grp.getgrgid(gid).gr_mem:
+            try:
+                members.add(pwd.getpwnam(name).pw_uid)
+            except KeyError:
+                pass
+    except KeyError:
+        pass
+    members.update(account.pw_uid for account in pwd.getpwall() if account.pw_gid == gid)
+    return members
+
+
+def _posix_acl(path: Path) -> bytes | None:
+    """The raw access ACL when the entry has one (Linux xattr); None when absent or unreadable."""
+    if not (hasattr(os, 'listxattr') and hasattr(os, 'getxattr')):
+        return None
+    try:
+        if _ACL_ACCESS not in os.listxattr(path, follow_symlinks=False):
+            return None
+        return os.getxattr(path, _ACL_ACCESS, follow_symlinks=False)
+    except OSError:
+        return None
+
+
+def _acl_writers_untrusted(blob: bytes, trusted: set[int], group_members) -> str | None:
+    """Why a named-user or named-group ACL entry lets an untrusted account write, if one does.
+
+    Entries are (tag u16, perm u16, id u32) after a 4-byte version header. Named entries are
+    limited by the mask, so only entries whose permission and the mask both include write count.
+    """
+    if len(blob) < 4 or (len(blob) - 4) % 8 or int.from_bytes(blob[:4], 'little') != 2:
+        return 'carrying a POSIX ACL LCU cannot read'
+    entries = [(int.from_bytes(blob[i:i + 2], 'little'), int.from_bytes(blob[i + 2:i + 4], 'little'),
+                int.from_bytes(blob[i + 4:i + 8], 'little')) for i in range(4, len(blob), 8)]
+    masks = [perm for tag, perm, _ in entries if tag == _ACL_MASK]
+    mask = masks[0] if masks else 0x7
+    for tag, perm, ident in entries:
+        if not perm & mask & _ACL_WRITE:
+            continue
+        if tag == _ACL_USER and ident not in trusted:
+            return f'writable by uid {ident} through a POSIX ACL'
+        if tag == _ACL_GROUP:
+            members = group_members(ident)
+            if members is None or not members <= trusted:
+                return f'writable by group {ident} through a POSIX ACL'
     return None
 
 
-def _read_only_mount(path: Path) -> bool:
-    try:
-        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
-    except OSError:
-        return False
+def _untrusted_entry(path: Path, info: os.stat_result, trusted: set[int], group_members=_group_members) -> str | None:
+    """Why this entry lets another account change what the desktop account executes.
+
+    A symlink's own mode is meaningless; only its owner counts. Group write is accepted only
+    when every account in that group is trusted (root's group normally has no unprivileged
+    member); named-user and named-group POSIX ACL entries with write are judged the same way.
+    Limits: group membership comes from the local account database, so members supplied by
+    a directory service or granted later are not seen, and ACLs are only read where the
+    platform exposes them as the `system.posix_acl_access` extended attribute (Linux).
+    """
+    if info.st_uid not in trusted:
+        return f'owned by uid {info.st_uid}'
+    if stat.S_ISLNK(info.st_mode):
+        return None
+    sticky_directory = stat.S_ISDIR(info.st_mode) and info.st_mode & stat.S_ISVTX
+    if info.st_mode & stat.S_IWOTH and not sticky_directory:
+        # A sticky directory (like /tmp) only lets accounts add entries; they cannot
+        # replace ones owned by someone else.
+        return 'writable by group or other accounts'
+    if info.st_mode & stat.S_IWGRP and not sticky_directory:
+        members = group_members(info.st_gid)
+        if members is None or not members <= trusted:
+            return 'writable by group or other accounts'
+    blob = _posix_acl(path)
+    if blob is not None:
+        return _acl_writers_untrusted(blob, trusted, group_members)
+    return None
 
 
-def _check_trusted_tree(app: Path, runtime: Path, files: tuple[Path, ...], trusted: set[int]) -> None:
+def _check_trusted_tree(app: Path, files: tuple[Path, ...], trees: tuple[Path, ...], trusted: set[int]) -> None:
     """Refuse a tree where accounts other than root and the desktop account could replace code.
 
-    Covers the executables and modules the runtime launches, every directory above them up to
-    `/`, and the CUA runtime tree. Content on a read-only mount is not writable by anyone.
+    Covers the executables the runtime launches and every directory above them up to `/`, plus
+    the complete trees the desktop account executes from (the CUA runtime and the Chrome,
+    browser and computer-use plugins). Symlinks may only point inside the app; each target and
+    its ancestors are validated, and a linked directory is walked once (cycles are ignored).
+    Read-only mounts are checked like any other: ownership and mode say who could change
+    the files through another view of the same source.
     """
     problems = []
-    checked = set()
+    seen = set()
+    groups = {}
 
-    def check(path: Path, info=None):
-        if path in checked:
+    def members(gid):
+        if gid not in groups:
+            groups[gid] = _group_members(gid)
+        return groups[gid]
+
+    pending = []
+    inspected, walked = {}, set()
+
+    def check(path: Path, walk: bool = False):
+        """Validate one entry. With `walk`, also validate what it leads to (a link's target, a directory's contents)."""
+        if path not in inspected:
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                problems.append(f'{path} cannot be inspected ({exc.strerror})')
+                inspected[path] = None
+                return
+            inspected[path] = info
+            reason = _untrusted_entry(path, info, trusted, members)
+            if reason:
+                problems.append(f'{path} is {reason}')
+        info = inspected[path]
+        if info is None:
             return
-        checked.add(path)
-        info = info or path.lstat()
         if stat.S_ISLNK(info.st_mode):
-            real = path.resolve()
+            try:
+                real = path.resolve(strict=True)
+            except (OSError, RuntimeError):
+                if path not in walked:
+                    problems.append(f'{path} is a broken or looping link')
+                walked.add(path)
+                return
             if not _within(real, app):
-                problems.append(f'{path} links outside the application ({real})')
-            return
-        if _read_only_mount(path):
-            return
-        reason = _untrusted_entry(path, info, trusted)
-        if reason:
-            problems.append(f'{path} is {reason}')
+                if path not in walked:
+                    problems.append(f'{path} links outside the application ({real})')
+                walked.add(path)
+                return
+            if path not in walked:
+                walked.add(path)
+                pending.append(real)  # the target is validated and, if a directory, walked
+        elif walk and stat.S_ISDIR(info.st_mode) and path not in walked:
+            walked.add(path)
+            try:
+                pending.extend(Path(entry.path) for entry in os.scandir(path))
+            except OSError as exc:
+                problems.append(f'{path} cannot be read ({exc.strerror})')
+
+    def ancestors(path: Path):
+        for candidate in (path, *path.parents):
+            check(candidate)
 
     for path in files:
         real = path.resolve(strict=True)
         if not _within(real, app):
             problems.append(f'{path} resolves outside the application ({real})')
             continue
-        for candidate in (real, *real.parents):
-            check(candidate)
-    for directory, directories, names in os.walk(runtime):
-        for name in (*directories, *names):
-            check(Path(directory) / name)
+        for candidate in (*path.parents, path):  # links on the unresolved path count too
+            if _within(candidate, app):
+                check(candidate)
+        ancestors(real)
+    for tree in trees:
+        real = tree.resolve(strict=True)
+        if not _within(real, app):
+            problems.append(f'{tree} resolves outside the application ({real})')
+            continue
+        ancestors(real)
+        pending.append(real)
+    while pending:
+        path = pending.pop()
+        check(path, walk=True)
+        if not path.is_symlink():
+            ancestors(path)
     if problems:
         shown = '; '.join(problems[:3]) + (f'; and {len(problems) - 3} more' if len(problems) > 3 else '')
         raise ValueError('The application is not in a location only root and this account can change: '
@@ -259,7 +381,8 @@ def resolve_installed_linux_app(app_path: Path, *, arch: str,
             raise ValueError(f'Application executable is not executable: {path}')
     trusted = {0, os.getuid(), os.geteuid()} | set(trusted_uids or ())
     modules = runtime / 'lib/node_modules'
-    _check_trusted_tree(app, runtime.resolve(strict=True),
-                        (*required, *((modules,) if modules.exists() else ())), trusted)
+    plugins = resources / 'plugins/openai-bundled/plugins'
+    _check_trusted_tree(app, (*required, *((modules,) if modules.exists() else ())),
+                        (runtime, plugins / 'chrome', browser_plugin, plugins / 'unified-computer-use'), trusted)
     return InstalledApplication(app, resources, runtime, 'linux', _linux_version(app, arch), arch,
                                 tools.cli, tools.code_mode_host, runtime_version)

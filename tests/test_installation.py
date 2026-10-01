@@ -20,6 +20,7 @@ from lcu.session import discover
 from lcu.setup import Change, apply_changes, regular_path
 from install import checked_prefix, install, main as install_main
 from installed_app import _download, select as select_app
+from lcu import platforms as lcu_platforms
 from lcu.platforms import resolve_installed_linux_app
 from bundle import seal
 
@@ -255,15 +256,153 @@ class InstallationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'outside the application'):
             resolve_installed_linux_app(app, arch='arm64')
 
-    def test_read_only_mount_owned_by_another_account_passes(self):
+    def test_read_only_mount_is_checked_like_any_other_tree(self):
         if os.getuid() == 0:
             self.skipTest('root-owned files are always trusted')
         app = _application_fixture(self.root / 'chatgpt')
-        app.chmod(0o777)
-        with patch('lcu.platforms.os.getuid', return_value=os.getuid() + 1), \
-             patch('lcu.platforms.os.geteuid', return_value=os.getuid() + 1), \
-             patch('lcu.platforms._read_only_mount', return_value=True):
-            self.assertEqual(resolve_installed_linux_app(app, arch='arm64').app, app.resolve())
+        read_only = SimpleNamespace(f_flag=os.ST_RDONLY)
+        owner = os.getuid()
+        other = owner + 1
+        # Another account owns it: a writable view of the same source could change it.
+        with patch('lcu.platforms.os.getuid', return_value=other), \
+             patch('lcu.platforms.os.geteuid', return_value=other), \
+             patch('os.statvfs', return_value=read_only):
+            with self.assertRaisesRegex(ValueError, f'owned by uid {owner}'):
+                resolve_installed_linux_app(app, arch='arm64')
+        # A trusted owner (root in a Silo mount) on a read-only mount still passes.
+        with patch('lcu.platforms.os.getuid', return_value=other), \
+             patch('lcu.platforms.os.geteuid', return_value=other), \
+             patch('os.statvfs', return_value=read_only):
+            self.assertEqual(resolve_installed_linux_app(app, arch='arm64', trusted_uids={owner}).app,
+                             app.resolve())
+        # Mode bits count on a read-only mount too.
+        (app / 'resources/cua_node/bin/node').chmod(0o757)
+        with patch('os.statvfs', return_value=read_only):
+            with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+                resolve_installed_linux_app(app, arch='arm64')
+
+    def _chrome_script(self, app, name='scripts/installManifest.mjs'):
+        path = app / 'resources/plugins/openai-bundled/plugins/chrome' / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('export {};\n')
+        return path
+
+    def test_executed_chrome_plugin_scripts_must_be_unwritable_by_others(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        install_script = self._chrome_script(app)
+        diagnostic = self._chrome_script(app, 'scripts/diagnostics/status.mjs')
+        resolve_installed_linux_app(app, arch='arm64')
+        for target in (install_script, diagnostic, diagnostic.parent):
+            before = target.stat().st_mode & 0o7777
+            target.chmod(before | 0o002)
+            with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+                resolve_installed_linux_app(app, arch='arm64')
+            target.chmod(before)
+        resolve_installed_linux_app(app, arch='arm64')
+
+    def test_other_plugin_trees_are_covered_too(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        script = app / 'resources/plugins/openai-bundled/plugins/browser/scripts/run.mjs'
+        script.parent.mkdir(parents=True)
+        script.write_text('export {};\n')
+        script.chmod(0o666)
+        with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_link_to_a_writable_directory_elsewhere_in_the_app_is_followed(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        shared = app / 'resources/shared'
+        shared.mkdir()
+        payload = shared / 'dependency.js'
+        payload.write_text('export {};\n')
+        modules = app / 'resources/cua_node/lib/node_modules'
+        (modules / 'linked').symlink_to(shared, target_is_directory=True)
+        resolve_installed_linux_app(app, arch='arm64')
+        payload.chmod(0o666)
+        with self.assertRaisesRegex(ValueError, 'dependency.js is writable by group or other'):
+            resolve_installed_linux_app(app, arch='arm64')
+        payload.chmod(0o644)
+        shared.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'shared is writable by group or other'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_link_to_a_file_elsewhere_in_the_app_is_validated(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        target = app / 'resources/helper.mjs'
+        target.write_text('export {};\n')
+        (app / 'resources/cua_node/lib/node_modules/helper.mjs').symlink_to(target)
+        resolve_installed_linux_app(app, arch='arm64')
+        target.chmod(0o666)
+        with self.assertRaisesRegex(ValueError, 'helper.mjs is writable by group or other'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_link_cycles_and_repeated_links_terminate(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        modules = app / 'resources/cua_node/lib/node_modules'
+        (modules / 'loop').symlink_to(modules, target_is_directory=True)
+        (modules / 'again').symlink_to(modules / 'loop', target_is_directory=True)
+        resolve_installed_linux_app(app, arch='arm64')
+
+    def test_link_that_escapes_the_app_is_refused_anywhere_in_a_tree(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        outside = self.root / 'outside'
+        outside.mkdir()
+        (app / 'resources/plugins/openai-bundled/plugins/chrome/escape').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'escape links outside the application'):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_group_write_requires_every_group_member_to_be_trusted(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        node = app / 'resources/cua_node/bin/node'
+        node.chmod(0o775)
+        stranger = os.getuid() + 1000
+        with patch('lcu.platforms._group_members', return_value={stranger}):
+            with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+                resolve_installed_linux_app(app, arch='arm64')
+        with patch('lcu.platforms._group_members', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'writable by group or other'):
+                resolve_installed_linux_app(app, arch='arm64')
+        with patch('lcu.platforms._group_members', return_value={0, os.getuid()}):
+            resolve_installed_linux_app(app, arch='arm64')
+
+    def test_group_zero_is_not_trusted_by_its_number_alone(self):
+        from lcu.platforms import _untrusted_entry
+        info = SimpleNamespace(st_uid=0, st_gid=0, st_mode=0o100664)
+        self.assertIsNotNone(_untrusted_entry(Path('/x'), info, {0}, lambda gid: {0, 1234}))
+        self.assertIsNone(_untrusted_entry(Path('/x'), info, {0}, lambda gid: {0}))
+
+    @staticmethod
+    def _acl(*entries):
+        blob = (2).to_bytes(4, 'little')
+        for tag, perm, ident in entries:
+            blob += tag.to_bytes(2, 'little') + perm.to_bytes(2, 'little') + ident.to_bytes(4, 'little')
+        return blob
+
+    def test_named_acl_entries_with_write_are_untrusted_unless_masked_or_trusted(self):
+        from lcu.platforms import _acl_writers_untrusted
+        USER, GROUP, MASK, OBJ = 0x02, 0x08, 0x10, 0x01
+        no_group = lambda gid: set()
+        base = (OBJ, 6, 0xFFFFFFFF),
+        self.assertRegex(_acl_writers_untrusted(self._acl(*base, (USER, 6, 4242), (MASK, 7, 0xFFFFFFFF)),
+                                                {0}, no_group), 'uid 4242 through a POSIX ACL')
+        self.assertIsNone(_acl_writers_untrusted(self._acl(*base, (USER, 6, 4242), (MASK, 5, 0xFFFFFFFF)),
+                                                 {0}, no_group))  # the mask removes write
+        self.assertIsNone(_acl_writers_untrusted(self._acl(*base, (USER, 4, 4242), (MASK, 7, 0xFFFFFFFF)),
+                                                 {0}, no_group))  # read only
+        self.assertIsNone(_acl_writers_untrusted(self._acl(*base, (USER, 6, 4242), (MASK, 7, 0xFFFFFFFF)),
+                                                 {0, 4242}, no_group))
+        self.assertRegex(_acl_writers_untrusted(self._acl(*base, (GROUP, 6, 50), (MASK, 7, 0xFFFFFFFF)),
+                                                {0}, lambda gid: {4242}), 'group 50')
+        self.assertRegex(_acl_writers_untrusted(b'garbage', {0}, no_group), 'cannot read')
+
+    def test_a_writable_acl_on_an_app_file_is_rejected(self):
+        app = _application_fixture(self.root / 'chatgpt')
+        blob = self._acl((0x01, 6, 0xFFFFFFFF), (0x02, 6, os.getuid() + 1000), (0x10, 7, 0xFFFFFFFF))
+        target = app / 'resources/cua_node/bin/node_repl'
+        real = lcu_platforms._posix_acl
+        with patch('lcu.platforms._posix_acl', side_effect=lambda p: blob if p == target.resolve() else real(p)):
+            with self.assertRaisesRegex(ValueError, 'node_repl is writable by uid .* through a POSIX ACL'):
+                resolve_installed_linux_app(app, arch='arm64')
 
     def test_install_links_the_installed_app_without_copying_it(self):
         prefix = self.root / 'lcu'
