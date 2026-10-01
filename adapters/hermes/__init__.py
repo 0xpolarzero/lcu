@@ -261,16 +261,6 @@ def register(ctx) -> None:
     owner_session: str | None = None
     active_tool_identity = contextvars.ContextVar("lcu_hermes_active_tool_identity", default=None)
 
-    skill_path = PLUGIN_DIR / "skills" / "lcu" / "SKILL.md"
-    if not skill_path.is_file():
-        bridge.close()
-        raise RuntimeError(f"Generated LCU skill is missing: {skill_path}")
-    register_skill = getattr(ctx, "register_skill", None)
-    if callable(register_skill):
-        if register_skill("lcu", skill_path) is None:
-            bridge.close()
-            raise RuntimeError("Hermes did not register the LCU skill")
-
     def inject_original_context(session_id="", turn_id="", **kwargs):
         nonlocal connected, owner_session
         del kwargs
@@ -312,16 +302,14 @@ def register(ctx) -> None:
                     return f"LCU could not reconnect the original runtime for this Hermes session: {exc}"
             owner_session = session_id
             active_turns[session_id] = turn_id
-        skill = skill_path.read_text(encoding="utf-8")
+        # Like official Codex, the model gets only the original server's
+        # instructions and tool descriptors.
         descriptors = json.dumps(public, ensure_ascii=False, indent=2)
         instructions = connected.get("instructions")
         if not isinstance(instructions, str):
             instructions = ""
         return (
             "Use the original installed Computer Use runtime through these LCU tools.\n\n"
-            f"LCU skill file: {skill_path}\n"
-            f"Resolve relative skill references from {skill_path.parent}.\n"
-            "LCU skill:\n" + skill + "\n\n"
             "Original CUA MCP initialization instructions:\n" + instructions + "\n\n"
             "Original public CUA MCP tool descriptors:\n" + descriptors
         )

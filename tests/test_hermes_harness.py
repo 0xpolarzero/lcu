@@ -28,8 +28,6 @@ class FakeContext:
         self.tools[name] = {"toolset": toolset, "schema": schema, "handler": handler}
         return object()
 
-    def register_skill(self, name, path):
-        self.skill = (name, path)
         return object()
 
     def on_unload(self, callback):
@@ -76,8 +74,6 @@ class HermesHarnessTests(unittest.TestCase):
             plugin_dir = home / "plugins" / "lcu-cua"
             plugin_dir.mkdir(parents=True)
             shutil.copy2(PLUGIN / "__init__.py", plugin_dir / "__init__.py")
-            (plugin_dir / "skills" / "lcu").mkdir(parents=True)
-            (plugin_dir / "skills" / "lcu" / "SKILL.md").write_text("Fixture LCU skill content.\n", encoding="utf-8")
             log = home / "fixture.jsonl"
             adapter_root, node = self.make_adapter_tree(home)
             config = {
@@ -99,8 +95,8 @@ class HermesHarnessTests(unittest.TestCase):
                 self.assertEqual(context.tools["js"]["schema"]["description"], "Original JS description.")
                 injected = context.hooks["pre_llm_call"](
                     session_id="hermes-session", turn_id="hermes-turn")
-                self.assertIn("Fixture LCU skill content.", injected)
-                self.assertIn(str(plugin_dir / "skills/lcu/SKILL.md"), injected)
+                # Like official Codex: original instructions and descriptors only, no skill.
+                self.assertNotIn("SKILL.md", injected)
                 self.assertIn("Original CUA initialization guide.", injected)
                 self.assertIn('"name": "js"', injected)
 
@@ -260,7 +256,6 @@ class HermesHarnessTests(unittest.TestCase):
                            item["args"].get("session_id") == "cleanup-once"]
                 self.assertEqual([item["args"]["hook_event_name"] for item in retries], ["Stop", "Stop"])
                 self.assertEqual(retries[0]["args"]["turn_id"], "cleanup-turn")
-                self.assertEqual(context.skill[0], "lcu")
                 self.assertEqual(set(context.hooks), {"pre_llm_call", "on_session_end"})
                 self.assertIn("tool_execution", context.middleware)
             finally:
@@ -277,8 +272,6 @@ class HermesHarnessTests(unittest.TestCase):
             plugin_dir = home / "plugins" / "lcu-cua"
             plugin_dir.mkdir(parents=True)
             shutil.copy2(PLUGIN / "__init__.py", plugin_dir / "__init__.py")
-            (plugin_dir / "skills" / "lcu").mkdir(parents=True)
-            (plugin_dir / "skills" / "lcu" / "SKILL.md").write_text("Fixture skill.\n", encoding="utf-8")
             adapter_root, node = self.make_adapter_tree(home)
             (plugin_dir / "lcu-config.json").write_text(json.dumps({
                 "command": [str(node), str(adapter_root / "test/hermes-mcp-fixture.mjs")], "node": str(node),

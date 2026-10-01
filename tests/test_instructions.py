@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lcu import setup
-from lcu.setup import (agent_scopes, configure, export_bundle, generate_skill, host_policy,
+from lcu.setup import (agent_scopes, configure, export_bundle, host_policy, remove_generated_skill, remove_old_skill,
                        installed_app_resources, load_setup_state, parser, save_setup_state,
                        setup_state_path, validate)
 from lcu.setup_clients import CLIENTS
@@ -61,139 +61,72 @@ class InstalledInstructionTests(unittest.TestCase):
             path = chrome / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-        self.skill_source = self.root / 'skill-source'
-        self.skill_source.mkdir()
-        (self.skill_source / 'SKILL.md').write_bytes(
-            (Path(__file__).resolve().parents[1] / 'skills/lcu/SKILL.md').read_bytes())
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_generated_skill_has_complete_pre_call_sources_byte_identically(self):
-        generated = generate_skill(self.skill_source, self.home, self.release)
-        wrapper = (generated / 'SKILL.md').read_text()
-        # The template's bare `lcu setup` is replaced; `lcu` is not on PATH.
-        self.assertNotIn('run `lcu setup`', wrapper)
-        self.assertIn('/opt/lcu/current/bin/lcu setup', wrapper)
-        # An explicit installed runtime path substitutes exactly.
-        exact = generate_skill(self.skill_source, self.home, self.release,
-                               setup_command='/opt/lcu/current/bin/lcu')
-        self.assertIn('`/opt/lcu/current/bin/lcu setup`', (exact / 'SKILL.md').read_text())
-        mapping = {
-            '@oai/cua/docs/tinysky-alt-core-cua-repl.md': 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md',
-            '@oai/cua-repl/instructions/linux/description.md': 'references/upstream/cua-repl/instructions/linux/description.md',
-            '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md': 'references/upstream/sky/linux/SKILL.md',
-            '@oai/sky/docs/sky-full-desktop-api.md': 'references/upstream/sky/native-api.md',
-            '@oai/sky/docs/sky-window-api.md': 'references/upstream/sky/window-api.md',
-            '@oai/sky/docs/sky-window2-api.md': 'references/upstream/sky/window2-api.md',
-        }
-        for upstream, local in mapping.items():
-            source = (self.resources / 'cua_node/lib/node_modules' / upstream
-                      if upstream.startswith('@oai/') else self.resources / upstream)
-            self.assertEqual((generated / local).read_bytes(), source.read_bytes())
-        self.assertFalse((generated / 'references/upstream/cua-repl/instructions/macos').exists())
-        self.assertFalse((generated / 'references/upstream/browser-desktop').exists())
-        self.assertFalse((generated / 'references/upstream/chrome').exists())
-        self.assertNotIn('Chrome', (generated / 'SKILL.md').read_text())
+    def test_setup_removes_the_skill_generated_by_earlier_versions(self):
+        # Official Codex computer use registers no skill, so LCU no longer generates one.
+        remove_generated_skill(self.home)  # Nothing to remove is not an error.
+        old = self.home / '.local/share/lcu/skills/lcu'
+        (old / 'references/upstream/cua/docs').mkdir(parents=True)
+        (old / 'SKILL.md').write_text('Before the first call, read the copied guides.')
+        (old / 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').write_text('copied guide')
+        remove_generated_skill(self.home)
+        self.assertFalse((self.home / '.local/share/lcu/skills').exists())
 
-    def test_chrome_opt_in_retains_original_browser_and_plugin_guides(self):
-        generated = generate_skill(self.skill_source, self.home, self.release, chrome=True)
-        self.assertEqual((generated / 'references/upstream/browser-desktop/codex-app/api.json').read_bytes(),
-                         (self.modules / '@oai/browser-desktop/environment-docs/codex-app/api.json').read_bytes())
-        self.assertEqual((generated / 'references/upstream/browser-desktop/codex-app/documents.json').read_bytes(),
-                         (self.modules / '@oai/browser-desktop/environment-docs/codex-app/documents.json').read_bytes())
-        self.assertEqual((generated / 'references/upstream/chrome/docs/documents.json').read_bytes(),
-                         (self.resources / 'plugins/openai-bundled/plugins/chrome/docs/documents.json').read_bytes())
-        self.assertEqual((generated / 'references/upstream/chrome/skill/SKILL.md').read_bytes(),
-                         (self.resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md').read_bytes())
-        self.assertIn('references/upstream/browser-desktop/codex-app/api.json',
-                      (generated / 'SKILL.md').read_text())
-        self.assertIn('description: Control Linux desktop windows and opted-in Chrome tabs',
-                      (generated / 'SKILL.md').read_text())
-        self.assertIn('entrypoints do not apply to LCU', (generated / 'SKILL.md').read_text())
+    def test_old_skill_cleanup_removes_only_lcus_own_skill(self):
+        installed = self.root / 'installed/lcu'
+        installed.mkdir(parents=True)
+        calls = []
 
-    def test_missing_instruction_source_does_not_replace_last_generated_skill(self):
-        generated = generate_skill(self.skill_source, self.home, self.release)
-        (generated / 'marker').write_text('previous generation')
-        (self.modules / '@oai/sky/docs/sky-full-desktop-api.md').unlink()
-        with self.assertRaisesRegex(ValueError, 'Original instruction file missing'):
-            generate_skill(self.skill_source, self.home, self.release)
-        self.assertEqual((generated / 'marker').read_text(), 'previous generation')
+        def run(argv, **kwargs):
+            calls.append(argv[2:])
+            if argv[2] == 'list':
+                return SimpleNamespace(returncode=0, stdout=json.dumps(listing), stderr='')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
 
-    def test_macos_wrapper_drops_the_window_id_sentence_kept_on_linux(self):
-        linux = generate_skill(self.skill_source, self.home, self.release)
-        self.assertIn('exact observed window ID', (linux / 'SKILL.md').read_text())
-        contents = self.app / 'Contents'
-        contents.mkdir()
-        self.resources.rename(contents / 'Resources')
-        self.resources = contents / 'Resources'
-        self.modules = self.resources / 'cua_node/lib/node_modules'
-        (self.release / 'installation.json').write_text('{"platform":"darwin","app":"app"}')
-        sky = self.modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md'
-        sky.parent.mkdir(parents=True)
-        sky.write_bytes(b'macos guide\n')
-        macos = generate_skill(self.skill_source, self.home, self.release)
-        wrapper = (macos / 'SKILL.md').read_text()
-        self.assertNotIn('exact observed window ID', wrapper)
-        self.assertIn('effective policy.', wrapper)
+        cases = (
+            ([], None, 'none'),
+            ([{'name': 'lcu', 'path': str(installed)}],
+             'description: Control macOS desktop windows through the original Codex computer-use runtime.', 'removed'),
+            ([{'name': 'lcu', 'path': str(installed)}],
+             'description: Read and operate Linux desktop windows using the LCU MCP computer-use tools.', 'removed'),
+            ([{'name': 'lcu', 'path': str(installed)}], 'description: Someone else\'s unrelated skill.', 'kept'),
+        )
+        for listing, text, expected in cases:
+            with self.subTest(expected=expected, text=text):
+                calls.clear()
+                if text:
+                    (installed / 'SKILL.md').write_text(f'---\nname: lcu\n{text}\n---\n')
+                with patch('lcu.setup.subprocess.run', side_effect=run):
+                    self.assertEqual(remove_old_skill('node', 'skills', self.root, {}, ['--global']), expected)
+                self.assertEqual(calls[0], ['list', '--json', '--global'])
+                # Removal is for every agent, so the shared .agents/skills copy goes too.
+                self.assertEqual(calls[1:], [['remove', 'lcu', '--yes', '--global']] if expected == 'removed' else [])
 
-    def test_macos_skill_selects_original_macos_guides_without_linux_guidance(self):
-        # A macOS bundle has a different resources root, but its original guides
-        # must be copied exactly as Linux guides are, never translated or edited.
-        contents = self.app / 'Contents'
-        contents.mkdir()
-        self.resources.rename(contents / 'Resources')
-        self.resources = contents / 'Resources'
-        self.modules = self.resources / 'cua_node/lib/node_modules'
-        (self.release / 'installation.json').write_text(
-            '{"platform":"darwin","app":"app"}')
-        sky = self.modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md'
-        sky.parent.mkdir(parents=True)
-        sky.write_bytes(b'complete original macOS guide\n')
-        generated = generate_skill(self.skill_source, self.home, self.release)
-        self.assertEqual(installed_app_resources(self.release), self.resources.resolve())
-        self.assertEqual((generated / 'references/upstream/sky/macos/SKILL.md').read_bytes(),
-                         sky.read_bytes())
-        self.assertEqual((generated / 'references/upstream/cua-repl/instructions/macos/description.md').read_bytes(),
-                         (self.modules / '@oai/cua-repl/instructions/macos/description.md').read_bytes())
-        self.assertFalse((generated / 'references/upstream/cua-repl/instructions/linux').exists())
-        wrapper = (generated / 'SKILL.md').read_text()
-        self.assertIn('references/upstream/sky/macos/SKILL.md', wrapper)
-        self.assertNotIn('Linux', wrapper)
-        self.assertNotIn('instructions/linux', wrapper)
-        chrome_skill = generate_skill(self.skill_source, self.home, self.release, chrome=True)
-        self.assertIn('description: Control macOS desktop windows and opted-in Chrome tabs',
-                      (chrome_skill / 'SKILL.md').read_text())
-
-    def test_export_contains_only_lcu_authored_bootstrap_not_upstream_payload(self):
+    def test_export_carries_no_skill_and_no_upstream_payload(self):
         destination = self.root / 'export'
         with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
-            export_bundle(destination, self.skill_source, ['/usr/bin/lcu'], self.release)
+            export_bundle(destination, ['/usr/bin/lcu'], self.release)
+        self.assertFalse((destination / 'skills').exists())
         contents = b'\n'.join(path.read_bytes() for path in destination.rglob('*') if path.is_file())
-        self.assertIn(b'run `lcu setup', contents)
         self.assertNotIn(b'original core guide', contents)
         self.assertNotIn(b'original Chrome skill', contents)
         self.assertNotIn(str(self.root).encode(), contents)
         self.assertNotIn(b'/usr/bin/lcu', contents)
+        metadata = json.loads((destination / 'lcu-bootstrap.json').read_text())
+        self.assertNotIn('instructionSources', metadata)
+        self.assertNotIn('preCallRequirement', metadata)
         command = json.loads((destination / 'mcp.json').read_text())['mcpServers']['lcu']
         self.assertEqual(command['command'], '/bin/sh')
         self.assertIn('LCU_PREFIX', command['args'][1])
         self.assertIn('LCU_SESSION_MODE', command['args'][1])
 
-    def test_chrome_export_marks_original_reference_sources_without_copying_them(self):
-        destination = self.root / 'export-chrome'
-        with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
-            export_bundle(destination, self.skill_source, ['/usr/bin/lcu'], self.release, chrome=True)
-        command = json.loads((destination / 'mcp.json').read_text())['mcpServers']['lcu']
-        self.assertEqual(command['args'][-1], '--chrome')
-        metadata = json.loads((destination / 'lcu-bootstrap.json').read_text())
-        self.assertTrue(any('/plugins/chrome/skills/control-chrome' in item for item in metadata['instructionSources']))
-        self.assertFalse((destination / 'skills/lcu/references').exists())
-
     def test_exported_command_resolves_destination_prefix_and_session(self):
         destination = self.root / 'export'
         with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
-            export_bundle(destination, self.skill_source, ['/producer/private/lcu'], self.release)
+            export_bundle(destination, ['/producer/private/lcu'], self.release)
         command = json.loads((destination / 'mcp.json').read_text())['mcpServers']['lcu']
         prefix = self.root / 'destination'
         bin_dir = prefix / 'current/bin'
@@ -224,7 +157,7 @@ class InstalledInstructionTests(unittest.TestCase):
 
         with patch('lcu.setup.host_policy', return_value=policy), \
                 patch('lcu.codex_hooks.export_files', side_effect=export_files):
-            export_bundle(destination, self.skill_source, ['/producer/private/lcu'], self.release)
+            export_bundle(destination, ['/producer/private/lcu'], self.release)
 
         config = json.loads((destination / 'codex.mcp.json').read_text())['mcpServers']['lcu']
         self.assertEqual(config['command'], '/bin/sh')
@@ -277,30 +210,24 @@ class InstalledInstructionTests(unittest.TestCase):
             'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': 'keep-me'}]}]},
         }))
         calls = []
-        selected_chrome = {'value': False}
+        selected_scope = {'value': 'user'}
 
         def run(argv, **kwargs):
             calls.append(argv)
-            if argv[1:3] == [str(skill_cli), 'add']:
-                source = Path(argv[3])
-                self.assertTrue((source / 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md').is_file())
-                self.assertEqual((source / 'references/upstream/browser-desktop').exists(),
-                                 selected_chrome['value'])
-                self.assertEqual((source / 'references/upstream/chrome').exists(),
-                                 selected_chrome['value'])
-                self.assertIn('--copy', argv)
-                return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
+            if argv[1:3] == [str(skill_cli), 'list']:
+                self.assertEqual('--global' in argv, selected_scope['value'] == 'user')
+                return SimpleNamespace(returncode=0, stdout='[]')
             return SimpleNamespace(returncode=0, stdout='{}')
 
-        def register(scope, command, *, chrome=False):
+        def register(scope, command):
             calls.clear()
-            selected_chrome['value'] = chrome
+            selected_scope['value'] = scope
             with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
                     patch('lcu.setup.preflight_mcp'), patch('lcu.setup.subprocess.run', side_effect=run):
-                failures = configure(['claude-code'], self.home, self.skill_source,
+                failures = configure(['claude-code'], self.home,
                                      command, tool_root, self.release, scope=scope,
                                      project=project if scope == 'project' else None,
-                                     chrome=chrome, environ={'HOME': str(self.home)})
+                                     environ={'HOME': str(self.home)})
             self.assertEqual(failures, [])
             self.assertEqual(len(calls), 2)
             mcp_call = next(argv for argv in calls if argv[1:3] == ['--input-type=module', '-e'])
@@ -335,7 +262,7 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(user_settings.read_bytes(), configured_user)
 
         project_command = [*base_command, '--chrome', '--audio']
-        self.assertEqual(register('project', project_command, chrome=True),
+        self.assertEqual(register('project', project_command),
                          [str(node), str(adapter), *project_command])
         project_settings = project / '.claude/settings.local.json'
         self.assertTrue(project_settings.is_file())
@@ -344,7 +271,7 @@ class InstalledInstructionTests(unittest.TestCase):
             'mcp__lcu__turn_ended', 'mcp__lcu__js_add_node_module_dir',
             'mcp__lcu__set_turn_context'])
         configured_project = project_settings.read_bytes()
-        register('project', project_command, chrome=True)
+        register('project', project_command)
         self.assertEqual(project_settings.read_bytes(), configured_project)
         self.assertEqual(user_settings.read_bytes(), configured_user)
 
@@ -372,18 +299,17 @@ class InstalledInstructionTests(unittest.TestCase):
 
         def run(argv, **_kwargs):
             calls.append(argv)
-            if argv[1:3] == [str(skill_cli), 'add']:
-                return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
+            if argv[1:3] == [str(skill_cli), 'list']:
+                return SimpleNamespace(returncode=0, stdout='[]')
             return SimpleNamespace(returncode=0, stdout=json.dumps({'path': str(config)}))
 
         with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
-                patch('lcu.setup.generate_skill', return_value=self.skill_source), \
                 patch('lcu.setup.host_policy', return_value=policy), \
                 patch('lcu.setup.preflight_mcp'), \
                 patch('lcu.setup.subprocess.run', side_effect=run), \
                 patch('lcu.codex_hooks.require_cli_hook_support'), \
                 patch('lcu.codex_hooks.install_hooks') as install_hooks:
-            failures = configure(['codex'], self.home, self.skill_source, original,
+            failures = configure(['codex'], self.home, original,
                                  tool_root, self.release, environ={'HOME': str(self.home)})
 
         self.assertEqual(failures, [])
@@ -394,7 +320,7 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertEqual(install_hooks.call_args.args[0], original_codex)
         self.assertEqual(install_hooks.call_args.args[1], config)
 
-    def test_pi_registration_uses_original_skill_and_offline_local_package(self):
+    def test_pi_registration_removes_old_skill_and_uses_offline_local_package(self):
         self.assertEqual(set(CLIENTS), {'codex', 'claude-code', 'pi', 'omp', 'hermes'})
         tool_root = self.root / 'agent-tools'
         node, skill_cli, mcp_cli = (tool_root / name for name in ('node', 'skills.mjs', 'mcp.mjs'))
@@ -408,11 +334,8 @@ class InstalledInstructionTests(unittest.TestCase):
 
         def run(argv, **kwargs):
             calls.append((argv, kwargs))
-            if argv[1:3] == [str(skill_cli), 'add']:
-                self.assertIn('--agent', argv)
-                self.assertEqual(argv[argv.index('--agent') + 1], 'pi')
-                self.assertIn('--copy', argv)
-                return SimpleNamespace(returncode=0, stdout='[{"name":"lcu","status":"installed"}]')
+            if argv[1:3] == [str(skill_cli), 'list']:
+                return SimpleNamespace(returncode=0, stdout='[]')
             self.assertEqual(argv[1:3], ['install', str(self.home / '.local/share/lcu/pi/extension.mjs')])
             self.assertEqual(kwargs['env']['PI_OFFLINE'], '1')
             return SimpleNamespace(returncode=0, stdout='Installed')
@@ -420,7 +343,7 @@ class InstalledInstructionTests(unittest.TestCase):
         with patch('lcu.setup.installer_paths', return_value=(node, skill_cli, mcp_cli)), \
                 patch('lcu.setup.shutil.which', return_value='/bin/pi'), \
                 patch('lcu.setup.subprocess.run', side_effect=run):
-            failures = configure(['pi'], self.home, self.skill_source,
+            failures = configure(['pi'], self.home,
                                  ['/usr/bin/lcu', '--audio'], tool_root, self.release,
                                  environ={'HOME': str(self.home)})
         self.assertEqual(failures, [])
@@ -448,10 +371,10 @@ class InstalledInstructionTests(unittest.TestCase):
 
     def test_chrome_export_only_adds_runtime_flag_when_selected(self):
         with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
-            export_bundle(self.root / 'native-export', self.skill_source, ['/usr/bin/lcu'], self.release)
-            export_bundle(self.root / 'chrome-export', self.skill_source, ['/usr/bin/lcu', '--chrome'],
+            export_bundle(self.root / 'native-export', ['/usr/bin/lcu'], self.release)
+            export_bundle(self.root / 'chrome-export', ['/usr/bin/lcu', '--chrome'],
                           self.release, chrome=True)
-            export_bundle(self.root / 'audio-export', self.skill_source, ['/usr/bin/lcu', '--audio'],
+            export_bundle(self.root / 'audio-export', ['/usr/bin/lcu', '--audio'],
                           self.release, audio=True)
         native = json.loads((self.root / 'native-export/mcp.json').read_text())['mcpServers']['lcu']
         browser = json.loads((self.root / 'chrome-export/mcp.json').read_text())['mcpServers']['lcu']
@@ -463,13 +386,6 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('--chrome', metadata['destinationSetup'])
         audio_metadata = json.loads((self.root / 'audio-export/lcu-bootstrap.json').read_text())
         self.assertIn('--audio', audio_metadata['destinationSetup'])
-
-    def test_export_bootstrap_skill_includes_audio_rerun_flag(self):
-        with patch('lcu.setup.host_policy', return_value={}), patch('lcu.codex_hooks.export_files', return_value={}):
-            export_bundle(self.root / 'audio-export', self.skill_source, ['/usr/bin/lcu', '--audio'],
-                          self.release, audio=True)
-        bootstrap = (self.root / 'audio-export/skills/lcu/SKILL.md').read_text()
-        self.assertIn('lcu setup --export /new/path --audio --yes', bootstrap)
 
     def test_setup_state_round_trips_and_rejects_malformed(self):
         self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False})
@@ -512,7 +428,7 @@ class InstalledInstructionTests(unittest.TestCase):
         account = SimpleNamespace(pw_name='fixture', pw_uid=os.getuid(), pw_dir=str(self.home))
         captured = []
 
-        def fake_configure(names, home, source, command, *args, **kwargs):
+        def fake_configure(names, home, command, *args, **kwargs):
             captured.append(command)
             return []
 
@@ -553,10 +469,3 @@ class InstalledInstructionTests(unittest.TestCase):
             drive([])
         self.assertEqual(prompts, ['Apply this setup? [y/N] '])
         self.assertNotIn('--chrome', captured[-1])
-
-    def test_chrome_skill_names_the_installed_runtime_for_browser_commands(self):
-        generated = generate_skill(self.skill_source, self.home, self.release, chrome=True,
-                                   setup_command='/opt/lcu/current/bin/lcu')
-        wrapper = (generated / 'SKILL.md').read_text()
-        self.assertIn('`/opt/lcu/current/bin/lcu browser status`', wrapper)
-        self.assertNotIn('`lcu ', wrapper)

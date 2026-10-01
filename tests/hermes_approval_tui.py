@@ -44,7 +44,7 @@ CASES = [
 ]
 
 
-def exercise(hermes: Path, node: Path, skill: Path, release: Path, name: str,
+def exercise(hermes: Path, node: Path, release: Path, name: str,
              code: str, selection: int | str | None, expected: dict, evidence_dir: Path) -> dict:
     requests = []
     model_requests = []
@@ -109,7 +109,7 @@ def exercise(hermes: Path, node: Path, skill: Path, release: Path, name: str,
             "OPENAI_API_KEY": "lcu-hermes-scripted-provider", "TERM": "xterm-256color",
             "NO_COLOR": "1", "LCU_FIXTURE_LOG": str(log),
         }
-        configure_hermes(home, skill,
+        configure_hermes(home,
                          [str(node), str(ROOT / "adapters/test/hermes-mcp-fixture.mjs")],
                          node, release, scope="user", project=None, env=env)
         settings = [
@@ -201,20 +201,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hermes", required=True, type=Path)
     parser.add_argument("--node", required=True, type=Path)
-    parser.add_argument("--skill", required=True, type=Path)
     parser.add_argument("--release", type=Path, default=ROOT)
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--case", choices=[case[0] for case in CASES])
     args = parser.parse_args()
-    hermes, node, skill, release = (args.hermes.absolute(), args.node.absolute(),
-                                    args.skill.absolute(), args.release.absolute())
-    if not all(path.is_file() for path in (hermes, node, skill / "SKILL.md")):
-        parser.error("--hermes, --node, and --skill/SKILL.md must name existing files")
+    hermes, node, release = args.hermes.absolute(), args.node.absolute(), args.release.absolute()
+    if not all(path.is_file() for path in (hermes, node)):
+        parser.error("--hermes and --node must name existing files")
     reports = []
     for name, code, selection, expected in CASES:
         if args.case and args.case != name:
             continue
-        report = exercise(hermes, node, skill, release, name, code, selection, expected, args.evidence)
+        report = exercise(hermes, node, release, name, code, selection, expected, args.evidence)
         reports.append(report)
         print(json.dumps(report), flush=True)
     (args.evidence / "summary.json").write_text(json.dumps(reports, indent=2) + "\n", encoding="utf-8")

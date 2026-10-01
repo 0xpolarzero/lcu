@@ -19,8 +19,8 @@ from provision_agent_tools import provision as provision_agents
 
 SOURCE = Path(__file__).resolve().parents[1]
 
-# The docs/*.md set shipped in every archive; README and the skill round out
-# the reachable roots for verification-record selection.
+# The docs/*.md set shipped in every archive; README rounds out the reachable
+# roots for verification-record selection.
 SHIPPED_DOCS = ('INSTALLATION.md', 'DEVELOPMENT.md', 'INSTRUCTIONS.md',
                 'VERIFICATION.md', 'PROVENANCE.md', 'PARITY-STATUS.md',
                 'STANDALONE-ADAPTATIONS.md', 'ADAPTERS.md')
@@ -35,8 +35,7 @@ def linked_docs(source):
     """
     source = Path(source)
     docs = (source / 'docs').resolve()
-    roots = [source / 'README.md', source / 'skills/lcu/SKILL.md',
-             *(source / 'docs' / name for name in SHIPPED_DOCS)]
+    roots = [source / 'README.md', *(source / 'docs' / name for name in SHIPPED_DOCS)]
     seen, linked, stack = set(), set(), [path.resolve() for path in roots]
     while stack:
         path = stack.pop()
@@ -119,8 +118,6 @@ def build(output, package=None, *, target='linux', app=None):
             shipped = release / 'docs' / document.relative_to(docs)
             shipped.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(document, shipped)
-        (release / 'skills/lcu').mkdir(parents=True)
-        shutil.copy2(SOURCE / 'skills/lcu/SKILL.md', release / 'skills/lcu/SKILL.md')
         for filename in ('README.md', 'LICENSE', 'runtime.lock.json'):
             shutil.copy2(SOURCE / filename, release / filename)
         (release / 'scripts').mkdir()

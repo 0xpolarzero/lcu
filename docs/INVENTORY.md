@@ -6,7 +6,7 @@ LCU's source and thin archives carry the [pin and selected component hashes](../
 
 [The installer](../scripts/installed_app.py) checks package identity, runtime manifest, required executables, links, modes and component hashes. It derives an inventory of every file, directory and symlink from the verified package. A supplied existing app must match that inventory before selection. The managed generation stores its inventory locally and is checked on reuse; it is shared by agents and retained across LCU upgrades. The inventory is not redistributed.
 
-[Instruction setup](../lcu/setup.py) copies the applicable original Linux and Chrome guides byte for byte from the selected app into the target account's local skill directory before agent registration. The source wrapper in [SKILL.md](../skills/lcu/SKILL.md) has no checked-in reference tree. [Installation tests](../tests/test_installation.py), [instruction tests](../tests/test_instructions.py) and the [source-distribution test](../tests/test_distribution.py) cover the corresponding boundaries.
+[Setup](../lcu/setup.py) registers no skill and copies no original documents: the original runtime delivers its instructions through the tool, as in official Codex. It removes the `lcu` skill that earlier versions registered. [Installation tests](../tests/test_installation.py), [instruction tests](../tests/test_instructions.py) and the [source-distribution test](../tests/test_distribution.py) cover the corresponding boundaries.
 
 ## Historical source audit
 

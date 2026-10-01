@@ -1,7 +1,7 @@
 """Run the generated OMP plugin through OMP's real linker and RPC discovery.
 
-Requires an already installed OMP binary. All HOME, XDG, project, session, and
-skill files are disposable; this test makes no model or desktop calls.
+Requires an already installed OMP binary. All HOME, XDG, project and session
+files are disposable; this test makes no model or desktop calls.
 """
 import argparse
 import json
@@ -77,18 +77,13 @@ def run_scope(root, omp, scope, profile):
     project = root / f'project-{profile}'
     project.mkdir()
     (project / '.omp').mkdir()
-    skill = root / f'full-generated-skill-{profile}'
-    skill.mkdir()
-    (skill / 'SKILL.md').write_text(
-            '---\nname: lcu\ndescription: Disposable LCU registration fixture.\n---\n'
-            '\nUse this generated fixture skill. Marker: LCU_SKILL_DISCOVERY_FIXTURE.\n')
     release = Path(__file__).resolve().parents[1]
     fixture = release / 'adapters/test/omp-mcp-fixture.mjs'
     node = shutil.which('node')
     if not node:
         raise RuntimeError('Node.js is required to run the original MCP fixture')
     try:
-        configure_omp(Path(env['HOME']), skill, [node, str(fixture)], release,
+        configure_omp(Path(env['HOME']), [node, str(fixture)], release,
                       scope=scope, project=project if scope == 'project' else None, env=env)
     except ValueError as exc:
         if scope != 'project' or 'project' not in str(exc).lower():
@@ -104,8 +99,8 @@ def run_scope(root, omp, scope, profile):
     if not package_link.is_symlink():
         raise AssertionError(f'OMP {scope}/{profile} plugin link was not created: {package_link}')
     package = package_link.resolve()
-    if not (package / 'skills/lcu/SKILL.md').is_file():
-        raise AssertionError('Generated full skill is missing from the linked OMP package')
+    if (package / 'skills').exists():
+        raise AssertionError('The linked OMP package must not register a skill, as in official Codex')
     session = root / f'session-{profile}'
     session.mkdir()
     cwd = project if scope == 'project' else root / f'cwd-{profile}'
@@ -117,14 +112,12 @@ def run_scope(root, omp, scope, profile):
     if result.returncode:
         raise AssertionError(f'OMP {scope} RPC exited {result.returncode}: {result.stderr}\n{result.stdout}')
     commands = commands_from_output(result.stdout)
-    if not any(item.get('name') == 'skill:lcu' and item.get('source') == 'skill'
-               for item in commands if isinstance(item, dict)):
-        raise AssertionError(f'OMP {scope}/{profile} did not discover the linked fixture skill: {commands}')
+    if any(item.get('name') == 'skill:lcu' for item in commands if isinstance(item, dict)):
+        raise AssertionError(f'OMP {scope}/{profile} still discovered an LCU skill: {commands}')
     fixture_entries = [json.loads(line) for line in Path(env['LCU_FIXTURE_LOG']).read_text().splitlines()]
     if fixture_entries:
         raise AssertionError(f'RPC command listing unexpectedly executed LCU tools: {fixture_entries}')
-    print(f'OMP {scope}/{profile}: native linked skill discovered; '
-          f'generated skill installed at {package / "skills/lcu/SKILL.md"}.')
+    print(f'OMP {scope}/{profile}: native plugin linked at {package}; no LCU skill registered.')
     return package
 
 

@@ -43,7 +43,7 @@ Linux and macOS archives include the same shared MCP SDK client and Pi extension
 
 Run adapter checks with `npm test --prefix adapters`. [Mac runtime verification](verification/macos-runtime.md) distinguishes transport/instruction checks from live native control. A sandbox that prevents `codesign` reading signing services or prohibits nested `sandbox-exec` cannot perform those checks; preserve original sandbox settings and run verification in an appropriate host environment.
 
-Before publishing, inspect the tar member list and unpacked tree. They must contain LCU-owned launchers, wrapper skill, lock/installer metadata and redistributable registration dependencies only. They must not contain app binaries, upstream instruction copies, generated app fragments, profiles or tokens. Portable exports have the same no-OpenAI-payload requirement.
+Before publishing, inspect the tar member list and unpacked tree. They must contain LCU-owned launchers, lock/installer metadata and redistributable registration dependencies only. They must not contain app binaries, upstream instruction copies, generated app fragments, profiles or tokens. Portable exports have the same no-OpenAI-payload requirement.
 
 ## Install and exercise an isolated fixture
 

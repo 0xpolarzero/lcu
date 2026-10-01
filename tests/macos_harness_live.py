@@ -367,7 +367,7 @@ def build_command(agent: str, cli: Path, model: str, args: list[str], prompt: st
 
 
 def prompt_for(agent: str, bundle_id: str, marker: str) -> str:
-    return ("Use only the LCU skill and its original Computer Use js tool. First call js once "
+    return ("Use only the original Computer Use js tool. First call js once "
             "with `await cua.getState();` to read the original instructions and identify the "
             "fixture window. Then make a separate js call to set its Draft text field to exactly "
             f"{marker}, click Save draft, and read the field once after saving. Confirm the field "
@@ -535,7 +535,6 @@ def main() -> None:
     parser.add_argument("--cli", required=True, type=Path)
     parser.add_argument("--release", required=True, type=Path)
     parser.add_argument("--runtime", type=Path, default=Path("/Users/lcuverify/lcu-installed/current/bin/lcu"))
-    parser.add_argument("--skill", type=Path)
     parser.add_argument("--app", type=Path, default=Path("/Applications/ChatGPT.app"))
     parser.add_argument("--model", default="glm-5.3-flash")
     parser.add_argument("--base-url", default="http://192.168.64.1:62098/v1")
@@ -555,8 +554,7 @@ def main() -> None:
     cli, release, runtime, app = (args.cli.resolve(strict=True), args.release.resolve(strict=True),
                                   args.runtime.resolve(strict=True), args.app.resolve(strict=True))
     if not all((release / path).is_file() for path in
-               ("bin/lcu", "lcu/runtime.py", "adapters/pi/index.ts", "adapters/hermes/plugin.yaml",
-                "skills/lcu/SKILL.md")):
+               ("bin/lcu", "lcu/runtime.py", "adapters/pi/index.ts", "adapters/hermes/plugin.yaml")):
         raise SystemExit("Staged LCU source tree is incomplete")
     url = urlsplit(args.base_url)
     if (url.scheme != "http" or url.hostname != "192.168.64.1" or url.port != 62098 or
@@ -581,11 +579,6 @@ def main() -> None:
             home, hermes_home = root / "home", root / "hermes-home"
             for directory in (home, hermes_home, root / "cwd", root / "session"):
                 directory.mkdir(parents=True)
-            if args.skill:
-                skill = args.skill.resolve(strict=True)
-            else:
-                from lcu.setup import generate_skill
-                skill = generate_skill(release / "skills/lcu", home, root / "live-lcu")
             env = cua_environment(home, app, audio=False)
             env["PATH"] = os.pathsep.join((str(cli.parent), env.get("PATH", "/usr/bin:/bin")))
             if args.agent == "hermes":
@@ -634,13 +627,13 @@ def main() -> None:
                         f"      - id: {args.model}\n        contextWindow: 200000\n"
                         "        maxTokens: 8192\n        supportsTools: true\n"
                         "        compat:\n          supportsDeveloperRole: false\n", encoding="utf-8")
-                    configure_omp(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
+                    configure_omp(home, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
                                   test_release, scope="user", project=None, env=env)
                     (profile / "config.yml").write_text("setupVersion: 2\nstartup:\n  quiet: true\n")
                     run_args = ["--cwd", str(root / "cwd"), "--session-dir", str(root / "session")]
                 else:
                     node = app / "Contents/Resources/cua_node/bin/node"
-                    configure_hermes(home, skill, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
+                    configure_hermes(home, ["/usr/bin/env", f"HOME={Path.home()}", str(overlay_runtime)],
                                      node, test_release, scope="user", project=None, env=env)
                     instrument_hermes_cleanup(hermes_home / "plugins/lcu-cua/__init__.py")
                     from lcu.harness_setup import _run

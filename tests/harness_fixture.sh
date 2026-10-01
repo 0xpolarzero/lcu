@@ -19,7 +19,7 @@ repo, output = map(lambda p: Path(p).resolve(), sys.argv[1:])
 if output.is_relative_to(repo):
     raise SystemExit('Generated original instructions must stay outside the repository')
 output.mkdir(parents=True, exist_ok=True)
-if (output / 'skill').exists():
+if (output / 'doctor.log').exists():
     raise SystemExit('Use a fresh output directory')
 PY
 docker run -d --name "$name" --label lcu.harness-fixture=1 --network none \
@@ -62,6 +62,5 @@ docker exec "$name" bash -c 'for attempt in {1..100}; do
   if test -s /tmp/lcu-desktop.env && DISPLAY=:99 xwininfo -root -tree | grep -q "LCU Target"; then exit 0; fi
   sleep .1
 done; exit 1'
-docker cp "$name:/home/lcutester/export/skills/lcu" "$output/skill"
 docker exec -u lcutester "$name" /tmp/lcu-runtime doctor >"$output/doctor.log"
-printf 'Fixture ready: %s\nSkill: %s/skill\nCleanup: docker rm -f %s\n' "$name" "$output" "$name"
+printf 'Fixture ready: %s\nOutput: %s\nCleanup: docker rm -f %s\n' "$name" "$output" "$name"

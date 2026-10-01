@@ -29,16 +29,14 @@ def main() -> None:
         root = Path(temporary)
         home = root / "home"
         hermes_home = root / "hermes"
-        skill = root / "skill"
-        for directory in (home, hermes_home, skill):
+        for directory in (home, hermes_home):
             directory.mkdir(parents=True, exist_ok=True)
-        (skill / "SKILL.md").write_text("Isolated LCU registration fixture.\n", encoding="utf-8")
         env = {
             "PATH": os.pathsep.join([str(Path(hermes).resolve().parent), str(node.parent), "/usr/bin", "/bin"]),
             "HOME": str(home),
             "HERMES_HOME": str(hermes_home),
         }
-        configure_hermes(home, skill, [str(node), str(ROOT / "adapters/test/mcp-fixture.mjs")],
+        configure_hermes(home, [str(node), str(ROOT / "adapters/test/mcp-fixture.mjs")],
                          node, ROOT, scope="user", project=None, env=env)
         command = [hermes, "plugins", "doctor", "lcu-cua", "--ci"]
         result = subprocess.run(command, cwd=home, env=env, text=True, capture_output=True, timeout=90)

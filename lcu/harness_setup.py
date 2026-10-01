@@ -19,7 +19,7 @@ def _run(argv, *, cwd, env):
 
 
 @contextmanager
-def _package(destination, harness, files, skill):
+def _package(destination, harness, files):
     """Replace only our own generated tree and restore it if registration fails."""
     from .setup import regular_path
     destination = regular_path(destination)
@@ -39,12 +39,6 @@ def _package(destination, harness, files, skill):
             target = stage / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        # The source is the locally generated full skill, never the bootstrap
-        # from the release. No original documents enter the repository/archive.
-        regular_path(skill)
-        for entry in skill.rglob('*'):
-            regular_path(entry)
-        shutil.copytree(skill, stage / 'skills/lcu')
         (stage / marker).write_text(json.dumps(identity) + '\n')
         previous = Path(temporary) / 'previous'
         if destination.exists():
@@ -60,7 +54,7 @@ def _package(destination, harness, files, skill):
             raise
 
 
-def configure_omp(home, skill, command, release, *, scope, project, env):
+def configure_omp(home, command, release, *, scope, project, env):
     if scope != 'user':
         raise ValueError('Oh My Pi native plugin links are profile-scoped. Use --scope user with the intended OMP profile; project scope is not supported.')
     executable = shutil.which('omp', path=env.get('PATH'))
@@ -70,7 +64,7 @@ def configure_omp(home, skill, command, release, *, scope, project, env):
     if not adapter.is_file():
         raise ValueError(f'LCU Pi/OMP adapter missing: {adapter}')
     # Separate package trees prevent profile setup from changing another
-    # registration's selected runtime command or Chrome instruction opt-in.
+    # registration's selected runtime command or Chrome opt-in.
     identity = [scope, str(project.resolve()) if project else '',
                 *(env.get(key, '') for key in ('OMP_PROFILE', 'PI_PROFILE', 'PI_CODING_AGENT_DIR'))]
     suffix = hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:16]
@@ -91,11 +85,11 @@ def configure_omp(home, skill, command, release, *, scope, project, env):
                ', connectOnLoad: true, ompEssentialTools: true});\n')
     files = {'package.json': (json.dumps(manifest, indent=2) + '\n').encode(),
              'index.ts': wrapper.encode()}
-    with _package(destination, 'omp', files, skill) as package:
+    with _package(destination, 'omp', files) as package:
         _run([executable, 'plugin', 'link', str(package)], cwd=home, env=env)
 
 
-def configure_hermes(home, skill, command, node, release, *, scope, project, env):
+def configure_hermes(home, command, node, release, *, scope, project, env):
     if scope != 'user':
         raise ValueError('Hermes native plugins are profile-scoped. Use --scope user with the intended HERMES_HOME; project scope is not supported.')
     executable = shutil.which('hermes', path=env.get('PATH'))
@@ -115,6 +109,6 @@ def configure_hermes(home, skill, command, node, release, *, scope, project, env
         raise ValueError(f'LCU Hermes bridge missing: {bridge}')
     config = {'command': command, 'node': str(node), 'bridge': str(bridge)}
     files['lcu-config.json'] = (json.dumps(config, indent=2) + '\n').encode()
-    with _package(root / 'plugins/lcu-cua', 'hermes', files, skill):
+    with _package(root / 'plugins/lcu-cua', 'hermes', files):
         _run([executable, 'plugins', 'enable', 'lcu-cua'], cwd=home,
              env={**env, 'HERMES_HOME': str(root)})

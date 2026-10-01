@@ -24,7 +24,7 @@ bash tests/harness_fixture.sh \
   lcu-hermes-flow /tmp/lcu-hermes-evidence
 ```
 
-The helper verifies input checksums, provisions LCU offline from the extracted app, exports the complete original skill, starts only generated windows, and runs `lcu doctor`. It was exercised on Linux ARM64 on 2026-09-28 with ChatGPT `26.915.31945` and CUA `0.0.16/20260915001755-492f19756c31`; window listing and screenshot capture passed.
+The helper verifies input checksums, provisions LCU offline from the extracted app, exports the LCU configuration, starts only generated windows, and runs `lcu doctor`. It was exercised on Linux ARM64 on 2026-09-28 with ChatGPT `26.915.31945` and CUA `0.0.16/20260915001755-492f19756c31`; window listing and screenshot capture passed.
 
 ## Model connection and harness runs
 
@@ -43,7 +43,6 @@ Use that ready file's `base_url` below. Keep raw transcripts outside the reposit
 python3 tests/omp_real_gtk.py \
   --omp /absolute/path/to/omp \
   --container lcu-omp-flow --container-user lcutester \
-  --skill /tmp/lcu-omp-evidence/skill \
   --model openai/glm-5.3-flash \
   --proxy-base-url http://127.0.0.1:PORT/v1 \
   --docker-host unix:///absolute/path/to/docker.sock \
@@ -52,7 +51,6 @@ python3 tests/omp_real_gtk.py \
 HERMES_BIN=/absolute/path/to/hermes \
 HERMES_TEST_NODE=/absolute/path/to/node \
 LCU_TEST_RELEASE="$PWD" \
-LCU_TEST_SKILL=/tmp/lcu-hermes-evidence/skill \
 LCU_TEST_CONTAINER=lcu-hermes-flow \
 LCU_TEST_MODEL=glm-5.3-flash \
 LCU_TEST_BASE_URL=http://127.0.0.1:PORT/v1 \

@@ -21,7 +21,6 @@ from lcu.setup import configure, export_bundle, host_policy
 def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
     resources = app / 'Contents/Resources'
     modules = resources / 'cua_node/lib/node_modules'
-    source = release / 'skills/lcu'
     runtime = release / 'bin/lcu'
     tools_root = release / 'agent-tools'
     with tempfile.TemporaryDirectory(prefix='lcu-macos-setup-', dir='/private/tmp') as temporary:
@@ -37,8 +36,8 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
             'TMPDIR': str(home), 'LANG': 'C.UTF-8',
         }
         command = [str(runtime), *(['--chrome'] if chrome else [])]
-        failures = configure(['codex'], home, source, command, tools_root,
-                             release, environ=env, chrome=chrome)
+        failures = configure(['codex'], home, command, tools_root,
+                             release, environ=env)
         assert not failures, failures
         config = tomllib.loads(codex.read_text())
         assert config['model'] == 'fixture-model'
@@ -59,44 +58,14 @@ def check_mode(release: Path, app: Path, *, chrome: bool) -> None:
             assert all(group in actual for group in groups), event
         assert config['hooks']['state'], 'Original hooks were not trusted'
 
-        generated = home / '.local/share/lcu/skills/lcu'
-        wrapper = (generated / 'SKILL.md').read_text()
-        assert ('references/upstream/chrome/' in wrapper) == chrome
-        assert ('references/upstream/browser-desktop/' in wrapper) == chrome
-        pairs = (
-            (modules / '@oai/cua/docs/tinysky-alt-core-cua-repl.md',
-             'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md'),
-            (modules / '@oai/cua-repl/instructions/macos/description.md',
-             'references/upstream/cua-repl/instructions/macos/description.md'),
-            (modules / '@oai/sky/docs/skills/oai_sky_lib/macos/SKILL.md',
-             'references/upstream/sky/macos/SKILL.md'),
-        )
-        for original, relative in pairs:
-            assert (generated / relative).read_bytes() == original.read_bytes(), relative
-        chrome_sources = (
-            (modules / '@oai/browser-desktop/environment-docs/codex-app/api.json',
-             'references/upstream/browser-desktop/codex-app/api.json'),
-            (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome/SKILL.md',
-             'references/upstream/chrome/skill/SKILL.md'),
-        )
-        for original, relative in chrome_sources:
-            if chrome:
-                assert (generated / relative).read_bytes() == original.read_bytes(), relative
-            else:
-                assert not (generated / relative).exists(), relative
-        assert chrome == (generated / 'references/upstream/chrome').exists()
-        assert chrome == (generated / 'references/upstream/browser-desktop').exists()
-        assert not (generated / 'references/upstream/cua-repl/instructions/linux').exists()
-        assert not (generated / 'references/upstream/sky/linux').exists()
-        installed_skills = [path for path in home.rglob('SKILL.md')
-                            if path.parent.name == 'lcu' and path != generated / 'SKILL.md']
-        assert installed_skills, 'Codex installer did not copy the full skill'
-        assert any((path.parent / pairs[1][1]).is_file() for path in installed_skills)
+        # Like official Codex computer use: no skill and no copied upstream documents.
+        assert not (home / '.local/share/lcu/skills').exists()
+        assert not [p for p in home.rglob('SKILL.md') if p.parent.name == 'lcu'], 'an LCU skill was registered'
 
         export = home / 'portable'
-        export_bundle(export, source, command, release, chrome=chrome)
+        export_bundle(export, command, release, chrome=chrome)
         assert json.loads((export / 'host-contract.json').read_text()) == host_policy(release)
-        assert not (export / 'skills/lcu/references').exists()
+        assert not (export / 'skills').exists()
         exported = b'\n'.join(path.read_bytes() for path in export.rglob('*') if path.is_file())
         assert (modules / '@oai/cua/docs/tinysky-alt-core-cua-repl.md').read_bytes() not in exported
         assert str(home).encode() not in exported
@@ -109,9 +78,7 @@ def exercise(release: Path, app: Path) -> None:
     print(json.dumps({'result': 'passed', 'checks': [
         'disposable native and Chrome-opt-in Codex registration', 'unrelated settings preserved',
         'original MCP policy', 'original trusted lifecycle hooks',
-        'native default omits Chrome references', 'opt-in Chrome references byte-identical',
-        'copied agent skill',
-        'bootstrap-only portable export'], 'provider_actions': 0}, indent=2))
+        'no skill and no upstream copies', 'portable export without upstream payload'], 'provider_actions': 0}, indent=2))
 
 
 def main() -> None:

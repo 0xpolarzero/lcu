@@ -65,13 +65,6 @@ class OmpHostTests(unittest.TestCase):
             home = root / "home"
             profile = home / ".omp/profiles/lcu-fixture/agent"
             profile.mkdir(parents=True)
-            skill = root / "skill"
-            (skill / "SKILL.md").parent.mkdir(parents=True)
-            (skill / "SKILL.md").write_text(
-                "---\nname: lcu\ndescription: Isolated generated LCU skill.\n---\n\n"
-                "This skill is discoverable in the isolated OMP profile.\n",
-                encoding="utf-8",
-            )
             for name in ("config", "data", "cache", "cwd", "session"):
                 (root / name).mkdir()
 
@@ -112,7 +105,7 @@ class OmpHostTests(unittest.TestCase):
                 "LCU_MCP_COMMAND": json.dumps([str(node), str(fixture)]),
                 "LCU_FIXTURE_LOG": str(fixture_log),
             }
-            configure_omp(home, skill, [str(node), str(fixture)], ROOT,
+            configure_omp(home, [str(node), str(fixture)], ROOT,
                           scope="user", project=None, env=env)
 
             command = [str(Path(OMP).resolve()), "--print", "--no-session",

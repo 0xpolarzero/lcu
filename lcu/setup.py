@@ -1,4 +1,4 @@
-"""Configure LCU tools and skill together, without requiring a running desktop."""
+"""Configure LCU tools, without requiring a running desktop."""
 from __future__ import annotations
 
 import argparse
@@ -39,16 +39,6 @@ def app_prerequisite_message(location=None, *, alternate_location=False):
     if alternate_location:
         message += ' If it is installed elsewhere, pass --existing-app PATH.'
     return message
-
-
-CHROME_SKILL_ADDENDUM = """
-
-## Chrome browser control
-
-This LCU installation opted into the original unified `cua` Chrome surface. Before the first browser call, read the original [browser API](references/upstream/browser-desktop/codex-app/api.json) and [document-selection graph](references/upstream/browser-desktop/codex-app/documents.json). Use browser and tab entrypoints shown by the connected provider and its returned capability instructions. The original [Chrome plugin guide](references/upstream/chrome/skill/SKILL.md) and [Chrome plugin documents](references/upstream/chrome/docs/documents.json) are retained as references. Their separate `setupBrowserRuntime()` and `agent.browsers` entrypoints do not apply to LCU's unified `cua` tool.
-
-For connection problems, run `lcu browser status` and, if the native host is missing, `lcu browser install` as the desktop account. Enable the official ChatGPT extension in the selected Chrome profile. Site approvals remain with the original provider and the agent host.
-"""
 
 
 @dataclass
@@ -341,119 +331,59 @@ def installed_app_resources(release_root):
     return resources
 
 
-def _copy_resource_tree(source, destination):
-    """Copy regular files from a selected upstream instruction tree."""
-    if not source.is_dir():
-        raise ValueError(f'Original instruction directory missing: {source}')
-    for path in source.rglob('*'):
-        if path.is_symlink():
-            raise ValueError(f'Unexpected symlink in original instructions: {path}')
-        if path.is_file():
-            relative = path.relative_to(source)
-            target = destination / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(path, target)
+def remove_generated_skill(home):
+    """Delete the skill that earlier LCU versions generated for registration.
 
-
-def _copy_resource_file(source, destination):
-    if source.is_symlink() or not source.is_file():
-        raise ValueError(f'Original instruction file missing: {source}')
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
-
-
-def generate_skill(source, home, release_root, *, chrome=False, setup_command=None):
-    """Materialize the selected platform's original references byte for byte."""
-    resources = installed_app_resources(release_root)
-    installation = json.loads((Path(release_root) / 'installation.json').read_text())
-    target = installation.get('platform', 'linux')
-    instruction_platform = {'linux': 'linux', 'darwin': 'macos', 'windows': 'windows'}[target]
-    modules = resources / ('cua_node/bin/node_modules' if target == 'windows' else 'cua_node/lib/node_modules')
-    def original(path):
-        if target == 'windows' and not path.exists():
-            return Path(str(path).replace('@oai', '%40oai'))
-        return path
-    selections = (
-        (original(modules / '@oai/cua/docs'), Path('upstream/cua/docs')),
-        (original(modules / '@oai/cua-repl/instructions'), Path('upstream/cua-repl/instructions')),
-        (original(modules / '@oai/browser-desktop/environment-docs/codex-app'), Path('upstream/browser-desktop/codex-app')),
-        (resources / 'plugins/openai-bundled/plugins/chrome/docs', Path('upstream/chrome/docs')),
-        (resources / 'plugins/openai-bundled/plugins/chrome/skills/control-chrome', Path('upstream/chrome/skill')),
-    )
-    generated_root = regular_path((home / 'AppData/Local/LCU/skills') if target == 'windows'
-                                  else (home / '.local/share/lcu/skills'))
-    generated = generated_root / 'lcu'
-    generated_root.mkdir(parents=True, exist_ok=True)
-    stage = generated_root / ('.lcu-stage-' + uuid.uuid4().hex)
-    stage.mkdir()
-    try:
-        wrapper = (source / 'SKILL.md').read_text()
-        if target == 'darwin':
-            # Only LCU-authored bootstrap text changes. All upstream documents
-            # below are copied without altering their prose or APIs.
-            wrapper = wrapper.replace('Linux', 'macOS').replace('/linux/', '/macos/')
-            # The sentence ends its paragraph with no trailing space; strip the
-            # preceding space so the macOS wrapper drops it cleanly.
-            wrapper = wrapper.replace(' For native macOS windows, target an exact observed window ID.', '')
-        elif target == 'windows':
-            wrapper = wrapper.replace('Linux', 'Windows').replace('/linux/', '/windows/')
-            wrapper = wrapper.replace('For native Windows windows, target an exact observed window ID.',
-                                      'For native Windows apps, target an exact observed window ID.')
-        if chrome:
-            platform_name = {'darwin': 'macOS', 'linux': 'Linux', 'windows': 'Windows'}[target]
-            wrapper = wrapper.replace(f'description: Control {platform_name} desktop windows through the original Codex computer-use runtime.',
-                                      f'description: Control {platform_name} desktop windows and opted-in Chrome tabs through the original Codex computer-use runtime.')
-            wrapper += CHROME_SKILL_ADDENDUM
-        # `lcu` is not on PATH; name the installed runtime, or its default path.
-        runtime_command = setup_command or {'linux': '/opt/lcu/current/bin/lcu',
-                                            'macos': '~/.local/share/lcu/current/bin/lcu',
-                                            'windows': r'%LOCALAPPDATA%\LCU\lcu.cmd'}[instruction_platform]
-        wrapper = wrapper.replace('`lcu ', f'`{runtime_command} ')
-        (stage / 'SKILL.md').write_text(wrapper)
-        refs = stage / 'references'
-        # Match upstream load_instructions(process.platform): expose shared
-        # launcher documents and the branch for the selected application.
-        repl_source, repl_target = selections[1]
-        for name in ('banner.js', 'browser-disabled.md', 'code.md', 'computer-disabled.md', 'reset.md', 'server.md'):
-            path = repl_source / name
-            if path.is_file():
-                # Do not shadow the `target` platform read by original().
-                destination = refs / repl_target / name
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, destination)
-        _copy_resource_tree(repl_source / instruction_platform, refs / repl_target / instruction_platform)
-        for upstream, relative in (selections[0], *(selections[2:] if chrome else ())):
-            _copy_resource_tree(upstream, refs / relative)
-        _copy_resource_file(original(modules / f'@oai/sky/docs/skills/oai_sky_lib/{instruction_platform}/SKILL.md'),
-                            refs / f'upstream/sky/{instruction_platform}/SKILL.md')
-        _copy_resource_file(original(modules / '@oai/sky/docs/sky-full-desktop-api.md'),
-                            refs / 'upstream/sky/native-api.md')
-        _copy_resource_file(original(modules / '@oai/sky/docs/sky-window-api.md'),
-                            refs / 'upstream/sky/window-api.md')
-        _copy_resource_file(original(modules / '@oai/sky/docs/sky-window2-api.md'),
-                            refs / 'upstream/sky/window2-api.md')
-        # Replace the previous generation atomically after every required source
-        # has been read successfully; agent registration then uses --copy.
-        previous = generated_root / ('.lcu-previous-' + uuid.uuid4().hex)
-        if generated.exists():
-            os.replace(generated, previous)
+    Official Codex computer use registers no skill, so LCU no longer does.
+    """
+    root = (home / 'AppData/Local/LCU/skills') if sys.platform == 'win32' else (home / '.local/share/lcu/skills')
+    generated = regular_path(root) / 'lcu'
+    if generated.is_dir() and not generated.is_symlink():
+        shutil.rmtree(generated)
         try:
-            os.replace(stage, generated)
-        except BaseException:
-            if previous.exists():
-                os.replace(previous, generated)
-            raise
-        shutil.rmtree(previous, ignore_errors=True)
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
-    return generated
+            root.rmdir()
+        except OSError:
+            pass
 
 
-def configure(names, home, source, command, tools_root, release_root, *, scope='user', project=None, chrome=False, setup_command=None, environ=None):
+# Descriptions used by the `lcu` skill that LCU 0.6.0 and earlier registered.
+OLD_SKILL_MARKERS = ('original Codex computer-use runtime', 'LCU MCP computer-use tools')
+
+
+def remove_old_skill(node, skills, cwd, env, global_args):
+    """Remove the `lcu` skill registered by LCU 0.6.0 and earlier, and nothing else.
+
+    The skill installer keeps a shared `.agents/skills` copy while any other
+    detected agent could use it, so remove it for every agent, but only after
+    confirming the installed skill is LCU's own.
+    """
+    def installer(*args):
+        result = subprocess.run([str(node), str(skills), *args, *global_args], cwd=cwd, env=env,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                encoding='utf-8', errors='replace', timeout=120)
+        if result.returncode:
+            detail = (result.stderr or result.stdout).strip()
+            raise ValueError(f'skill installer exited {result.returncode}' + (f': {detail}' if detail else ''))
+        return result.stdout
+    try:
+        installed = json.loads(installer('list', '--json') or '[]')
+    except json.JSONDecodeError as exc:
+        raise ValueError('skill installer returned invalid JSON') from exc
+    entry = next((item for item in installed if isinstance(item, dict) and item.get('name') == 'lcu'), None)
+    if entry is None:
+        return 'none'
+    skill = Path(str(entry.get('path', ''))) / 'SKILL.md'
+    text = skill.read_text(errors='replace') if skill.is_file() else ''
+    if not any(marker in text for marker in OLD_SKILL_MARKERS):
+        return 'kept'
+    installer('remove', 'lcu', '--yes')
+    return 'removed'
+
+
+def configure(names, home, command, tools_root, release_root, *, scope='user', project=None, setup_command=None, environ=None):
     """Delegate registration and return phase failures."""
     env = installer_environment(home, names, environ)
     node, skills, mcp = installer_paths(tools_root)
-    skill_source = generate_skill(source, home, release_root, chrome=chrome, setup_command=setup_command)
     resources = installed_app_resources(release_root)
     original_plugins = resources / 'plugins/openai-bundled'
     cwd = project if scope == 'project' else home
@@ -465,12 +395,12 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
             from .harness_setup import configure_omp, configure_hermes
             try:
                 if name == 'omp':
-                    configure_omp(home, skill_source, command, release_root,
+                    configure_omp(home, command, release_root,
                                   scope=scope, project=project, env=env)
                 else:
-                    configure_hermes(home, skill_source, command, node, release_root,
+                    configure_hermes(home, command, node, release_root,
                                      scope=scope, project=project, env=env)
-                print(f'{client.label}: plugin and skill registered.')
+                print(f'{client.label}: plugin registered.')
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 failures.append((name, 'plugin', str(exc)))
                 print(f'{client.label}: plugin failed: {exc}', file=sys.stderr)
@@ -499,21 +429,29 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                 failures.append((name, 'host', str(exc)))
                 print(f'{client.label}: host failed: {exc}', file=sys.stderr)
                 continue
-        skill_command = [str(node), str(skills), 'add', str(skill_source), '--skill', 'lcu',
-                         '--agent', client.skills_agent, '--copy', '--yes', '--json', *global_args]
+        # Earlier LCU versions registered an `lcu` skill; official Codex computer
+        # use has none, so remove it.
+        cleanup_command = None
         if name == 'pi':
             pi = shutil.which('pi', path=env.get('PATH'))
             pi_root = (home / 'AppData/Local/LCU/pi') if sys.platform == 'win32' else (home / '.local/share/lcu/pi')
             extension = pi_root / 'extension.mjs'
             selected_command = pi_root / 'commands.json'
-            commands = (('skill', skill_command),
+            commands = (('old skill cleanup', cleanup_command),
                         ('extension', [pi, 'install', *([] if scope == 'user' else ['-l']), str(extension)]))
         else:
-            commands = (('skill', skill_command),
+            commands = (('old skill cleanup', cleanup_command),
                         ('MCP', [str(node), '--input-type=module', '-e', MCP_REGISTER, str(mcp),
                                  client.mcp_agent, scope, json.dumps(mcp_command), json.dumps(host_policy(release_root))]))
         for phase, argv in commands:
             try:
+                if phase == 'old skill cleanup':
+                    outcome = remove_old_skill(node, skills, cwd, env, global_args)
+                    if outcome == 'removed':
+                        print(f'{client.label}: old LCU skill removed.')
+                    elif outcome == 'kept':
+                        print(f'{client.label}: kept an `lcu` skill that LCU did not create.')
+                    continue
                 if phase == 'MCP':
                     if mcp_setup_error:
                         raise ValueError(mcp_setup_error)
@@ -549,17 +487,7 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
                     # Upstream diagnostics are shown to the invoking user, never stored.
                     detail = (result.stderr or result.stdout).strip()
                     raise ValueError(f'installer exited {result.returncode}' + (f': {detail}' if detail else ''))
-                if phase == 'skill':
-                    try:
-                        installed = json.loads(result.stdout)
-                    except json.JSONDecodeError as exc:
-                        raise ValueError('skill installer returned invalid JSON') from exc
-                    if not isinstance(installed, list) or not any(
-                        isinstance(item, dict) and item.get('name') == 'lcu'
-                        and item.get('status') == 'installed' for item in installed
-                    ):
-                        raise ValueError('skill installer did not report installing LCU')
-                elif name == 'codex':
+                if name == 'codex':
                     from .codex_hooks import install_hooks
                     from .app_layout import locate_codex_tools
                     registered = json.loads(result.stdout)
@@ -575,21 +503,15 @@ def configure(names, home, source, command, tools_root, release_root, *, scope='
     return failures
 
 
-def export_bundle(destination, source, command, release_root, *, chrome=False, audio=False):
+def export_bundle(destination, command, release_root, *, chrome=False, audio=False):
     destination = regular_path(destination)
     if destination.exists():
         raise ValueError('Export destination already exists; choose a new directory.')
-    if not (source / 'SKILL.md').is_file():
-        raise ValueError('Complete LCU skill missing.')
     policy = host_policy(release_root)
-    # Re-run flags shared by the bootstrap doc and destinationSetup metadata.
+    # Re-run flags for the destinationSetup metadata.
     setup_flags = ('--chrome ' if chrome else '') + ('--audio ' if audio else '')
-    # Portable exports carry only LCU-authored bootstrap guidance. The original
-    # application and its instruction files are resolved on the target machine.
-    files = {'SKILL.md': (source / 'SKILL.md').read_bytes()}
     installation = json.loads((Path(release_root) / 'installation.json').read_text())
     target = installation.get('platform', 'linux')
-    native_docs = 'macos' if target == 'darwin' else 'linux'
     resource_root = 'Contents/Resources' if target == 'darwin' else 'resources'
     manifest = {'$schema': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
                 'name': 'lcu', 'description': 'Computer use through the locally installed Codex runtime.'}
@@ -633,21 +555,12 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
         'computerAudioOptIn': ('Enabled in the registered MCP command with --audio. The original optional recording API may require its own approval. A saved audio file does not mean the selected model receives audio. LCU does not add audio-specific instructions.'
                                if audio else 'Disabled unless the caller explicitly sets both original audio environment flags.'),
         'applicationResourceRoot': resource_root,
-        'instructionSources': [
-            f'{resource_root}/cua_node/lib/node_modules/@oai/cua/docs',
-            f'{resource_root}/cua_node/lib/node_modules/@oai/cua-repl/instructions/{native_docs}',
-            f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/skills/oai_sky_lib/{native_docs}',
-            f'{resource_root}/cua_node/lib/node_modules/@oai/sky/docs/sky-full-desktop-api.md',
-            *([f'{resource_root}/cua_node/lib/node_modules/@oai/browser-desktop/environment-docs/codex-app'] if chrome else []),
-            *([f'{resource_root}/plugins/openai-bundled/plugins/chrome/docs',
-               f'{resource_root}/plugins/openai-bundled/plugins/chrome/skills/control-chrome'] if chrome else []),
-        ],
         'destinationSetup': ('Install the matching thin LCU archive and selected application, then run '
                              'lcu setup --export /new/path ' + setup_flags
-                             + '--yes on the destination account. Import the newly generated export and its local full skill.'),
+                             + '--yes on the destination account and import that newly generated export.'),
         'runtimePrefix': 'Set LCU_PREFIX for a nondefault destination prefix: /opt/lcu on Linux, $HOME/.local/share/lcu on macOS.',
         'sessionMode': 'Linux defaults to XFCE discovery; set LCU_SESSION_MODE=direct inside its desktop session. macOS defaults to direct.',
-        'preCallRequirement': 'Generate and register the local skill before the first computer-use call.',
+        'instructions': 'The original MCP server instructions, tool descriptions and tool results, as in official Codex; no skill.',
     }
     changes.append(Change(destination / 'lcu-bootstrap.json', None,
                           (json.dumps(bootstrap_metadata, indent=2) + '\n').encode()))
@@ -659,12 +572,6 @@ def export_bundle(destination, source, command, release_root, *, chrome=False, a
     original_plugins = resources / 'plugins/openai-bundled'
     changes += [Change(destination / name, None, data)
                 for name, data in export_files(portable_codex_command, original_plugins).items()]
-    bootstrap = ("# LCU skill bootstrap\n\n"
-                 "Install LCU and its selected application on this machine, then run "
-                 "`lcu setup --export /new/path " + setup_flags + "--yes` here and import that new export. "
-                 "Use the generated local full skill before the first computer-use call.\n")
-    files['SKILL.md'] = bootstrap.encode()
-    changes += [Change(destination / 'skills/lcu' / name, None, data) for name, data in files.items()]
     apply_changes(changes)
 
 
@@ -680,7 +587,7 @@ def parser():
     p.add_argument('--project', type=Path, help='Absolute existing project directory for project scope')
     p.add_argument('--yes', action='store_true', help='Apply explicit choices without a confirmation prompt')
     p.add_argument('--list-agents', action='store_true', help='List supported adapters and exit')
-    p.add_argument('--export', type=Path, help='Export a portable tools-and-skill plugin for custom clients to a new directory')
+    p.add_argument('--export', type=Path, help='Export a portable tools plugin for custom clients to a new directory')
     p.add_argument('--chrome', action='store_true', help='Opt into original Chrome control, extension connector, and browser guidance')
     p.add_argument('--no-chrome', action='store_true', help='Disable Chrome control, overriding a saved opt-in')
     p.add_argument('--audio', action='store_true', help='Opt into the original optional computer-audio recording API')
@@ -850,13 +757,11 @@ def main(argv=None):
             release_root = Path(__file__).resolve().parents[1]
             runtime = args.prefix / 'lcu.cmd'
             launcher = args.prefix / 'windows_launcher.py'
-            source = release_root / 'skills/lcu'
             desktop_command = [sys.executable, '-B', str(launcher)]
         else:
             release_root = args.prefix / 'current'
             runtime = release_root / 'bin/lcu'
             launcher = release_root / 'bin/lcu-session'
-            source = (release_root / 'skills/lcu').resolve()
             desktop_command = ([str(runtime)] if args.session == 'direct' else
                                [str(launcher), '--user', account.pw_name, '--', str(runtime)])
         for path in (runtime, launcher):
@@ -907,10 +812,10 @@ def main(argv=None):
             runtime_flags = (['--chrome'] if chrome else []) + (['--audio'] if audio else [])
             command = [*desktop_command, *runtime_flags]
             if args.export:
-                print(f'Export tools and skill to {args.export}')
+                print(f'Export tools to {args.export}')
             else:
                 print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
-                print('Existing LCU skill and MCP entries will be updated; unrelated configuration is preserved.')
+                print('Existing LCU MCP entries will be updated and any old LCU skill removed; unrelated configuration is preserved.')
                 if 'codex' in names:
                     print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
             if args.chrome:
@@ -933,13 +838,12 @@ def main(argv=None):
                 # The original native host is a per-account browser connection.
                 from .browser import install as install_browser_host
                 install_browser_host(release_root)
+            remove_generated_skill(home)
             if args.export:
-                local_skill = generate_skill(source, home, release_root, chrome=chrome, setup_command=setup_command)
-                export_bundle(args.export, source, command, release_root, chrome=chrome, audio=audio)
-                print(f'Complete original instructions for this account: {local_skill / "SKILL.md"}')
+                export_bundle(args.export, command, release_root, chrome=chrome, audio=audio)
             else:
-                failures = configure(names, home, source, command, tools_root, release_root,
-                                     scope=args.scope, project=args.project, chrome=chrome,
+                failures = configure(names, home, command, tools_root, release_root,
+                                     scope=args.scope, project=args.project,
                                      setup_command=setup_command)
                 if failures:
                     retry = [*direct_runtime, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
@@ -970,7 +874,7 @@ def main(argv=None):
         if not args.audio:
             print(f'Computer-audio recording not enabled; add it later with `{setup_command} setup --agent AGENT --audio`; other saved opt-ins are kept.')
         if args.export:
-            print('Import this plugin with a compatible client, or use its mcp.json and the generated full local skill with your custom agent.')
+            print('Import this plugin with a compatible client, or use its mcp.json with your custom agent.')
         mode, doctor, doctor_timeout = desktop_readiness_request(
             args, interactive=sys.stdin.isatty(), desktop_command=desktop_command)
         if mode == 'required':

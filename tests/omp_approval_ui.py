@@ -87,9 +87,8 @@ def exercise(omp: Path, case, evidence: Path):
         home = root / 'home'
         profile = home / '.omp/profiles/lcu-ui/agent'
         profile.mkdir(parents=True)
-        for folder in ('config', 'data', 'cache', 'cwd', 'skill'):
+        for folder in ('config', 'data', 'cache', 'cwd'):
             (root / folder).mkdir()
-        (root / 'skill/SKILL.md').write_text('---\nname: lcu\ndescription: Generated approval fixture.\n---\nUse the fixture js tool.\n')
         (profile / 'models.yml').write_text(
             'providers:\n  openai:\n    api: openai-completions\n'
             f'    baseUrl: http://127.0.0.1:{server.server_port}/v1\n'
@@ -107,7 +106,7 @@ def exercise(omp: Path, case, evidence: Path):
             'PI_CODING_AGENT_DIR': str(profile), 'LCU_FIXTURE_LOG': str(log),
             'OPENAI_API_KEY': 'fixture-invalid', 'TERM': 'xterm-256color', 'NO_COLOR': '1',
         }
-        configure_omp(home, root / 'skill', [str(node), str(ROOT / 'adapters/test/mcp-fixture.mjs')],
+        configure_omp(home, [str(node), str(ROOT / 'adapters/test/mcp-fixture.mjs')],
                       ROOT, scope='user', project=None, env=env)
         # Official OMP v18.4.1 setup-version.ts declares CURRENT_SETUP_VERSION=2.
         # This generated profile already has its model/provider configured.

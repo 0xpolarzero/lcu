@@ -27,19 +27,14 @@ class HarnessSetupTests(unittest.TestCase):
         hermes.mkdir()
         for name in ('plugin.yaml', '__init__.py', 'bridge.mjs'):
             (hermes / name).write_text('fixture ' + name)
-        self.skill = self.root / 'skill'
-        (self.skill / 'references').mkdir(parents=True)
-        (self.skill / 'SKILL.md').write_text('fixture local skill')
-        (self.skill / 'references/original.md').write_bytes(b'original\r\nreference\n')
         self.command = ['/opt/lcu/current/bin/lcu', '--audio', '--chrome']
 
     def configure(self, name, *, scope='user', run=None, executable='/bin/omp', env=None):
         with patch.object(setup, 'installer_paths', return_value=(Path('/original/node'), Path('/skills'), Path('/mcp'))), \
-             patch.object(setup, 'generate_skill', return_value=self.skill), \
              patch.object(setup, 'installed_app_resources', return_value=self.root / 'resources'), \
              patch('shutil.which', return_value=executable), \
              patch('subprocess.run', side_effect=run or (lambda argv, **kw: subprocess.CompletedProcess(argv, 0, '', ''))):
-            return setup.configure([name], self.home, self.skill, self.command,
+            return setup.configure([name], self.home, self.command,
                                    self.root / 'tools', self.release, scope=scope,
                                    project=self.project if scope == 'project' else None,
                                    environ={'PATH': '/bin', **(env or {})})
@@ -61,7 +56,7 @@ class HarnessSetupTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'project scope is not supported'):
                     setup.validate(args)
 
-    def test_omp_native_link_preserves_scope_command_and_original_skill(self):
+    def test_omp_native_link_preserves_scope_and_command_without_a_skill(self):
         calls = []
 
         def run(argv, **kwargs):
@@ -82,7 +77,7 @@ class HarnessSetupTests(unittest.TestCase):
             self.assertIn(json.dumps(self.command), wrapper)
             self.assertIn('connectOnLoad: true', wrapper)
             self.assertIn('ompEssentialTools: true', wrapper)
-            self.assertEqual((package / 'skills/lcu/references/original.md').read_bytes(), b'original\r\nreference\n')
+            self.assertFalse((package / 'skills').exists())
             self.assertEqual(options['cwd'], self.home)
             self.assertEqual(options['env']['HOME'], str(self.home))
         self.assertNotEqual(calls[0][0][-1], calls[1][0][-1])
@@ -107,7 +102,7 @@ class HarnessSetupTests(unittest.TestCase):
         failures = self.configure('omp', run=run)
         self.assertIn('plugin failed', failures[0][2])
 
-    def test_hermes_registers_local_plugin_with_complete_skill_and_command(self):
+    def test_hermes_registers_local_plugin_and_command_without_a_skill(self):
         calls = []
         def run(argv, **kwargs):
             calls.append((argv, kwargs))
@@ -120,7 +115,7 @@ class HarnessSetupTests(unittest.TestCase):
             'command': self.command, 'node': '/original/node',
             'bridge': str(self.release / 'adapters/hermes/bridge.mjs'),
         })
-        self.assertEqual((package / 'skills/lcu/references/original.md').read_bytes(), b'original\r\nreference\n')
+        self.assertFalse((package / 'skills').exists())
 
     def test_hermes_rejects_project_scope_without_installing_globally(self):
         failures = self.configure('hermes', scope='project', executable='/bin/hermes')

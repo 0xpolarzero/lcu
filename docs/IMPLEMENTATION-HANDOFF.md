@@ -144,6 +144,8 @@ Retain applicable original tool visibility, startup timeout, output allowance an
 
 ## 7. Instructions without redistribution or condensation
 
+> Superseded on 2026-10-01: official Codex computer use registers no skill and delivers the full guide in the first tool result, so LCU now registers no skill and generates no pre-call references. See [instruction delivery](INSTRUCTIONS.md).
+
 Keep upstream instruction code/resources in their installed app locations. Remove the checked-in copies under `instructions/` and `skills/lcu/references/` from the new distribution once local delivery replaces them. The existing inventory has 195 original instruction resources and 385 reference copies; use that inventory as a completeness baseline, not as permission to ship the copies again.
 
 At setup, generate a small LCU-owned wrapper with full pre-call access to the original guides through stable local references/symlinks. If a supported agent cannot follow them, create byte-identical user-local reference files from the selected app during setup. Never put those generated upstream copies in Git, release assets, CI uploads, published container layers, or a portable export advertised as redistributable. Bind generated references to the selected app version and regenerate them coherently on upgrade.

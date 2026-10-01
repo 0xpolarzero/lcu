@@ -40,7 +40,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     for flag, env_name in (("hermes", "HERMES_BIN"), ("container", "HERMES_FIXTURE_CONTAINER"),
                            ("model", "HERMES_MODEL"), ("base-url", "HERMES_BASE_URL"),
-                           ("skill", "HERMES_BROWSER_SKILL"), ("api-key", "HERMES_API_KEY")):
+                           ("api-key", "HERMES_API_KEY")):
         p.add_argument("--" + flag, default=os.environ.get(env_name), required=not bool(os.environ.get(env_name)))
     p.add_argument("--node", default=os.environ.get("HERMES_TEST_NODE") or shutil.which("node"))
     p.add_argument("--release", default=os.environ.get("LCU_TEST_RELEASE", str(ROOT)),
@@ -112,12 +112,9 @@ def main():
     args = parse_args()
     hermes = Path(args.hermes).resolve()
     node = Path(args.node).resolve() if args.node else None
-    skill = Path(args.skill).resolve()
     release = Path(args.release).resolve()
-    if skill.is_file():
-        skill = skill.parent
-    if not hermes.is_file() or not node or not node.is_file() or not (skill / "SKILL.md").is_file():
-        raise SystemExit("Hermes, Node, or generated browser LCU skill is missing")
+    if not hermes.is_file() or not node or not node.is_file():
+        raise SystemExit("Hermes or Node is missing")
     proxy = validate_proxy(args.base_url)
     docker = shutil.which("docker")
     if not docker:
@@ -138,7 +135,7 @@ def main():
                "HOME": str(home), "HERMES_HOME": str(hermes_home), "OPENAI_API_KEY": args.api_key,
                "TERM": "xterm-256color", "NO_COLOR": "1", "NO_PROXY": "localhost,127.0.0.1",
                "no_proxy": "localhost,127.0.0.1", "LCU_HERMES_LIFECYCLE_LOG": str(lifecycle_log)}
-        configure_hermes(home, skill, command, node, release, scope="user", project=None, env=env)
+        configure_hermes(home, command, node, release, scope="user", project=None, env=env)
         instrument_cleanup(hermes_home / "plugins/lcu-cua/__init__.py", lifecycle_log)
         for key, value in (("model.provider", "custom"), ("model.default", args.model),
                            ("model.base_url", args.base_url.rstrip("/")),
@@ -148,7 +145,7 @@ def main():
             if configured.returncode:
                 raise RuntimeError(f"Hermes config {key} failed: {configured.stderr}{configured.stdout}")
         marker = "hermes-browser-" + uuid.uuid4().hex[:12]
-        prompt = ("Use only the generated LCU browser-use skill and its original Computer Use js tool. "
+        prompt = ("Use only LCU's original Computer Use js tool. "
                   "First call await cua.getState() and follow its original instructions. In isolated "
                   "Chrome create a tab at " + ORIGIN + "/. Enter exactly " + marker +
                   " in Draft text, click Save draft, verify Saved: " + marker +

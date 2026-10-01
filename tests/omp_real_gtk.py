@@ -5,9 +5,8 @@ compatible endpoint must be a host-local credential-injecting proxy. The LCU
 MCP subprocess runs through docker exec in the prestarted network-none GTK
 fixture. The fixture's Target.txt is the independent result oracle.
 
-Required environment: OMP_BIN, OMP_FIXTURE_CONTAINER, OMP_MODEL,
-OMP_PROXY_BASE_URL, and LCU_FIXTURE_SKILL (the generated Linux skills/lcu
-directory or its parent folder containing SKILL.md).
+Required environment: OMP_BIN, OMP_FIXTURE_CONTAINER, OMP_MODEL and
+OMP_PROXY_BASE_URL.
 """
 
 from __future__ import annotations
@@ -40,8 +39,6 @@ def parse_args():
                         help='provider/model accepted by the credential proxy')
     parser.add_argument('--proxy-base-url', default=os.environ.get('OMP_PROXY_BASE_URL'),
                         help='host-loopback OpenAI-compatible proxy URL; no key is read here')
-    parser.add_argument('--skill', default=os.environ.get('LCU_FIXTURE_SKILL'),
-                        help='generated Linux LCU skill dir or SKILL.md path')
     parser.add_argument('--container-user', default='lcutester')
     parser.add_argument('--docker-host', default=os.environ.get('LCU_DOCKER_HOST'),
                         help='explicit Docker socket URL for an isolated fixture daemon')
@@ -50,7 +47,7 @@ def parse_args():
     parser.add_argument('--evidence-file', default=os.environ.get('OMP_EVIDENCE_FILE'),
                         help='write JSON evidence here; keep outside the repository')
     args = parser.parse_args()
-    missing = [name for name in ('omp', 'container', 'model', 'proxy_base_url', 'skill')
+    missing = [name for name in ('omp', 'container', 'model', 'proxy_base_url')
                if not getattr(args, name)]
     if missing:
         parser.error('missing required settings: ' + ', '.join(missing))
@@ -83,11 +80,6 @@ def run(args):
                              timeout=30, check=True).stdout.strip()
     with omp.open('rb') as binary:
         digest = hashlib.file_digest(binary, 'sha256').hexdigest()
-    skill = Path(args.skill).resolve()
-    if skill.is_file():
-        skill = skill.parent
-    if not (skill / 'SKILL.md').is_file():
-        raise SystemExit(f'Generated LCU skill not found under {skill}')
     proxy_url = validate_proxy_url(args.proxy_base_url)
     docker = shutil.which('docker')
     node = shutil.which('node')
@@ -136,10 +128,10 @@ def run(args):
         docker_command = [docker] + (['--host', args.docker_host] if args.docker_host else [])
         command = [*docker_command, 'exec', '-i', '-u', args.container_user,
                    args.container, args.lcu_runtime]
-        configure_omp(home, skill, command, ROOT, scope='user', project=None, env=env)
+        configure_omp(home, command, ROOT, scope='user', project=None, env=env)
 
         marker = 'omp-lcu-' + uuid.uuid4().hex[:12]
-        prompt = (f'Use the lcu skill and original Computer Use tools. In the window '
+        prompt = (f'Use the original Computer Use tools. In the window '
                   f'named LCU Target, first call await cua.getState() and use the '
                   f'returned original Computer Use instructions. Enter exactly {marker} '
                   f'in the Draft text field, '

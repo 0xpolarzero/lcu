@@ -27,10 +27,10 @@ def original_hooks(host_root):
 
 
 def export_files(command, host_root):
-    """Native plugin files; exported skills live at the standard ./skills path."""
+    """Native plugin files, mirroring the original unified-computer-use plugin (which has no skill)."""
     original = original_plugin(host_root)
     manifest = json.loads((original / '.codex-plugin/plugin.json').read_text())
-    manifest.update(name='lcu', description='Computer use through the locally installed Codex runtime.', skills='./skills')
+    manifest.update(name='lcu', description='Computer use through the locally installed Codex runtime.')
     manifest['hooks']['hooks'] = original_hooks(host_root)
     descriptor = json.loads((original / '.mcp.json').read_text())
     server = descriptor['mcpServers'].pop('cua_repl')
@@ -40,7 +40,7 @@ def export_files(command, host_root):
         'hooks': manifest['hooks']['hooks'],
         'requestMetadata': 'Forward each real session_id and turn_id as x-codex-turn-metadata in MCP request _meta.',
         'lifecycle': 'Call lcu.turn_ended when the host stops or interrupts a turn, including a subagent turn; substitute the original hook input variables with real host identifiers. Keep the MCP connection alive until cleanup finishes.',
-        'unsupportedHosts': 'Installing MCP and a skill alone does not supply turn lifecycle hooks. A host without equivalent hooks must implement this contract before claiming Codex lifecycle parity.',
+        'unsupportedHosts': 'Installing MCP alone does not supply turn lifecycle hooks. A host without equivalent hooks must implement this contract before claiming Codex lifecycle parity.',
         'codexTrust': 'Codex requires trust for these exact hooks. Use lcu setup --agent codex or review and trust them in Codex; this export does not bypass hook trust.',
     }
     return {name: (json.dumps(value, indent=2) + '\n').encode() for name, value in (

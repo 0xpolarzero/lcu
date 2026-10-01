@@ -9,7 +9,6 @@ Required environment:
   HERMES_BIN             Hermes CLI installed from the official stable tag
   HERMES_TEST_NODE       Node executable used by the packaged MCP bridge
   LCU_TEST_RELEASE       unpacked LCU release tree for the target platform
-  LCU_TEST_SKILL         complete generated skill tree from that LCU release
   LCU_TEST_CONTAINER     disposable GTK fixture container name
   LCU_TEST_MODEL         model id supported by the local test proxy
   LCU_TEST_BASE_URL      OpenAI-compatible /v1 endpoint served by the proxy
@@ -66,7 +65,6 @@ def main() -> None:
     hermes = Path(required("HERMES_BIN")).resolve()
     node = Path(required("HERMES_TEST_NODE")).resolve()
     release = Path(required("LCU_TEST_RELEASE")).resolve()
-    skill = Path(required("LCU_TEST_SKILL")).resolve()
     container = required("LCU_TEST_CONTAINER")
     model = required("LCU_TEST_MODEL")
     base_url = required("LCU_TEST_BASE_URL").rstrip("/")
@@ -84,8 +82,6 @@ def main() -> None:
         raise SystemExit("HERMES_BIN and HERMES_TEST_NODE must name executable files")
     if not (release / "adapters/hermes/bridge.mjs").is_file():
         raise SystemExit(f"LCU release has no Hermes bridge: {release}")
-    if not (skill / "SKILL.md").is_file():
-        raise SystemExit(f"Generated skill is incomplete: {skill}")
     if not base_url.startswith("http://127.0.0.1:"):
         raise SystemExit("The model proxy must be loopback-only (http://127.0.0.1:<port>/v1)")
 
@@ -115,7 +111,7 @@ def main() -> None:
 
         from lcu.harness_setup import configure_hermes
 
-        configure_hermes(home, skill, command, node, release, scope="user",
+        configure_hermes(home, command, node, release, scope="user",
                          project=None, env=env)
 
         # Use Hermes' own config command so plugin enablement and unrelated
@@ -138,7 +134,7 @@ def main() -> None:
         # The prompt deliberately constrains the task to generated UI state;
         # no shell/file tools are authorized by the user request.
         prompt = (
-            "Use the LCU computer-use skill and its js tool only. Find the GTK "
+            "Use LCU's js tool only. Find the GTK "
             "window titled 'LCU Target'. Enter the exact marker " + marker +
             " into its Draft text field, click Save draft, then verify on screen "
             "that it says 'Saved: " + marker + "'. Do not interact with any other "

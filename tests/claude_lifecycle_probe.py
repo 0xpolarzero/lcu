@@ -41,11 +41,6 @@ def prepare(release, output):
     project.mkdir()
     claude = project / '.claude'
     claude.mkdir()
-    (claude / 'skills').mkdir()
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from lcu.setup import generate_skill
-    skill = generate_skill(release / 'skills/lcu', output / 'fixture-home', release)
-    shutil.copytree(skill, claude / 'skills/lcu')
     recorder = output / 'record_hook.py'
     shutil.copyfile(__file__, recorder)
     log = output / 'events.jsonl'

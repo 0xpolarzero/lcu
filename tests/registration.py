@@ -143,48 +143,27 @@ assert config['mcpServers']['lcu']['command'] == '/bin/sh'
 assert 'LCU_PREFIX' in config['mcpServers']['lcu']['args'][1]
 assert '--chrome' not in config['mcpServers']['lcu']['args']
 assert command not in config['mcpServers']['lcu']['args'][1]
-assert not (home / '.local/share/lcu/skills/lcu/references/upstream/browser-desktop').exists()
-assert not (home / '.local/share/lcu/skills/lcu/references/upstream/chrome').exists()
+assert not (home / '.local/share/lcu/skills').exists()
 contract = json.loads((export / 'host-contract.json').read_text())
 for key in ('enabled_tools', 'omit_tools_from', 'startup_timeout_sec', 'tools'):
     assert contract[key] == policy[key]
-assert (export / 'skills/lcu/SKILL.md').is_file()
-# Generated agent skill exposes original Linux references before a tool call.
-registered_skills = [p.parent for p in home.rglob('SKILL.md')
-                     if p.parent.name == 'lcu' and export not in p.parents]
-assert registered_skills
+# Like official Codex computer use, LCU registers no skill and copies no upstream documents;
+# the original runtime supplies the instructions through the tool.
+assert not (export / 'skills').exists()
+assert not [p for p in home.rglob('SKILL.md') if p.parent.name == 'lcu'], 'an LCU skill is still registered'
 module_root = resources / 'cua_node/lib/node_modules'
-reference_pairs = (
-    (module_root / '@oai/cua/docs/tinysky-alt-core-cua-repl.md', 'references/upstream/cua/docs/tinysky-alt-core-cua-repl.md'),
-    (module_root / '@oai/cua-repl/instructions/linux/description.md', 'references/upstream/cua-repl/instructions/linux/description.md'),
-    (module_root / '@oai/sky/docs/skills/oai_sky_lib/linux/SKILL.md', 'references/upstream/sky/linux/SKILL.md'),
-    (module_root / '@oai/sky/docs/sky-full-desktop-api.md', 'references/upstream/sky/native-api.md'),
-)
-for skill in registered_skills:
-    for original, relative in reference_pairs:
-        assert (skill / relative).read_bytes() == original.read_bytes(), (skill, relative)
-    assert not (skill / 'references/upstream/cua-repl/instructions/macos').exists(), skill
-    assert not (skill / 'references/upstream/browser-desktop').exists(), skill
-    assert not (skill / 'references/upstream/chrome').exists(), skill
-# Portable exports carry bootstrap metadata, never upstream instruction files.
 assert (export / 'lcu-bootstrap.json').is_file()
-assert not (export / 'skills/lcu/references').exists()
 upstream_sample = (module_root / '@oai/cua/docs/tinysky-alt-core-cua-repl.md').read_bytes()
 assert upstream_sample not in b'\n'.join(p.read_bytes() for p in export.rglob('*') if p.is_file())
 subprocess.run(['runuser', '-u', account, '--', 'python3',
                 '/src/tests/portable_consumer.py', str(export)], check=True)
-# Explicit browser setup installs the original connector and unified browser guide.
+# Explicit browser setup installs the original connector; the runtime supplies browser guidance.
 subprocess.run([command, 'setup', '--user', account, '--agent', 'codex', '--session', 'direct',
                 '--chrome', '--yes'], check=True)
 browser_hosts = list((home / '.local/share/lcu/browser').glob('*/chrome/scripts/installManifest.mjs'))
 assert len(browser_hosts) == 1, 'Chrome opt-in must install one original native host'
 assert (home / '.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json').is_file()
-browser_guide = home / '.local/share/lcu/skills/lcu/references/upstream/browser-desktop/codex-app/api.json'
-assert browser_guide.read_bytes() == (module_root / '@oai/browser-desktop/environment-docs/codex-app/api.json').read_bytes()
-chrome_refs = home / '.local/share/lcu/skills/lcu/references/upstream/chrome'
-original_chrome = resources / 'plugins/openai-bundled/plugins/chrome'
-assert (chrome_refs / 'docs/documents.json').read_bytes() == (original_chrome / 'docs/documents.json').read_bytes()
-assert (chrome_refs / 'skill/SKILL.md').read_bytes() == (original_chrome / 'skills/control-chrome/SKILL.md').read_bytes()
+assert not [p for p in home.rglob('SKILL.md') if p.parent.name == 'lcu']
 assert '--chrome' in tomllib.loads(codex.read_text())['mcp_servers']['lcu']['args']
 browser_export = home / 'portable-chrome'
 subprocess.run([command, 'setup', '--user', account, '--export', str(browser_export),

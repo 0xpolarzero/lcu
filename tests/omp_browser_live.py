@@ -43,7 +43,6 @@ def parse_args():
     p.add_argument("--container", default=os.environ.get("OMP_FIXTURE_CONTAINER"), required=not bool(os.environ.get("OMP_FIXTURE_CONTAINER")))
     p.add_argument("--model", default=os.environ.get("OMP_MODEL"), required=not bool(os.environ.get("OMP_MODEL")))
     p.add_argument("--proxy-base-url", default=os.environ.get("OMP_PROXY_BASE_URL"), required=not bool(os.environ.get("OMP_PROXY_BASE_URL")))
-    p.add_argument("--skill", default=os.environ.get("OMP_BROWSER_SKILL"), required=not bool(os.environ.get("OMP_BROWSER_SKILL")))
     p.add_argument("--docker-host", default=os.environ.get("LCU_DOCKER_HOST"))
     p.add_argument("--runtime", default="/home/browser-test/lcu-current/current/bin/lcu")
     p.add_argument("--release", type=Path, default=ROOT)
@@ -68,11 +67,8 @@ def main():
     args = parse_args()
     omp = Path(args.omp).resolve()
     release = args.release.resolve()
-    skill = Path(args.skill).resolve()
-    if skill.is_file():
-        skill = skill.parent
-    if not omp.is_file() or not (skill / "SKILL.md").is_file():
-        raise SystemExit("OMP executable or generated browser LCU skill is missing")
+    if not omp.is_file():
+        raise SystemExit("OMP executable is missing")
     proxy = validate_proxy(args.proxy_base_url)
     docker = shutil.which("docker")
     node = shutil.which("node")
@@ -108,7 +104,7 @@ def main():
             "OPENAI_API_KEY": "local-fixture-proxy", "TERM": "xterm-256color", "NO_COLOR": "1",
             "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1",
         }
-        configure_omp(home, skill, lcu_command, release, scope="user", project=None, env=env)
+        configure_omp(home, lcu_command, release, scope="user", project=None, env=env)
         (profile / "config.yml").write_text("setupVersion: 2\nstartup:\n  quiet: true\n", encoding="utf-8")
         ended = root / "agent-ended.json"
         observer = root / "observer.ts"
@@ -117,7 +113,7 @@ def main():
             'export default pi => { pi.on("agent_end", async () => { writeFileSync('
             + json.dumps(str(ended)) + ', JSON.stringify({agent_end:true})); }); };\n')
         marker = "omp-browser-" + uuid.uuid4().hex[:12]
-        prompt = ("Use the LCU browser-use skill and original Computer Use tools. First call "
+        prompt = ("Use the original Computer Use tools. First call "
                   "await cua.getState() and follow its original instructions. In the isolated "
                   "Chrome browser, create a NEW session tab using cua.createBrowserTab at " + ORIGIN +
                   "/. Do not use an existing tab. Enter exactly " + marker +

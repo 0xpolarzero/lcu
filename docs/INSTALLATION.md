@@ -95,7 +95,7 @@ To add another harness later, run the installed command:
 
 Use the public standalone Codex CLI on the desktop account's normal `PATH`. If setup reports unsupported `mcp_tool` hooks, update it with `npm install -g @openai/codex@latest`, check `codex --version`, and rerun `~/.local/share/lcu/current/bin/lcu setup --agent codex`. See [Codex CLI setup](ADAPTERS.md#codex-cli) and [the verification record](verification/codex-standalone-cli-2026-09-27.md).
 
-Pi setup uses Pi's package installer to register the bundled native extension and installs the original local skill. See [Pi approval verification](verification/pi-approval-2026-09-26.md) and [result forwarding](ADAPTERS.md#same-case-result-forwarding).
+Pi setup uses Pi's package installer to register the bundled native extension. See [Pi approval verification](verification/pi-approval-2026-09-26.md) and [result forwarding](ADAPTERS.md#same-case-result-forwarding).
 
 For Oh My Pi or Hermes Agent, install the harness first, then register its native integration:
 
@@ -104,7 +104,7 @@ For Oh My Pi or Hermes Agent, install the harness first, then register its nativ
 ~/.local/share/lcu/current/bin/lcu setup --agent hermes
 ```
 
-OMP setup calls `omp plugin link` on a generated local package containing the shared Pi extension and full local skill. Native links use the selected OMP user profile; project scope is rejected because OMP ignores it for local links. Hermes setup writes an LCU-owned plugin to `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`, includes the full local skill, and calls `hermes plugins enable lcu-cua`. Set an absolute `HERMES_HOME` to select another Hermes profile. Neither native integration supports project scope; setup rejects it. Restart the selected harness after registration. See [OMP](ADAPTERS.md#oh-my-pi) and [Hermes](ADAPTERS.md#hermes-agent) for behavior and evidence.
+OMP setup calls `omp plugin link` on a generated local package containing the shared Pi extension. Native links use the selected OMP user profile; project scope is rejected because OMP ignores it for local links. Hermes setup writes an LCU-owned plugin to `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua`, includes the LCU skill, and calls `hermes plugins enable lcu-cua`. Set an absolute `HERMES_HOME` to select another Hermes profile. Neither native integration supports project scope; setup rejects it. Restart the selected harness after registration. See [OMP](ADAPTERS.md#oh-my-pi) and [Hermes](ADAPTERS.md#hermes-agent) for behavior and evidence.
 
 Interactive `lcu setup` runs a guided desktop-readiness check after agent registration. On macOS, the guide reads the selected app and signed helper names and paths and shows the relevant **Accessibility** and **Screen & System Audio Recording** (or **Screen Recording**) panes, opening a pane only after you choose it. The original runtime remains responsible for its normal approval and macOS prompts. See [Desktop and browser](#desktop-and-browser) for what `doctor` verifies per platform, its exit codes, and how first-call readiness is confirmed.
 
@@ -230,7 +230,7 @@ There is no uninstall command; remove the registrations LCU created, then delete
    - **Pi:** `pi remove "$HOME/.local/share/lcu/pi/extension.mjs"` (add `-l` in the project for project scope), then delete `~/.local/share/lcu/pi`.
    - **Oh My Pi:** `omp plugin uninstall lcu-computer-use` (the linked package is staged under `~/.local/share/lcu/omp`).
    - **Hermes:** `hermes plugins remove lcu-cua`; if `${HERMES_HOME:-~/.hermes}/plugins/lcu-cua` remains, delete it.
-2. Remove the LCU skill copies the skill installer placed in each harness's skill location, and the generated references under `~/.local/share/lcu/skills`.
+2. If you set up LCU 0.6.0 or earlier, remove the `lcu` skill copies the skill installer placed in each harness's skill location, and `~/.local/share/lcu/skills`. Running setup from a newer LCU removes them for the selected harnesses.
 3. If you ran `lcu browser install`, remove the LCU Chrome native-host manifest (`com.openai.codexextension.json`) from your Chrome profile's `NativeMessagingHosts` directory, along with the relay copy under `~/.local/share/lcu/browser` (macOS: `~/Library/Application Support/lcu/browser`).
 4. Delete the prefix (`/opt/lcu` or `~/.local/share/lcu`), `~/.local/share/lcu/skills`, and the saved opt-ins at `~/.local/state/lcu`.
 

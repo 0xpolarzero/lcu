@@ -61,22 +61,19 @@ class WindowsSetupTests(unittest.TestCase):
                             'import json,sys\n'
                             'args=sys.argv[1:]\n'
                             'if args and args[0].endswith("skills.mjs"):\n'
-                            '  print(json.dumps([{"name":"lcu","status":"installed"}]))\n'
+                            '  print("[]")\n'
                             '  sys.stderr.buffer.write(b"note \\xe2\\x80\\x8f\\n")\n'
                             'elif any("upsertServer" in arg for arg in args):\n'
                             '  print(json.dumps({"path":"' + str(base / 'mcp.json').replace('\\', '\\\\') + '"}))\n')
             node.chmod(0o755)
-            skill = base / 'skill'
-            skill.mkdir()
             adapter = base / 'adapters/claude.mjs'
             adapter.parent.mkdir()
             adapter.write_text('fixture relay')
             with mock.patch.object(setup, 'installer_paths', return_value=(node, base / 'skills.mjs', base / 'mcp.mjs')), \
-                 mock.patch.object(setup, 'generate_skill', return_value=skill), \
                  mock.patch.object(setup, 'installed_app_resources', return_value=base / 'resources'), \
                  mock.patch.object(setup, 'host_policy', return_value={}), \
                  mock.patch('subprocess._text_encoding', return_value='cp1252'):
-                failures = setup.configure(['claude-code'], home, skill, ['lcu'], base / 'tools', base,
+                failures = setup.configure(['claude-code'], home, ['lcu'], base / 'tools', base,
                                            environ={'HOME': str(home), 'PATH': str(base)})
             self.assertEqual(failures, [])
 
@@ -99,20 +96,19 @@ class WindowsSetupTests(unittest.TestCase):
                 original_cli.write_text('original Codex CLI')
                 original_host.write_text('original code-mode host')
                 def registered(argv, **_options):
-                    output = ('[{"name":"lcu","status":"installed"}]' if ' add ' in f' {" ".join(map(str, argv))} '
+                    output = ('[]' if ' list ' in f' {" ".join(map(str, argv))} '
                               else json.dumps({'path': str(config)}))
                     return subprocess.CompletedProcess(argv, 0, output, '')
                 with self.subTest(system=system), \
                      mock.patch.object(setup.sys, 'platform', system), \
                      mock.patch.object(setup, 'installer_environment', return_value={'PATH': 'fixture'}), \
                      mock.patch.object(setup, 'installer_paths', return_value=(base / 'node', base / 'skills', base / 'mcp')), \
-                     mock.patch.object(setup, 'generate_skill', return_value=base / 'skill'), \
                      mock.patch.object(setup, 'installed_app_resources', return_value=resources), \
                      mock.patch.object(setup, 'host_policy', return_value={}), \
                      mock.patch.object(setup.subprocess, 'run', side_effect=registered), \
                      mock.patch('lcu.codex_hooks.require_cli_hook_support'), \
                      mock.patch('lcu.codex_hooks.install_hooks') as hooks:
-                    self.assertEqual(setup.configure(['codex'], config.parent, base / 'skill',
+                    self.assertEqual(setup.configure(['codex'], config.parent,
                         ['lcu'], base / 'tools', release), [])
                     self.assertEqual(hooks.call_args.args[0], codex_bin / expected)
 
@@ -152,73 +148,6 @@ class WindowsSetupTests(unittest.TestCase):
                 args.export = home / 'export'
                 with self.assertRaisesRegex(ValueError, 'Windows portable export'):
                     setup.validate(args)
-
-    def test_windows_shared_launcher_docs_do_not_shadow_sky_doc_copies(self):
-        # A banner.js present under the %40oai layout used to overwrite the
-        # `target` platform string and make the Windows sky doc copies fail.
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary).resolve()
-            home = base / 'account'
-            home.mkdir()
-            release = base / 'release'
-            release.mkdir()
-            (release / 'installation.json').write_text(json.dumps({'platform': 'windows'}))
-            resources = base / 'registered-msix/app/resources'
-            modules = resources / 'cua_node/bin/node_modules/%40oai'
-            content = b'original\r\n'
-            paths = [
-                modules / 'cua/docs/tinysky-alt-core-cua-repl.md',
-                modules / 'cua-repl/instructions/banner.js',
-                modules / 'cua-repl/instructions/windows/description.md',
-                modules / 'sky/docs/skills/oai_sky_lib/windows/SKILL.md',
-                modules / 'sky/docs/sky-full-desktop-api.md',
-                modules / 'sky/docs/sky-window-api.md',
-                modules / 'sky/docs/sky-window2-api.md',
-            ]
-            for path in paths:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-            source = Path(__file__).resolve().parents[1] / 'skills/lcu'
-            with mock.patch.object(setup, 'installed_app_resources', return_value=resources):
-                generated = setup.generate_skill(source, home, release)
-            self.assertEqual((generated / 'references/upstream/cua-repl/instructions/banner.js').read_bytes(), content)
-            self.assertEqual((generated / 'references/upstream/sky/native-api.md').read_bytes(), content)
-            self.assertEqual((generated / 'references/upstream/sky/windows/SKILL.md').read_bytes(), content)
-            wrapper = (generated / 'SKILL.md').read_text()
-            self.assertIn('For native Windows apps, target an exact observed window ID.', wrapper)
-
-    def test_windows_original_encoded_instruction_tree_copied_byte_exact(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary).resolve()
-            home = base / 'account'
-            home.mkdir()
-            release = base / 'release'
-            release.mkdir()
-            (release / 'installation.json').write_text(json.dumps({'platform': 'windows'}))
-            resources = base / 'registered-msix/app/resources'
-            modules = resources / 'cua_node/bin/node_modules/%40oai'
-            original = b'Original Windows CUA guide \xc3\xa9\r\n'
-            paths = [
-                modules / 'cua/docs/tinysky-alt-core-cua-repl.md',
-                modules / 'cua-repl/instructions/windows/description.md',
-                modules / 'sky/docs/skills/oai_sky_lib/windows/SKILL.md',
-                modules / 'sky/docs/sky-full-desktop-api.md',
-                modules / 'sky/docs/sky-window-api.md',
-                modules / 'sky/docs/sky-window2-api.md',
-            ]
-            for path in paths:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(original)
-            source = Path(__file__).resolve().parents[1] / 'skills/lcu'
-            with mock.patch.object(setup, 'installed_app_resources', return_value=resources):
-                generated = setup.generate_skill(source, home, release)
-            self.assertEqual((generated / 'references/upstream/cua-repl/instructions/windows/description.md').read_bytes(), original)
-            self.assertEqual((generated / 'references/upstream/sky/windows/SKILL.md').read_bytes(), original)
-            wrapper = (generated / 'SKILL.md').read_text()
-            self.assertIn('original Windows computer-use guide', wrapper)
-            self.assertNotIn('Chrome browser control', wrapper)
-            self.assertFalse((generated / 'references/upstream/chrome').exists())
-
 
 if __name__ == '__main__':
     unittest.main()
