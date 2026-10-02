@@ -41,8 +41,11 @@ docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$volume
   bash -c 'dpkg-deb --extract /package.deb /tmp/extracted && cp -a /tmp/extracted/usr/lib/chatgpt/. /app/'
 first="/opt/silo/chatgpt/$version"
 second="/opt/silo/chatgpt/$version-moved"
+# Docker's default profile also stops the original node_repl from sandboxing child processes, which hides a
+# whole class of failures. This gate lets bubblewrap work (as on a normal VM) and requires that it does.
+sandbox_flags=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add SYS_ADMIN)
 docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$output:/bundles:ro" \
-  -v "$volume:$first:ro" -v "$volume:$second:ro" \
-  -e PYTHONDONTWRITEBYTECODE=1 "$tag" \
+  -v "$volume:$first:ro" -v "$volume:$second:ro" "${sandbox_flags[@]}" \
+  -e PYTHONDONTWRITEBYTECODE=1 -e LCU_REQUIRE_SANDBOX=1 "$tag" \
   bash /src/tests/offline-readonly.sh "/bundles/$(basename -- "$archive")" "$first" "$second"
 printf 'Archive and evidence: %s\n' "$output"

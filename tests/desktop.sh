@@ -21,7 +21,13 @@ done
 openbox >"$LCU_TEST_OUTPUT/openbox.log" 2>&1 & processes+=("$!")
 python3 "$test_dir/fixture.py" >"$LCU_TEST_OUTPUT/fixture.log" 2>&1 & processes+=("$!")
 python3 "$test_dir/x11_fixture.py" >"$LCU_TEST_OUTPUT/x11-fixture.log" 2>&1 & processes+=("$!")
+GTK_A11Y=atspi python3 "$test_dir/gtk4_fixture.py" >"$LCU_TEST_OUTPUT/gtk4-fixture.log" 2>&1 & processes+=("$!")
 command=("$@")
 if [[ ${#command[@]} -eq 0 ]]; then command=(/opt/lcu/current/bin/lcu); fi
 "${command[@]}" doctor
 python3 "$test_dir/integration.py" "${command[@]}"
+# The same fixture through each adapter path (Codex and Claude relays, Pi/OMP client, Hermes bridge)
+# without any sandbox metadata. LCU_REQUIRE_SANDBOX=1 also checks the original sandbox is in effect.
+python3 "$test_dir/adapter_paths.py" "${command[@]}"
+# GTK 4 reads only XInput2: see the notes in the test about window-targeted versus desktop-level input.
+python3 "$test_dir/gtk4_input.py" "${command[@]}"
