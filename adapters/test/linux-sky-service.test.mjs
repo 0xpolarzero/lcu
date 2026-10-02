@@ -47,6 +47,7 @@ class Desktop {
     this.keycodesDown = new Set(); // key codes the X server reports pressed
     this.releases = [];     // {buttons, keys} of every XTEST release the wrapper asked for
     this.guards = [];       // every guard question asked (window id, point)
+    this.order = [];        // 'stop' (engine ended) and 'release' (XTEST release) in the order they happened
   }
 
   add(id, fields = {}) {
@@ -165,11 +166,13 @@ function installDeps() {
   };
   wrapper.deps.releaseHeld = async (buttons, keys) => {
     desk.releases.push({buttons, keys});
+    desk.order.push('release');
     for (const button of buttons) desk.buttonsDown.delete(button);
     for (const key of keys) desk.keycodesDown.delete(key);
     return true;
   };
   wrapper.deps.restartWorker = () => { desk.restarts += 1; };
+  wrapper.deps.stopEngines = async () => { desk.engineStops = (desk.engineStops ?? 0) + 1; desk.order.push('stop'); };
   wrapper.deps.xresPid = async id => {
     desk.xresCalls += 1;
     const window = desk.windows.find(candidate => candidate.id === id);
@@ -712,6 +715,7 @@ test('a drag that hangs after its button went down is released before the worker
     /did not answer "drag".*released the buttons and keys/);
   assert.deepEqual([...desk.buttonsDown], [], 'Button1 must not stay pressed');
   assert.deepEqual(desk.releases, [{buttons: [1], keys: []}]);
+  assert.deepEqual(desk.order, ['stop', 'release'], 'the engine is ended before the release, so it cannot press again');
   assert.equal(desk.restarts, 1);
 });
 

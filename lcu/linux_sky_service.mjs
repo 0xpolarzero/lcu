@@ -24,7 +24,7 @@
 // and sends nothing.
 import {pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
-import {readFile, readlink} from 'node:fs/promises';
+import {readFile, readlink, readdir} from 'node:fs/promises';
 import {hostname} from 'node:os';
 
 const TOOLKIT_TTL_MS = 10_000;
@@ -289,6 +289,43 @@ export const deps = {
   },
   // Releases buttons and key codes with XTEST; true when the helper reports success.
   releaseHeld: async (buttons, keys) => await xHelper(['release', buttons.join(','), keys.join(',')]) === '1',
+  // Ends the original engine processes (sky_linux_*, children of this worker) so that a call that did not answer
+  // cannot act when it resumes: SIGTERM, then SIGCONT because a stopped process acts on a pending signal only once
+  // continued. Waits briefly for them to be gone. Not every original transport kills its child when the worker exits.
+  stopEngines: async () => {
+    const parents = new Map();
+    for (const entry of await readdir('/proc')) {
+      if (!/^\d+$/.test(entry)) continue;
+      try {
+        const stat = await readFile(`/proc/${entry}/stat`, 'utf8');
+        parents.set(Number(entry), Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]));
+      } catch { /* exited */ }
+    }
+    const below = new Set([process.pid]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [pid, parent] of parents) if (below.has(parent) && !below.has(pid)) { below.add(pid); grew = true; }
+    }
+    below.delete(process.pid);
+    const engines = [];
+    for (const pid of below) {
+      try {
+        const argv0 = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0')[0];
+        if (argv0.slice(argv0.lastIndexOf('/') + 1).startsWith('sky_linux_')) engines.push(pid);
+      } catch { /* exited */ }
+    }
+    for (const pid of engines) { try { process.kill(pid, 'SIGTERM'); process.kill(pid, 'SIGCONT'); } catch { /* gone */ } }
+    const gone = async pid => {
+      try {
+        const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
+        return stat[stat.lastIndexOf(')') + 2] === 'Z';
+      } catch { return true; }
+    };
+    for (let round = 0; round < 20; round++) {
+      if ((await Promise.all(engines.map(gone))).every(Boolean)) return;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  },
   // Stops this trusted worker, and with it the original engine process, so that no timed-out call can act late.
   // node_repl reports the exit and starts a fresh worker for the next request.
   restartWorker: () => { setImmediate(() => process.exit(70)); },
@@ -491,16 +528,21 @@ function callOriginal(service, request, env, options = {}) {
   const limit = options.limitMs ?? callTimeoutMs(env);
   let timer;
   let timedOut = false;
-  const call = Promise.resolve().then(() => service.handleRpc(request)).catch(async error => {
+  // After the timeout fired, the outcome of the abandoned call (an engine ended by LCU fails it) is not reported:
+  // the caller hears of the timeout only once the engine is ended and the release is done.
+  const never = new Promise(() => {});
+  const call = Promise.resolve().then(() => service.handleRpc(request)).then(value => timedOut ? never : value, async error => {
+    if (timedOut) return never;
     // A call that failed by itself may also have left something pressed.
-    if (!timedOut && options.held) { try { await releaseHeld(options.held); } catch { /* best effort */ } }
+    if (options.held) { try { await releaseHeld(options.held); } catch { /* best effort */ } }
     throw error;
   });
   const expired = new Promise((_, reject) => {
     timer = setTimeout(async () => {
       stopped = true;
       timedOut = true;
-      call.catch(() => {});
+      // First end the engine (it may be stopped rather than hung, and resume), then release what it pressed.
+      try { await deps.stopEngines(); } catch { /* best effort */ }
       if (options.held) { try { await releaseHeld(options.held); } catch { /* the worker stops either way */ } }
       try { deps.restartWorker(); } catch { /* the call is refused either way */ }
       reject(new Rejection(`The original Linux input service did not answer "${request.method ?? request.type}" within ` +
