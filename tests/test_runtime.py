@@ -77,6 +77,12 @@ class UpstreamRuntimeTests(unittest.TestCase):
         with patch.dict(os.environ, settings, clear=True):
             env = environment(self.root)
         for key, value in settings.items():
+            if key == 'NODE_REPL_REQUEST_META':
+                # Host metadata is kept; only the missing sandbox default is added.
+                request = json.loads(value)
+                actual = json.loads(env[key])
+                self.assertEqual({k: v for k, v in actual.items() if k != 'codex/sandbox-state-meta'}, request)
+                continue
             self.assertEqual(env[key], value, key)
 
     def test_generic_connection_identity_has_no_invented_policy_or_model(self):
@@ -84,10 +90,50 @@ class UpstreamRuntimeTests(unittest.TestCase):
             first = environment(self.root)
             second = environment(self.root)
         metadata = json.loads(first['NODE_REPL_REQUEST_META'])
-        self.assertEqual(set(metadata), {'x-codex-turn-metadata'})
+        self.assertEqual(set(metadata), {'x-codex-turn-metadata', 'codex/sandbox-state-meta'})
         turn = metadata['x-codex-turn-metadata']
         self.assertEqual(set(turn), {'session_id', 'turn_id'})
         self.assertNotEqual(first['NODE_REPL_REQUEST_META'], second['NODE_REPL_REQUEST_META'])
+
+    def test_linux_default_disables_the_original_sandbox_wrapper(self):
+        # Without this, a machine with bubblewrap runs Sky under `codex sandbox` with
+        # network disabled and X11 connect(2) fails for every harness that sends no meta.
+        with patch.dict(os.environ, {}, clear=True):
+            metadata = json.loads(environment(self.root)['NODE_REPL_REQUEST_META'])
+        state = metadata['codex/sandbox-state-meta']
+        self.assertEqual(state['permissionProfile'], {'type': 'disabled'})
+        self.assertEqual(state['sandboxCwd'], Path.cwd().as_uri())
+        self.assertTrue(state['sandboxCwd'].startswith('file:///'))
+
+    def test_host_supplied_sandbox_state_is_never_replaced(self):
+        strict = {'permissionProfile': {'type': 'managed', 'file_system': {'type': 'unrestricted'},
+                                        'network': 'restricted'}, 'sandboxCwd': 'file:///work'}
+        supplied = json.dumps({'codex/sandbox-state-meta': strict, 'x-codex-turn-metadata': {'session_id': 's'}})
+        with patch.dict(os.environ, {'NODE_REPL_REQUEST_META': supplied}, clear=True):
+            env = environment(self.root)
+        self.assertEqual(env['NODE_REPL_REQUEST_META'], supplied)
+
+    def test_host_request_metadata_gains_only_the_missing_sandbox_default(self):
+        supplied = {'x-codex-turn-metadata': {'session_id': 'host-session', 'turn_id': 'host-turn'}}
+        with patch.dict(os.environ, {'NODE_REPL_REQUEST_META': json.dumps(supplied)}, clear=True):
+            actual = json.loads(environment(self.root)['NODE_REPL_REQUEST_META'])
+        self.assertEqual(actual.pop('codex/sandbox-state-meta')['permissionProfile'], {'type': 'disabled'})
+        self.assertEqual(actual, supplied)
+
+    def test_unparseable_or_non_object_host_metadata_is_left_alone(self):
+        for supplied in ('not json', '[1]', '', '"text"'):
+            with self.subTest(supplied=supplied), patch.dict(os.environ, {'NODE_REPL_REQUEST_META': supplied}, clear=True):
+                self.assertEqual(environment(self.root)['NODE_REPL_REQUEST_META'], supplied)
+
+    def test_sandbox_default_can_be_declined(self):
+        with patch.dict(os.environ, {'LCU_NODE_REPL_SANDBOX': 'host'}, clear=True):
+            metadata = json.loads(environment(self.root)['NODE_REPL_REQUEST_META'])
+        self.assertEqual(set(metadata), {'x-codex-turn-metadata'})
+
+    def test_other_platforms_keep_their_original_sandbox_state(self):
+        with patch.dict(os.environ, {}, clear=True):
+            metadata = json.loads(environment(self.root, platform='darwin')['NODE_REPL_REQUEST_META'])
+        self.assertEqual(set(metadata), {'x-codex-turn-metadata'})
 
     def test_additional_module_and_trust_roots_survive(self):
         settings = {'NODE_REPL_NODE_MODULE_DIRS': '/extra/modules',

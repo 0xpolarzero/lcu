@@ -166,6 +166,43 @@ def environment(root, resolved=None, *, chrome=False, audio=False, platform=None
         identity = 'lcu-' + str(uuid.uuid4())
         env['NODE_REPL_REQUEST_META'] = json.dumps({'x-codex-turn-metadata': {
             'session_id': identity, 'turn_id': identity + '-connection'}})
+    if target == 'linux' and env.get('LCU_NODE_REPL_SANDBOX') != 'host':
+        _default_linux_sandbox_state(env)
+    return env
+
+
+SANDBOX_STATE_META = 'codex/sandbox-state-meta'
+
+
+def _default_linux_sandbox_state(env):
+    """Give the original node_repl the sandbox state its Linux host would send.
+
+    With no `codex/sandbox-state-meta` the original node_repl runs its kernel and
+    trusted Sky worker under `codex sandbox` with network disabled whenever the
+    machine supports bubblewrap. That seccomp filter refuses connect(2), so Sky
+    cannot reach the X11 socket and every `js` call fails with "Could not connect
+    to X11 ... Operation not permitted". Hosts that do not send the metadata
+    (every LCU adapter and generic MCP clients) would never work on such a
+    machine. The default sandbox state disables that wrapper, as official Codex
+    does under danger-full-access; computer use remains gated by the original
+    approval prompts. A host that sends its own `codex/sandbox-state-meta` per
+    call, or one in NODE_REPL_REQUEST_META, keeps full precedence over this
+    default, so a stricter profile is honored. Set LCU_NODE_REPL_SANDBOX=host to
+    leave the original behavior untouched.
+    """
+    try:
+        request = json.loads(env['NODE_REPL_REQUEST_META'])
+    except ValueError:
+        return
+    if not isinstance(request, dict) or SANDBOX_STATE_META in request:
+        return
+    try:
+        cwd = Path.cwd()
+    except OSError:
+        cwd = Path('/')
+    request[SANDBOX_STATE_META] = {
+        'permissionProfile': {'type': 'disabled'}, 'sandboxCwd': cwd.as_uri()}
+    env['NODE_REPL_REQUEST_META'] = json.dumps(request)
     return env
 
 

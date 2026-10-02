@@ -1,5 +1,7 @@
 # Verification
 
+The Linux sandbox-state failure of 0.8.1 and the GTK 4 input behavior are recorded in [this 2026-10-02 note](verification/linux-sandbox-and-gtk4-input-2026-10-02.md).
+
 The historical results below describe v0.2.1 only. The installed-app migration has separate [current status](PARITY-STATUS.md); the current macOS app-selection and MCP check is recorded [here](verification/macos-current-app-2026-09-26.md). Passing earlier subset tests does not validate the thin archive, relocated application, or authenticated Chrome actions.
 
 # Historical v0.2.1 verification: 2026-09-22
