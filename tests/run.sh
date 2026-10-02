@@ -44,8 +44,16 @@ second="/opt/silo/chatgpt/$version-moved"
 # Docker's default profile also stops the original node_repl from sandboxing child processes, which hides a
 # whole class of failures. This gate lets bubblewrap work (as on a normal VM) and requires that it does.
 sandbox_flags=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add SYS_ADMIN)
+# Under emulation (the other architecture) bubblewrap cannot start, so the sandbox cannot be required there.
+case "$(docker info --format '{{.Architecture}}')" in
+  aarch64|arm64) native=linux/arm64 ;;
+  x86_64|amd64) native=linux/amd64 ;;
+  *) native= ;;
+esac
+require_sandbox=0
+if [[ "$platform" = "$native" ]]; then require_sandbox=1; else echo "Emulated $platform: the original sandbox cannot be required in this gate." >&2; fi
 docker run --rm --network none --platform "$platform" "${mounts[@]}" -v "$output:/bundles:ro" \
   -v "$volume:$first:ro" -v "$volume:$second:ro" "${sandbox_flags[@]}" \
-  -e PYTHONDONTWRITEBYTECODE=1 -e LCU_REQUIRE_SANDBOX=1 "$tag" \
+  -e PYTHONDONTWRITEBYTECODE=1 -e LCU_REQUIRE_SANDBOX="$require_sandbox" "$tag" \
   bash /src/tests/offline-readonly.sh "/bundles/$(basename -- "$archive")" "$first" "$second"
 printf 'Archive and evidence: %s\n' "$output"

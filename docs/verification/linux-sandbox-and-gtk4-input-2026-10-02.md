@@ -40,9 +40,9 @@ Reproduction with gnome-text-editor `--standalone` and a GTK 4 fixture under Xvf
 - `xdotool key ctrl+a`, `BackSpace`, `Return` and a pointer click (XTEST) work in all three setups, with the default `us` evdev keymap.
 - `xdotool key --window <id> ...` and `type --window <id>` (XSendEvent) change nothing in GTK 4.
 - Through LCU: `app.pressKey("ctrl+a")`/`BackSpace` and window-targeted coordinate clicks return without error and change nothing. The low-level desktop calls with no `window` work: `await sky.activate_window({window}); await sky.press_key({key: "ctrl+a"}); await sky.click({x, y})` with desktop coordinates.
-- `typeText` on a GTK 4 text view may raise `org.a11y.atspi.Text.SetCaretOffset ... NotSupported` after the text was inserted.
+- `typeText` depends on the engine version. ChatGPT 26.928.31416 inserts through AT-SPI (a GTK 4 text view may then raise `org.a11y.atspi.Text.SetCaretOffset ... NotSupported` after the text was inserted); 26.915.31945 returned without error and inserted nothing into a GTK 4 entry.
 
-`tests/gtk4_input.py` (GTK 4 fixture `tests/gtk4_fixture.py`) asserts the paths that work (AT-SPI text, desktop-level keys, Return, coordinate click) and prints the window-targeted result as information (`keys not delivered, coordinate click not delivered` here), so a change in the original engine appears in the log without failing the suite. LCU changes nothing for this: the original input implementation is authoritative, and no replacement is added.
+`tests/gtk4_input.py` (GTK 4 fixture `tests/gtk4_fixture.py`) asserts the paths that work in both app versions (desktop-level text, keys, Return, coordinate click) and prints the `typeText` and window-targeted results as information (`keys not delivered, coordinate click not delivered` here), so a change in the original engine appears in the log without failing the suite. LCU changes nothing for this: the original input implementation is authoritative, and no replacement is added.
 
 ## Requirements for a guest image or session (Silo)
 

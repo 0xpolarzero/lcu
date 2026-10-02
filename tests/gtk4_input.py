@@ -3,7 +3,7 @@
 GTK 4 only reads input through XInput2. The original Linux engine sends a window-targeted
 `pressKey`/`click` as core X events with XSendEvent, "without activating" the window, so a GTK 4
 window never sees them. Desktop-level input (no `window`) uses the X server's XTEST path and
-reaches GTK 4 normally, as xdotool does. AT-SPI actions and `typeText` do not use either path.
+reaches GTK 4 normally, as xdotool does. AT-SPI actions and (in recent engines) `typeText` use neither path.
 This test pins the paths that must work and prints, without asserting, what the window-targeted
 path does, so a future change in the original engine shows up in the log instead of failing here.
 """
@@ -49,14 +49,20 @@ try:
     run('var {sky} = await import("@oai/sky"); globalThis.windows = await sky.list_windows();'
         'globalThis.pick = title => windows.find(w => w.title === title);')
 
-    # AT-SPI text entry works on GTK 4. The original may report a caret error after a successful paste.
+    # Informational: `typeText` is not one input path across app versions. ChatGPT 26.928 inserts through
+    # AT-SPI, which GTK 4 accepts (it may report a caret error afterwards); 26.915 inserted nothing here.
     run(f'let app = await cua.getApp({{windowId:{entry["id"]}}}); '
         'try { await app.typeText("alpha"); } catch (error) { nodeRepl.write("typeText: " + error.message); }')
-    assert settle(lambda: entry_text() == 'alpha'), entry_text()
+    inserted = settle(lambda: entry_text() == 'alpha')
+    print(f'INFO: app.typeText on a GTK 4 entry: {"inserted" if inserted else "inserted nothing"}', flush=True)
 
     # Desktop-level keys reach GTK 4: focus the window, then press with no `window`.
     run('await sky.activate_window({window: pick("LCU GTK4 Entry")});'
         'await sky.press_key({key: "ctrl+a"}); await sky.press_key({key: "BackSpace"});')
+    assert settle(lambda: entry_text() == ''), entry_text()
+    run('await sky.type_text({text: "gamma"});')
+    assert settle(lambda: entry_text() == 'gamma'), entry_text()
+    run('await sky.press_key({key: "ctrl+a"}); await sky.press_key({key: "BackSpace"});')
     assert settle(lambda: entry_text() == ''), entry_text()
     run('await sky.type_text({text: "beta"}); await sky.press_key({key: "Return"});')
     assert settle(lambda: entry_text() == 'beta' and (output / 'Gtk4-activated').exists()), entry_text()
@@ -78,6 +84,6 @@ try:
     time.sleep(0.5)
     click = 'delivered' if (output / 'Gtk4-click').exists() else 'not delivered'
     print(f'INFO: window-targeted input on GTK 4: keys {keys}, coordinate click {click}', flush=True)
-    print('PASS: GTK 4 AT-SPI text, desktop-level keys, Return and coordinate click', flush=True)
+    print('PASS: GTK 4 desktop-level text, keys, Return and coordinate click', flush=True)
 finally:
     client.close()
