@@ -13,7 +13,8 @@ const tool = name => ({ name, description: name, inputSchema: { type: 'object', 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: ['js', 'js_reset'].map(tool) }));
 server.setRequestHandler(CallToolRequestSchema, async request => {
   if (process.env.LCU_FIXTURE_LOG) {
-    appendFileSync(process.env.LCU_FIXTURE_LOG, `${JSON.stringify({ name: request.params.name, meta: request.params._meta ?? null })}\n`);
+    appendFileSync(process.env.LCU_FIXTURE_LOG, `${JSON.stringify({ name: request.params.name, meta: request.params._meta ?? null,
+      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('LCU_'))) })}\n`);
   }
   return { content: [{ type: 'text', text: 'recorded' }] };
 });

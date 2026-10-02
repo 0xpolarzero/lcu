@@ -177,9 +177,40 @@ def gtk_flow(transport, name):
     assert second in state, state
     run(transport, f'await app.click({json.dumps(element(state, "Save draft"))}); await app.getAXState();')
     assert (output / 'Target.txt').read_text() == second
-    # Cleanup reaches the original server without metadata, and the next call must not be reset or sandboxed.
-    transport.turn_ended()
-    assert text(transport.js('nodeRepl.write(6 * 7);')) == '42'
+    # Window-targeted keys and clicks reach a GTK 4 window through LCU's translation on every adapter path.
+    gtk4_window_flow(transport)
+    # Cleanup reaches the original server without metadata and must succeed; the next real computer-use call must
+    # not be reset or sandboxed, and the kernel's state persists across turn_ended.
+    run(transport, f'globalThis.adapterSentinel = {json.dumps(name)}; nodeRepl.write("set");')
+    ended = transport.turn_ended()
+    assert isinstance(ended, dict) and not ended.get('isError'), ended
+    assert run(transport, 'nodeRepl.write(globalThis.adapterSentinel);') == name
+    windows = json.loads(run(transport, 'nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));'))
+    assert any(w.get('title') == 'LCU Target' for w in windows), windows
+    state = run(transport, 'await cua.getState();')
+    assert 'LCU Target' in state or 'window' in state.lower(), state[:400]
+
+
+def gtk4_window_flow(transport):
+    """app.pressKey and app.click on GTK 4 windows, observed through the fixture's own files."""
+    windows = json.loads(run(transport, 'nodeRepl.write(JSON.stringify(await cua.listWindows({emit:false})));'))
+    entry = next(w for w in windows if w.get('title') == 'LCU GTK4 Entry')
+    button = next(w for w in windows if w.get('title') == 'LCU GTK4 Button')
+    gtk4_entry = output / 'Gtk4-entry.txt'
+    gtk4_click = output / 'Gtk4-click'
+    gtk4_click.unlink(missing_ok=True)
+    run(transport, f'let gtk4 = await cua.getApp({{windowId:{entry["id"]}}}); '
+                   'await gtk4.pressKey("ctrl+a"); await gtk4.pressKey("BackSpace"); await gtk4.pressKey("w");')
+    deadline = time.time() + 5
+    while time.time() < deadline and not (gtk4_entry.exists() and gtk4_entry.read_text() == 'w'):
+        time.sleep(0.1)
+    assert gtk4_entry.exists() and gtk4_entry.read_text() == 'w', gtk4_entry.read_text() if gtk4_entry.exists() else None
+    run(transport, f'let gtk4Button = await cua.getApp({{windowId:{button["id"]}}}); await gtk4Button.click([150, 80]);')
+    deadline = time.time() + 5
+    while time.time() < deadline and not gtk4_click.exists():
+        time.sleep(0.1)
+    assert gtk4_click.exists(), 'window-targeted click did not reach GTK 4'
+    gtk4_click.unlink()
 
 
 def sandbox_available():

@@ -168,7 +168,51 @@ def environment(root, resolved=None, *, chrome=False, audio=False, platform=None
             'session_id': identity, 'turn_id': identity + '-connection'}})
     if target == 'linux' and env.get('LCU_NODE_REPL_SANDBOX') != 'host':
         _default_linux_sandbox_state(env)
+    if target == 'linux':
+        _configure_linux_input(root, runtime, env, metadata)
     return env
+
+
+LINUX_INPUT_TOOLKITS = ('gtk4', 'qt-scroll')
+
+
+def linux_input_translation_off(env):
+    return env.get('LCU_LINUX_INPUT_TRANSLATION', '').strip().lower() in ('off', '0', 'false', 'no')
+
+
+def _configure_linux_input(root, runtime, env, metadata):
+    """Interpose a thin wrapper on the Sky RPC for window-targeted input GTK 4 and Qt ignore.
+
+    The original Linux engine sends window-targeted keys, clicks, scroll and drag with
+    XSendEvent, which GTK 4 (XInput2 only) ignores, and Qt ignores for scroll. The wrapper
+    re-issues those calls through the engine's own desktop-level path for those windows only.
+    `LCU_LINUX_INPUT_TRANSLATION=off` leaves the original service in place. An exact tested
+    app/runtime pair whose record lists `native_input` is not translated for those toolkits.
+    """
+    if linux_input_translation_off(env):
+        return
+    wrapper = root / 'lcu/linux_sky_service.mjs'
+    service = runtime / 'lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js'
+    surfaces = {surface.strip() for surface in env.get('CUA_REPL_ENABLED_SURFACES', '').split(',')}
+    if 'computer' not in surfaces or not wrapper.is_file():
+        return
+    toolkits = list(LINUX_INPUT_TOOLKITS)
+    try:
+        from . import tested
+        descriptor = json.loads((root / 'installation.json').read_text())
+        native = tested.native_input(root, platform='linux', architecture=descriptor.get('architecture'),
+                                     app_version=metadata['version'], runtime=metadata['runtime'])
+        toolkits = [toolkit for toolkit in toolkits if toolkit not in native]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    if not toolkits:
+        return
+    try:
+        _override_trusted_service(env, wrapper, os.pathsep, 'Linux', computer_gated=True)
+    except ValueError:
+        return  # a caller-supplied Sky service takes precedence over this optional wrapper
+    env['LCU_LINUX_SKY_SERVICE_PATH'] = str(service)
+    env['LCU_LINUX_INPUT_TOOLKITS'] = ','.join(toolkits)
 
 
 SANDBOX_STATE_META = 'codex/sandbox-state-meta'

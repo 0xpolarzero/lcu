@@ -135,6 +135,79 @@ class UpstreamRuntimeTests(unittest.TestCase):
             metadata = json.loads(environment(self.root, platform='darwin')['NODE_REPL_REQUEST_META'])
         self.assertEqual(set(metadata), {'x-codex-turn-metadata'})
 
+    def install_linux_input_wrapper(self, *entries):
+        (self.root / 'lcu').mkdir(exist_ok=True)
+        (self.root / 'lcu/linux_sky_service.mjs').write_text('export async function handleRpc() {}\n')
+        (self.root / 'tested-versions.json').write_text(json.dumps({'format': 1, 'entries': list(entries)}))
+
+    def pair_entry(self, **changes):
+        return {'platform': 'linux', 'architecture': 'arm64', 'app_version': '26.924.22138',
+                'runtime': 'fixture-runtime-new', 'lcu_version': '0.8.3', **changes}
+
+    def test_linux_input_translation_wraps_only_the_sky_service(self):
+        self.install_linux_input_wrapper()
+        with patch.dict(os.environ, {}, clear=True):
+            env = environment(self.root)
+        wrapper = str(self.root / 'lcu/linux_sky_service.mjs')
+        self.assertEqual(json.loads(env['NODE_REPL_TRUSTED_SERVICES']), {'sky': wrapper})
+        self.assertEqual(env['LCU_LINUX_SKY_SERVICE_PATH'], str(
+            self.root / 'app/resources/cua_node/lib/node_modules/@oai/sky/dist/project/cua/sky_js/src/service.js'))
+        self.assertEqual(env['LCU_LINUX_INPUT_TOOLKITS'], 'gtk4,qt-scroll')
+        self.assertIn(str(self.root / 'lcu'), env['NODE_REPL_TRUSTED_CODE_PATHS'].split(os.pathsep))
+
+    def test_linux_input_translation_keeps_the_browser_service_when_chrome_is_enabled(self):
+        self.install_linux_input_wrapper()
+        with patch.dict(os.environ, {}, clear=True):
+            services = json.loads(environment(self.root, chrome=True)['NODE_REPL_TRUSTED_SERVICES'])
+        self.assertEqual(services['browser'], '@oai/browser-desktop/service')
+        self.assertEqual(services['sky'], str(self.root / 'lcu/linux_sky_service.mjs'))
+
+    def test_linux_input_translation_can_be_turned_off(self):
+        self.install_linux_input_wrapper()
+        for value in ('off', 'OFF', ' off ', '0', 'false', 'no'):
+            with self.subTest(value=value), patch.dict(os.environ, {'LCU_LINUX_INPUT_TRANSLATION': value}, clear=True):
+                env = environment(self.root)
+                self.assertNotIn('NODE_REPL_TRUSTED_SERVICES', env)
+                self.assertNotIn('LCU_LINUX_SKY_SERVICE_PATH', env)
+        with patch.dict(os.environ, {'LCU_LINUX_INPUT_TRANSLATION': 'on'}, clear=True):
+            self.assertIn('NODE_REPL_TRUSTED_SERVICES', environment(self.root))
+
+    def test_linux_input_translation_is_linux_only(self):
+        self.install_linux_input_wrapper()
+        with patch.dict(os.environ, {}, clear=True):
+            env = environment(self.root, platform='darwin')
+        self.assertNotIn('LCU_LINUX_SKY_SERVICE_PATH', env)
+        self.assertNotIn('NODE_REPL_TRUSTED_SERVICES', env)
+
+    def test_a_caller_supplied_sky_service_takes_precedence(self):
+        self.install_linux_input_wrapper()
+        supplied = json.dumps({'sky': '/custom/sky.mjs'})
+        with patch.dict(os.environ, {'NODE_REPL_TRUSTED_SERVICES': supplied}, clear=True):
+            env = environment(self.root)
+        self.assertEqual(env['NODE_REPL_TRUSTED_SERVICES'], supplied)
+        self.assertNotIn('LCU_LINUX_SKY_SERVICE_PATH', env)
+
+    def test_a_tested_pair_that_handles_a_toolkit_natively_is_not_translated_for_it(self):
+        self.install_linux_input_wrapper(self.pair_entry(native_input=['gtk4']))
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(environment(self.root)['LCU_LINUX_INPUT_TOOLKITS'], 'qt-scroll')
+        self.install_linux_input_wrapper(self.pair_entry(native_input=['gtk4', 'qt-scroll']))
+        with patch.dict(os.environ, {}, clear=True):
+            env = environment(self.root)
+        self.assertNotIn('NODE_REPL_TRUSTED_SERVICES', env)
+        self.assertNotIn('LCU_LINUX_INPUT_TOOLKITS', env)
+
+    def test_another_app_version_is_translated_even_when_a_tested_pair_is_native(self):
+        self.install_linux_input_wrapper(self.pair_entry(app_version='26.999.1', native_input=['gtk4', 'qt-scroll']))
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(environment(self.root)['LCU_LINUX_INPUT_TOOLKITS'], 'gtk4,qt-scroll')
+
+    def test_an_unreadable_tested_record_keeps_the_translation_on(self):
+        self.install_linux_input_wrapper()
+        (self.root / 'tested-versions.json').write_text('{broken')
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(environment(self.root)['LCU_LINUX_INPUT_TOOLKITS'], 'gtk4,qt-scroll')
+
     def test_additional_module_and_trust_roots_survive(self):
         settings = {'NODE_REPL_NODE_MODULE_DIRS': '/extra/modules',
                     'NODE_REPL_TRUSTED_CODE_PATHS': '/trusted', 'PATH': '/usr/bin'}

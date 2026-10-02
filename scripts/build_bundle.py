@@ -97,6 +97,8 @@ def build(output, package=None, *, target='linux', app=None):
             modules += ('session.py', 'platforms.py')
         for filename in modules:
             shutil.copy2(SOURCE / 'lcu' / filename, release / 'lcu' / filename)
+        if target == 'linux':
+            shutil.copy2(SOURCE / 'lcu/linux_sky_service.mjs', release / 'lcu/linux_sky_service.mjs')
         if target == 'darwin':
             shutil.copy2(SOURCE / 'lcu/macos_host.py', release / 'lcu/macos_host.py')
             shutil.copy2(SOURCE / 'lcu/macos_sky_service.mjs', release / 'lcu/macos_sky_service.mjs')

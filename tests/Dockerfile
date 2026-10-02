@@ -15,7 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libxdamage1 libxext6 libxfixes3 libxi6 libxkbcommon0 libxrandr2 \
     libxtst6 mesa-vulkan-drivers pulseaudio pulseaudio-utils python3 \
     x11-utils xdg-utils xz-utils \
-    python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 xvfb openbox xdotool \
+    python3-gi gir1.2-gtk-3.0 gir1.2-gtk-4.0 python3-pyqt5 xvfb openbox xdotool \
     xfce4-session xfwm4 xfdesktop4 xfce4-panel curl binutils \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=pi-verification /usr/local/bin/node /usr/local/bin/node

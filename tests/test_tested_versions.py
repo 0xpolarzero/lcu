@@ -52,6 +52,25 @@ class TestedVersionTests(unittest.TestCase):
                                                     'lcu_version': '0.7.0'}])
         self.assertEqual(tested.status_lines(result)[0], 'Tested pair: no.')
 
+    def test_native_input_lists_toolkits_only_for_the_exact_pair(self):
+        self.record(entry(native_input=['gtk4']), entry(architecture='x64', app_sha256='c' * 64))
+        self.assertEqual(tested.native_input(self.root, **PAIR), ('gtk4',))
+        self.assertEqual(tested.native_input(self.root, **{**PAIR, 'app_version': '26.999.1'}), ())
+        self.assertEqual(tested.native_input(self.root, **{**PAIR, 'architecture': 'x64'}), ())
+
+    def test_native_input_is_empty_without_a_usable_record(self):
+        self.assertEqual(tested.native_input(self.root, **PAIR), ())
+        (self.root / tested.RECORD).write_text('{broken')
+        self.assertEqual(tested.native_input(self.root, **PAIR), ())
+
+    def test_an_unknown_native_input_toolkit_invalidates_the_record(self):
+        for value in (['gtk3'], 'gtk4', [1]):
+            with self.subTest(value=value):
+                self.record(entry(native_input=value))
+                entries, problem = tested.load_entries(self.root)
+                self.assertIsNone(entries)
+                self.assertIn('invalid entry', problem)
+
     def test_the_runtime_must_match_as_well_as_the_app_version(self):
         self.record(entry())
         self.assertEqual(tested.assess(self.root, **{**PAIR, 'runtime': '0.0.99/other'})['status'], 'untested')

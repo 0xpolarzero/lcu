@@ -13,6 +13,9 @@ import re
 import sys
 
 RECORD = 'tested-versions.json'
+# Toolkits whose window-targeted input a tested app version handles itself, so LCU's Linux input
+# translation (see docs/STANDALONE-ADAPTATIONS.md) is not applied to them for that exact pair.
+NATIVE_INPUT_TOOLKITS = ('gtk4', 'qt-scroll')
 _FIELDS = ('platform', 'architecture', 'app_version', 'runtime', 'lcu_version')
 _SHA256 = re.compile(r'[0-9a-f]{64}')
 
@@ -33,7 +36,10 @@ def load_entries(root):
         if (not isinstance(entry, dict) or any(not isinstance(entry.get(field), str) or not entry[field]
                                                for field in _FIELDS)
                 or ('app_sha256' in entry and not (isinstance(entry['app_sha256'], str)
-                                                  and _SHA256.fullmatch(entry['app_sha256'])))):
+                                                  and _SHA256.fullmatch(entry['app_sha256'])))
+                or ('native_input' in entry and not (
+                    isinstance(entry['native_input'], list)
+                    and all(item in NATIVE_INPUT_TOOLKITS for item in entry['native_input'])))):
             return None, f'the tested-versions record has an invalid entry ({path})'
     return entries, None
 
@@ -69,6 +75,16 @@ def assess(root, *, platform, architecture, app_version, runtime):
                          f'{architecture}. LCU will still use it, but behavior has not been verified. '
                          + (f'Tested: {listed}.' if listed else 'No pair is recorded for this platform and architecture.'))
     return result
+
+
+def native_input(root, *, platform, architecture, app_version, runtime):
+    """Toolkits the exact tested pair handles natively; empty for any untested or unknown pair."""
+    entries, _ = load_entries(root)
+    for entry in entries or ():
+        if (entry['platform'], entry['architecture'], entry['app_version'], entry['runtime']) == (
+                platform, architecture, app_version, runtime):
+            return tuple(entry.get('native_input', ()))
+    return ()
 
 
 def observe(root, descriptor=None, metadata=None):

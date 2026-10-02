@@ -1,11 +1,13 @@
-"""Check what input reaches GTK 4 windows through the original runtime, with file oracles.
+"""Check what input reaches GTK 4 windows through LCU and the original runtime, with file oracles.
 
 GTK 4 only reads input through XInput2. The original Linux engine sends a window-targeted
-`pressKey`/`click` as core X events with XSendEvent, "without activating" the window, so a GTK 4
-window never sees them. Desktop-level input (no `window`) uses the X server's XTEST path and
+`pressKey`/`click`/`scroll`/`drag` as core X events with XSendEvent, "without activating" the window,
+so a GTK 4 window never sees them. Desktop-level input (no `window`) uses the X server's XTEST path and
 reaches GTK 4 normally, as xdotool does. AT-SPI actions and (in recent engines) `typeText` use neither path.
-This test pins the paths that must work and prints, without asserting, what the window-targeted
-path does, so a future change in the original engine shows up in the log instead of failing here.
+This test pins the desktop-level paths, then proves that LCU's Linux input translation
+(lcu/linux_sky_service.mjs) makes the window-targeted calls work for GTK 4: keys, coordinate click, scroll,
+drag, a modal dialog, and that `LCU_LINUX_INPUT_TRANSLATION=off` restores the original behavior.
+The oracles are files the independent fixtures write, never a call's success.
 """
 import json
 import os
@@ -13,6 +15,7 @@ from pathlib import Path
 import sys
 import time
 from mcp_client import Client, text
+import linux_input_support as support
 
 command = sys.argv[1:] or ['/opt/lcu/current/bin/lcu']
 output = Path(os.environ['LCU_TEST_OUTPUT'])
@@ -34,6 +37,92 @@ def settle(predicate, attempts=30):
             return True
         time.sleep(0.1)
     return False
+
+
+def window_targeted(command):
+    """Window-targeted input to GTK 4 windows, through `sky.*` and the `app.*` helpers."""
+    support.start_fixture('gtk4_surface_fixture.py')
+    session = support.Session(command)
+    try:
+        surface = session.window('LCU GTK4 Surface')
+        entry_window = session.window('LCU GTK4 Entry')
+        button_window = session.window('LCU GTK4 Button')
+        # Start from a different focused window: the translation must focus the target itself.
+        session.activate('LCU GTK4 Button')
+        session.run(f'await sky.press_key({{window: await byTitle("LCU GTK4 Surface"), key: "x"}});')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'x'), support.read('Gtk4Surface-entry.txt')
+        assert session.focused_id() == surface['id'], 'the translated key should leave the target focused'
+        # The app helpers use the same path: chord, Return through the entry, and BackSpace.
+        session.run(f'let app = await cua.getApp({{windowId:{surface["id"]}}});'
+                    'await app.pressKey("ctrl+a"); await app.pressKey("BackSpace");')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == ''), support.read('Gtk4Surface-entry.txt')
+        session.run('await app.pressKey("y");')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'y')
+        # key_down/key_up pair (engines from CUA 0.0.27 on): a held shift types a capital.
+        if session.run('nodeRepl.write(typeof sky.key_down === "function" ? "yes" : "no");') == 'yes':
+            session.run('await sky.key_down({window: await byTitle("LCU GTK4 Surface"), key: "shift"});'
+                        'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "k"});'
+                        'await sky.key_up({window: await byTitle("LCU GTK4 Surface"), key: "shift"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yK'), support.read('Gtk4Surface-entry.txt')
+        else:
+            print('INFO: this engine has no key_down/key_up; hold translation not exercised', flush=True)
+            session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "shift+k"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yK'), support.read('Gtk4Surface-entry.txt')
+
+        # Coordinate click on another, unfocused window: window-relative coordinates.
+        session.activate('LCU GTK4 Surface')
+        session.run(f'let button = await cua.getApp({{windowId:{button_window["id"]}}});'
+                    'await button.click([150, 80]);')
+        assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'window-targeted click did not reach GTK 4'
+        (support.output / 'Gtk4-click').unlink()
+        assert session.focused_id() == button_window['id']
+        # An AT-SPI element action is not translated and still works.
+        state = session.run('nodeRepl.write(await button.getAXState());')
+        assert 'Press' in state, state
+
+        # Scroll over the scrolled area: coordinates relative to the surface window (client origin).
+        session.run('await app.scroll([200, 330], "down", {pixels: 300});')
+        assert support.settle(lambda: int(support.read('Gtk4Surface-scroll.txt') or 0) > 0), support.read('Gtk4Surface-scroll.txt')
+        # Drag inside the drag area.
+        session.run('await app.drag([40, 70], [190, 100]);')
+        assert support.settle(lambda: support.read('Gtk4Surface-drag.txt') is not None), 'drag did not reach GTK 4'
+        dx, dy = map(int, support.read('Gtk4Surface-drag.txt').split(','))
+        assert 120 <= dx <= 180 and 15 <= dy <= 45, (dx, dy)
+
+        # A modal dialog owned by the target receives keys addressed to its parent.
+        before = support.read('Gtk4Surface-entry.txt')
+        (support.output / 'Gtk4Surface-open-modal').write_text('1')
+        modal = session.window('LCU GTK4 Modal')
+        session.activate('LCU GTK4 Entry')
+        session.run(f'await sky.press_key({{window: await byTitle("LCU GTK4 Surface"), key: "m"}});')
+        assert support.settle(lambda: support.read('Gtk4Surface-modal-entry.txt') == 'm'), support.read('Gtk4Surface-modal-entry.txt')
+        assert support.read('Gtk4Surface-entry.txt') == before, 'the parent received a key meant for the modal dialog'
+        assert session.focused_id() == modal['id']
+        (support.output / 'Gtk4Surface-close-modal').write_text('1')
+        assert support.settle(lambda: all(w.get('title') != 'LCU GTK4 Modal' for w in session.windows()))
+        session.activate('LCU GTK4 Entry')
+
+        # A window that is not listed keeps the engine's own error; nothing is sent to the desktop.
+        error = session.run('try { await sky.press_key({window: {app: "x11:1", id: 1, title: "gone", x: 0, y: 0, width: 5, height: 5, focused: false, modal: false, window_type: "normal"}, key: "q"}); nodeRepl.write("no error"); } catch (error) { nodeRepl.write("error: " + error.message); }')
+        assert error.startswith('error: '), error
+        assert session.focused_id() == entry_window['id']
+    finally:
+        session.close()
+
+    # Opt-out: the original engine behavior returns, including the focus-free, ineffective delivery.
+    off = support.Session(command, env={**os.environ, 'LCU_LINUX_INPUT_TRANSLATION': 'off'})
+    try:
+        off.activate('LCU GTK4 Entry')
+        before = support.read('Gtk4Surface-entry.txt')
+        off.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "z"});'
+                'await sky.click({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80});')
+        time.sleep(1)
+        assert support.read('Gtk4Surface-entry.txt') == before, 'translation was not disabled'
+        assert not (support.output / 'Gtk4-click').exists(), 'translation was not disabled'
+        assert off.focused_id() == entry_window['id'], 'the original path must not change focus'
+    finally:
+        off.close()
+        support.stop_fixtures()
 
 
 try:
@@ -74,16 +163,9 @@ try:
     assert settle(lambda: (output / 'Gtk4-click').exists()), 'desktop-level click did not reach GTK 4'
     (output / 'Gtk4-click').unlink()
 
-    # Informational: the window-targeted path (what app.pressKey and app.click use for coordinates).
-    before = entry_text()
-    run('try { await sky.press_key({window: pick("LCU GTK4 Entry"), key: "ctrl+a"});'
-        ' await sky.press_key({window: pick("LCU GTK4 Entry"), key: "BackSpace"}); } catch (error) { nodeRepl.write(error.message); }')
-    time.sleep(0.5)
-    keys = 'delivered' if entry_text() != before else 'not delivered'
-    run(f'try {{ await sky.click({{window: pick("LCU GTK4 Button"), x: 150, y: 80}}); }} catch (error) {{ nodeRepl.write(error.message); }}')
-    time.sleep(0.5)
-    click = 'delivered' if (output / 'Gtk4-click').exists() else 'not delivered'
-    print(f'INFO: window-targeted input on GTK 4: keys {keys}, coordinate click {click}', flush=True)
+    # Window-targeted input (what app.pressKey/app.click/app.scroll/app.drag send) reaches GTK 4 through
+    # LCU's translation to the engine's desktop-level calls. The windows below observe what arrived.
+    window_targeted(command)
     print('PASS: GTK 4 desktop-level text, keys, Return and coordinate click', flush=True)
 finally:
     client.close()
