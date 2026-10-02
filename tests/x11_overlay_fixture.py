@@ -5,6 +5,9 @@ and records every pointer button press it receives, so the file is the oracle fo
     overlay-show   "X,Y,WIDTH,HEIGHT" in desktop coordinates; the window is mapped there on top
     overlay-hide   unmaps it
     overlay-state  "shown" or "hidden", written after each change
+    overlay-grab   takes an active pointer grab with the window (as a popup menu does: owner events, button
+                   presses and releases selected); the window must be shown. overlay-ungrab drops it.
+    overlay-grab-state  "held", "released" or "failed:N" (the X status), written after each change
     overlay-click.txt   one "x,y" line per button press that reached it
 """
 import ctypes as c
@@ -54,6 +57,8 @@ move_resize = function('XMoveResizeWindow', [pointer, ulong, integer, integer, c
 map_window = function('XMapRaised', [pointer, ulong])
 unmap_window = function('XUnmapWindow', [pointer, ulong])
 flush = function('XFlush', [pointer])
+grab_pointer = function('XGrabPointer', [pointer, ulong, integer, c.c_uint, integer, integer, ulong, ulong, ulong])
+ungrab_pointer = function('XUngrabPointer', [pointer, ulong])
 pending = function('XPending', [pointer])
 next_event = function('XNextEvent', [pointer, c.POINTER(Event)])
 event = Event()
@@ -72,6 +77,17 @@ while True:
         unmap_window(display, window)
         flush(display)
         (output / 'overlay-state').write_text('hidden')
+    grab, drop = output / 'overlay-grab', output / 'overlay-ungrab'
+    if grab.exists():
+        grab.unlink()
+        status = grab_pointer(display, window, 1, (1 << 2) | (1 << 3), 1, 1, 0, 0, 0)  # async modes, CurrentTime
+        flush(display)
+        (output / 'overlay-grab-state').write_text('held' if status == 0 else f'failed:{status}')
+    if drop.exists():
+        drop.unlink()
+        ungrab_pointer(display, 0)
+        flush(display)
+        (output / 'overlay-grab-state').write_text('released')
     while pending(display):
         next_event(display, c.byref(event))
         if event.button.type == 4:

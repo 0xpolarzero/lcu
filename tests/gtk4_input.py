@@ -150,6 +150,34 @@ def window_targeted(command):
         assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'a click did not arrive once the overlay left'
         (support.output / 'Gtk4-click').unlink()
         assert support.read('overlay-click.txt') is None
+        # An active pointer grab by another client (a popup menu does this) sends every click to that client
+        # even though the window under the pointer is the target. The popup here is mapped away from the point.
+        (support.output / 'overlay-show').write_text('960,720,40,30')
+        assert support.settle(lambda: support.read('overlay-state') == 'shown')
+        (support.output / 'overlay-grab').write_text('1')
+        assert support.settle(lambda: support.read('overlay-grab-state') == 'held'), support.read('overlay-grab-state')
+        time.sleep(0.3)
+        for call in ('click({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80})',
+                     'click({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80, click_count: 2})',
+                     'move({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80})',
+                     'scroll({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80, direction: "down", pixels: 50})',
+                     'drag({window: await byTitle("LCU GTK4 Button"), path: [{x: 150, y: 80}, {x: 160, y: 85}]})'):
+            grabbed = session.run(f'try {{ await sky.{call}; nodeRepl.write("no error"); }}'
+                                  ' catch (error) { nodeRepl.write("error: " + error.message); }')
+            assert grabbed.startswith('error: ') and 'active pointer grab' in grabbed, (call, grabbed)
+        time.sleep(0.5)
+        assert not (support.output / 'Gtk4-click').exists(), 'a click reached GTK 4 during the grab'
+        assert support.read('overlay-click.txt') is None, ('input reached the grabbing popup', support.read('overlay-click.txt'))
+        # The probe grab must not disturb the popup's own grab, nor leave one behind once it is dropped.
+        (support.output / 'overlay-ungrab').write_text('1')
+        assert support.settle(lambda: support.read('overlay-grab-state') == 'released')
+        (support.output / 'overlay-hide').write_text('1')
+        assert support.settle(lambda: support.read('overlay-state') == 'hidden')
+        time.sleep(0.3)
+        session.run('await button.click([150, 80]);')
+        assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'a click did not arrive once the grab was dropped'
+        (support.output / 'Gtk4-click').unlink()
+        assert support.read('overlay-click.txt') is None
         # An AT-SPI element action is not translated and still works.
         state = session.run('nodeRepl.write(await button.getAXState());')
         assert 'Press' in state, state

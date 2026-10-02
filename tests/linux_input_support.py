@@ -1,4 +1,5 @@
 """Shared helpers for the Linux window-targeted input tests: fixtures, window lookup and file oracles."""
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -41,6 +42,81 @@ def stop_fixtures():
         except subprocess.TimeoutExpired:
             process.kill()
     fixtures.clear()
+
+
+_x11 = None
+
+
+def _display():
+    """A cached connection of the test process itself, to read the X server's input state."""
+    global _x11
+    if _x11 is None:
+        x = ctypes.CDLL('libX11.so.6')
+        x.XOpenDisplay.restype = ctypes.c_void_p
+        x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x.XDefaultRootWindow.restype = ctypes.c_ulong
+        x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong] + [ctypes.c_void_p] * 7
+        x.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.c_char * 32]
+        display = x.XOpenDisplay(None)
+        assert display, 'no X display'
+        _x11 = (x, display, x.XDefaultRootWindow(display))
+    return _x11
+
+
+def buttons_down():
+    """The pointer buttons (1-5) the X server reports pressed."""
+    x, display, root = _display()
+    mask = ctypes.c_uint()
+    scratch = [ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int()]
+    assert x.XQueryPointer(display, root, *[ctypes.byref(item) for item in scratch], ctypes.byref(mask))
+    return [number for number in range(1, 6) if mask.value & (1 << (7 + number))]
+
+
+def keys_down():
+    """The key codes the X server reports pressed."""
+    x, display, _root = _display()
+    keymap = (ctypes.c_char * 32)()
+    x.XQueryKeymap(display, keymap)
+    return {byte * 8 + bit for byte in range(32) for bit in range(8) if keymap[byte][0] & (1 << bit)}
+
+
+def descendants(root):
+    parents = {}
+    for entry in Path('/proc').iterdir():
+        if entry.name.isdigit():
+            try:
+                stat = (entry / 'stat').read_text()
+                parents[int(entry.name)] = int(stat[stat.rindex(')') + 2:].split()[1])
+            except (OSError, ValueError, IndexError):
+                pass
+    found, frontier = set(), {root}
+    while frontier:
+        frontier = {pid for pid, parent in parents.items() if parent in frontier and pid not in found}
+        found |= frontier
+    return found
+
+
+def engines(root):
+    """The original engine processes (sky_linux_*) under a process."""
+    result = []
+    for pid in descendants(root):
+        try:
+            argv = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
+        except OSError:
+            continue
+        if argv and os.path.basename(argv[0].decode(errors='replace')).startswith('sky_linux_'):
+            result.append(pid)
+    return result
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        state = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()[0]
+        return state != 'Z'
+    except (OSError, IndexError):
+        return False
 
 
 class Session:

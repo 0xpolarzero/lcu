@@ -21,43 +21,6 @@ output = Path(os.environ['LCU_TEST_OUTPUT'])
 LIMIT_MS = 3000
 
 
-def descendants(root):
-    parents = {}
-    for entry in Path('/proc').iterdir():
-        if entry.name.isdigit():
-            try:
-                stat = (entry / 'stat').read_text()
-                parents[int(entry.name)] = int(stat[stat.rindex(')') + 2:].split()[1])
-            except (OSError, ValueError, IndexError):
-                pass
-    found, frontier = set(), {root}
-    while frontier:
-        frontier = {pid for pid, parent in parents.items() if parent in frontier and pid not in found}
-        found |= frontier
-    return found
-
-
-def engines(root):
-    result = []
-    for pid in descendants(root):
-        try:
-            argv = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
-        except OSError:
-            continue
-        if argv and os.path.basename(argv[0].decode(errors='replace')).startswith('sky_linux_'):
-            result.append(pid)
-    return result
-
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-        state = (Path('/proc') / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()[0]
-        return state != 'Z'
-    except (OSError, IndexError):
-        return False
-
-
 # Earlier suites leave their last entry text behind; this fixture starts empty, so start from no file.
 (output / 'Gtk4Surface-entry.txt').unlink(missing_ok=True)
 support.start_fixture('gtk4_surface_fixture.py')
@@ -67,7 +30,7 @@ try:
     session.activate('LCU GTK4 Surface')
     root = session.client.process.pid
     session.run('await sky.list_windows();')
-    before = engines(root)
+    before = support.engines(root)
     assert before, 'no original engine process was found under this session'
     for pid in before:
         os.kill(pid, signal.SIGSTOP)
@@ -88,7 +51,7 @@ try:
     print(f'INFO: the hung call failed after {waited:.1f} s: {refused[:160]}', flush=True)
     time.sleep(1.5)
     assert support.read('Gtk4Surface-entry.txt') in (None, ''), ('a late key reached the entry', support.read('Gtk4Surface-entry.txt'))
-    assert support.settle(lambda: not any(alive(pid) for pid in before), attempts=100), 'the hung engine process was not stopped'
+    assert support.settle(lambda: not any(support.alive(pid) for pid in before), attempts=100), 'the hung engine process was not stopped'
     # A fresh worker and engine serve the next request; the old kernel's bindings are gone, so set up again.
     for attempt in range(3):
         try:
@@ -103,7 +66,7 @@ try:
     session.activate('LCU GTK4 Surface')
     session.run('await sky.press_key({key: "y"});')
     assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'y'), support.read('Gtk4Surface-entry.txt')
-    after = engines(root)
+    after = support.engines(root)
     assert after and not set(after) & set(before), ('the engine was not replaced', before, after)
 finally:
     session.close()

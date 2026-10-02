@@ -7,17 +7,21 @@
 // A window is translated only when the X server itself says which local process owns it (the
 // X-Resource extension, SO_PEERCRED on the server side) and that process is the one _NET_WM_PID
 // names, in this PID namespace; anything else is left to the original service. That identity is
-// trusted only after the same helper connection proved that the X server shares this PID namespace
-// (the server's record of the helper's own client equals the helper's getpid()). Every call that can
-// change focus or input state (translated or not: activate_window, desktop-level and window-targeted
-// input of any kind, pass-through fallbacks) runs through one queue, so nothing interleaves between a
-// translated request's final focus check and its input. Read-only calls bypass the queue. Each
-// original call made from the queue is bounded; on a timeout the trusted worker (and with it the
-// original engine process) is stopped so a late call cannot deliver input, and the call fails. If the
-// target cannot be focused, the point is outside the target, the X server reports another window
-// (a notification, a tooltip, an override-redirect popup) under a desktop-level pointer action's
-// first point, or the target owns a modal dialog and the input is a pointer action, a translated call
-// fails with an explicit error and sends nothing.
+// trusted only after the helper proved that the X server runs in this PID namespace: the listening
+// process of the display's local socket is found through /proc and must share this process's PID
+// namespace link (a TCP display, an unidentifiable server or another namespace fails closed), and the
+// server's record of the helper's own client must equal getpid(). Every call that can change focus or
+// input state (translated or not: activate_window, desktop-level and window-targeted input of any kind,
+// pass-through fallbacks) runs through one queue, so nothing interleaves between a translated request's
+// final focus check and its input. Read-only calls bypass the queue. Each original call made from the
+// queue is bounded (a translated drag, click hold or key hold adds time for its input, up to a cap); on a
+// timeout the buttons and keys that translated call itself pressed are released with XTEST, then the
+// trusted worker (and with it the original engine process) is stopped so a late call cannot deliver
+// input, and the call fails. If the target cannot be focused, the point is outside the target, the X
+// server reports another window (a notification, a tooltip, an override-redirect popup) under a
+// desktop-level pointer action's first point, another client holds an active pointer grab, or the target
+// owns a modal dialog and the input is a pointer action, a translated call fails with an explicit error
+// and sends nothing.
 import {pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
 import {readFile, readlink} from 'node:fs/promises';
@@ -34,24 +38,98 @@ const DEFAULT_TOOLKITS = 'gtk4,qt-scroll';
 // (Chromium and Electron mmap icudtl.dat; Firefox is libxul).
 const NOT_GTK4 = [/\/icudtl\.dat/, /\/libxul\.so/, /\/libffmpeg\.so/];
 
-// Two questions only the X server can answer, asked through minimal ctypes use of libX11 and libXRes
-// (Debian/Ubuntu package libxres1). Every failure prints nothing, which means "unknown".
+// Questions only the X server (and the kernel) can answer, asked through minimal ctypes use of libX11,
+// libXRes and libXtst (Debian/Ubuntu packages libxres1 and libxtst6). Every failure prints nothing, which
+// means "unknown".
+//   socket: prints 1 when the X server behind $DISPLAY provably runs in this PID namespace, else 0. Only a
+//     local display qualifies (:N, unix:N). The listening socket is found in /proc/net/unix (the abstract
+//     name @/tmp/.X11-unix/XN and the file /tmp/.X11-unix/XN), every process holding it is found through
+//     /proc/*/fd (only processes this one can read), and each must have the same /proc/<pid>/ns/pid link as
+//     this process. A TCP or remote display, an unreadable holder or no holder at all is 0. A process listed
+//     in this /proc is in this PID namespace or one below it, so a server in another namespace is never found.
+//   xres WINDOW: only the second half of pid, for tests: the process id without the socket proof, which
+//     is what LCU trusted before 0.8.7 (see the regression test in tests/linux_xres_namespace.py).
 //   pid WINDOW: the local process the X server attributes to the window's client: XResQueryClientIds
 //     with XRES_CLIENT_ID_PID_MASK (X-Resource 1.2) returns the SO_PEERCRED process id of the connection
-//     and nothing for a client on another machine. SO_PEERCRED ids are relative to the PID namespace
-//     of the X server, so first the helper's own client is queried, over the same connection, and its
-//     id must equal os.getpid(); a server in another PID namespace fails that proof and nothing is printed.
-//     (The helper's client is represented by a 1x1 window it creates and never maps.)
-//   at WINDOW X Y: prints 1 when the deepest mapped window the X server finds at root point (X, Y) is
-//     WINDOW or one of its descendants (the chain from the root down passes through WINDOW, so a
-//     window-manager frame above it is fine), 0 when it is any other window, such as an overlay.
+//     and nothing for a client on another machine. Asked only when the socket proof above holds, and then
+//     also only when the server's record of the helper's own client (a 1x1 window it creates and never
+//     maps) equals os.getpid(): an additional condition, no longer the only proof, because equal numbers
+//     in distinct PID namespaces prove nothing.
+//   guard WINDOW [X Y]: one JSON line. buttons and keys are the pointer buttons (1-5) and key codes the X
+//     server reports pressed now (XQueryPointer, XQueryKeymap); modifiers lists the modifier key codes. With a
+//     root point it also reports grab and owner. grab is the result of a brief XGrabPointer on the root with no
+//     event mask, undone at once (0 free; 1 another client holds an active pointer grab, such as a popup menu
+//     or a drag in progress; 4 frozen; anything else is not usable): the grab changes nothing on the
+//     desktop, but pointer events arriving during that round trip (well under a millisecond) are not
+//     delivered to anyone. owner is true when the deepest mapped window the X server finds at root point
+//     (X, Y) is WINDOW or one of its descendants (the chain from the root down passes through WINDOW, so a
+//     window-manager frame above it is fine), false when it is any other window, such as an overlay.
 //     XTranslateCoordinates only reads; it moves nothing and honors input shapes.
+//   release BUTTONS KEYS: comma-separated lists; releases each with XTEST (XTestFakeButtonEvent,
+//     XTestFakeKeyEvent), prints 1 on success. LCU calls it only for what a timed-out call itself pressed.
 export const XRES_HELPER_SCRIPT = `
-import ctypes, os, sys
+import ctypes, json, os, sys
+
+def x_server_in_this_namespace():
+    name = os.environ.get('DISPLAY', '')
+    if name.startswith('unix:'):
+        name = name[4:]
+    if not name.startswith(':'):
+        return False  # TCP, a remote host or no display
+    number = name[1:].split('.')[0]
+    if not (number.isascii() and number.isdigit()):
+        return False
+    names = {'/tmp/.X11-unix/X' + number, '@/tmp/.X11-unix/X' + number}
+    inodes = set()
+    with open('/proc/net/unix') as table:
+        next(table)
+        for line in table:
+            fields = line.split()
+            if len(fields) >= 8 and fields[7] in names and int(fields[3], 16) & 0x10000:  # __SO_ACCEPTCON
+                inodes.add(fields[6])
+    if not inodes:
+        return False
+    mine = os.readlink('/proc/self/ns/pid')
+    holders = {}
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            descriptors = os.listdir('/proc/%s/fd' % entry)
+        except OSError:
+            continue
+        for descriptor in descriptors:
+            try:
+                target = os.readlink('/proc/%s/fd/%s' % (entry, descriptor))
+            except OSError:
+                continue
+            if target.startswith('socket:[') and target[8:-1] in inodes:
+                holders.setdefault(target[8:-1], set()).add(entry)
+    if set(holders) != inodes:
+        return False  # a listener whose process cannot be identified
+    for pids in holders.values():
+        for pid in pids:
+            try:
+                if os.readlink('/proc/%s/ns/pid' % pid) != mine:
+                    return False
+            except OSError:
+                return False
+    return True
+
+mode = sys.argv[1]
+if mode == 'socket':
+    try:
+        print(1 if x_server_in_this_namespace() else 0)
+    except Exception:
+        print(0)
+    sys.exit(0)
+
 class Spec(ctypes.Structure):
     _fields_ = [('client', ctypes.c_ulong), ('mask', ctypes.c_uint)]
 class Value(ctypes.Structure):
     _fields_ = [('spec', Spec), ('length', ctypes.c_long), ('value', ctypes.c_void_p)]
+class ModifierMap(ctypes.Structure):
+    _fields_ = [('per_modifier', ctypes.c_int), ('codes', ctypes.POINTER(ctypes.c_ubyte))]
 x11 = ctypes.CDLL('libX11.so.6')
 x11.XOpenDisplay.restype = ctypes.c_void_p
 x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
@@ -61,29 +139,89 @@ x11.XCreateSimpleWindow.restype = ctypes.c_ulong
 x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
                                     ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
 x11.XFlush.argtypes = [ctypes.c_void_p]
+x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
 x11.XTranslateCoordinates.restype = ctypes.c_int
 x11.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
                                       ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong)]
+x11.XQueryPointer.restype = ctypes.c_int
+x11.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                              ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                              ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_uint)]
+x11.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.c_char * 32]
+x11.XGetModifierMapping.restype = ctypes.POINTER(ModifierMap)
+x11.XGetModifierMapping.argtypes = [ctypes.c_void_p]
+x11.XFreeModifiermap.argtypes = [ctypes.POINTER(ModifierMap)]
+x11.XGrabPointer.restype = ctypes.c_int
+x11.XGrabPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_uint, ctypes.c_int, ctypes.c_int,
+                             ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+x11.XUngrabPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+
+if mode == 'pid':
+    try:
+        if not x_server_in_this_namespace():
+            sys.exit(1)
+    except Exception:
+        sys.exit(1)
 display = x11.XOpenDisplay(None)
 if not display:
     sys.exit(1)
-mode = sys.argv[1]
+root = x11.XDefaultRootWindow(display)
 
-if mode == 'at':
-    target, px, py = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-    root = x11.XDefaultRootWindow(display)
-    chain, current = [], root
-    while len(chain) < 64:
-        dx, dy, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()
-        if not x11.XTranslateCoordinates(display, root, current, px, py, ctypes.byref(dx), ctypes.byref(dy), ctypes.byref(child)):
-            sys.exit(1)
-        if child.value == 0:
-            break
-        current = child.value
-        chain.append(current)
-    else:
+def pressed():
+    mask = ctypes.c_uint()
+    a, b, c, d = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_int(), ctypes.c_int()
+    e, f = ctypes.c_int(), ctypes.c_int()
+    if not x11.XQueryPointer(display, root, ctypes.byref(a), ctypes.byref(b), ctypes.byref(c), ctypes.byref(d),
+                             ctypes.byref(e), ctypes.byref(f), ctypes.byref(mask)):
         sys.exit(1)
-    print(1 if target in chain else 0)
+    buttons = [number for number in range(1, 6) if mask.value & (1 << (7 + number))]
+    keymap = (ctypes.c_char * 32)()
+    x11.XQueryKeymap(display, keymap)
+    keys = [byte * 8 + bit for byte in range(32) for bit in range(8) if keymap[byte][0] & (1 << bit)]
+    table = x11.XGetModifierMapping(display)
+    if not table:
+        sys.exit(1)
+    count = 8 * table.contents.per_modifier
+    modifiers = sorted({table.contents.codes[i] for i in range(count)} - {0})
+    x11.XFreeModifiermap(table)
+    return buttons, keys, modifiers
+
+if mode == 'guard':
+    buttons, keys, modifiers = pressed()
+    answer = {'buttons': buttons, 'keys': keys, 'modifiers': modifiers, 'grab': None, 'owner': None}
+    if len(sys.argv) > 4:
+        target, px, py = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+        grab = x11.XGrabPointer(display, root, 0, 0, 1, 1, 0, 0, 0)  # GrabModeAsync twice, CurrentTime
+        if grab == 0:
+            x11.XUngrabPointer(display, 0)
+        x11.XSync(display, 0)
+        answer['grab'] = grab
+        chain, current = [], root
+        while len(chain) < 64:
+            dx, dy, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()
+            if not x11.XTranslateCoordinates(display, root, current, px, py, ctypes.byref(dx), ctypes.byref(dy), ctypes.byref(child)):
+                sys.exit(1)
+            if child.value == 0:
+                break
+            current = child.value
+            chain.append(current)
+        else:
+            sys.exit(1)
+        answer['owner'] = target in chain
+    print(json.dumps(answer))
+    sys.exit(0)
+
+if mode == 'release':
+    xtst = ctypes.CDLL('libXtst.so.6')
+    xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+    xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+    for number in [int(item) for item in sys.argv[2].split(',') if item]:
+        xtst.XTestFakeButtonEvent(display, number, 0, 0)
+    for code in [int(item) for item in sys.argv[3].split(',') if item]:
+        xtst.XTestFakeKeyEvent(display, code, 0, 0)
+    x11.XFlush(display)
+    x11.XSync(display, 0)
+    print(1)
     sys.exit(0)
 
 xres = ctypes.CDLL('libXRes.so.1')
@@ -111,11 +249,10 @@ def client_pid(xid):
     pids.discard(-1)
     return pids.pop() if len(pids) == 1 else None
 
-if mode == 'pid':
-    # A 1x1 window that is never mapped: a resource of this connection's own client, for the proof.
-    own = x11.XCreateSimpleWindow(display, x11.XDefaultRootWindow(display), 0, 0, 1, 1, 0, 0, 0)
+if mode in ('pid', 'xres'):
+    own = x11.XCreateSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0)
     x11.XFlush(display)
-    if client_pid(own) != os.getpid():  # the server is not in this PID namespace (or lies)
+    if client_pid(own) != os.getpid():  # the server numbers processes differently (or lies)
         sys.exit(1)
     pid = client_pid(int(sys.argv[2]))
     if pid:
@@ -137,11 +274,21 @@ export const deps = {
     const pid = Number(await xHelper(['pid', String(windowId)]));
     return Number.isInteger(pid) && pid > 0 ? pid : null;
   },
-  // true: the deepest mapped window at the root point is the window or its descendant; false: another window; null: unknown.
-  pointerOwner: async (windowId, x, y) => {
-    const answer = await xHelper(['at', String(windowId), String(x), String(y)]);
-    return answer === '1' ? true : answer === '0' ? false : null;
+  // The X input state and, with a root point, the pointer grab and the window at the point (see the helper's
+  // "guard" question); null when unknown.
+  guard: async (windowId, point) => {
+    const args = ['guard', String(windowId)];
+    if (point) args.push(String(point.x), String(point.y));
+    try {
+      const answer = JSON.parse(await xHelper(args));
+      const numbers = value => Array.isArray(value) && value.every(Number.isInteger);
+      return numbers(answer.buttons) && numbers(answer.keys) && numbers(answer.modifiers) ? answer : null;
+    } catch {
+      return null;
+    }
   },
+  // Releases buttons and key codes with XTEST; true when the helper reports success.
+  releaseHeld: async (buttons, keys) => await xHelper(['release', buttons.join(','), keys.join(',')]) === '1',
   // Stops this trusted worker, and with it the original engine process, so that no timed-out call can act late.
   // node_repl reports the exit and starts a fresh worker for the next request.
   restartWorker: () => { setImmediate(() => process.exit(70)); },
@@ -284,23 +431,81 @@ async function classify(id, wanted) {
 // Every call the queue makes to the original service is bounded. A call that does not answer in time is
 // not merely abandoned (it could still deliver its input later, in the middle of a later request): the
 // worker is stopped, which ends the original engine process, and the queue refuses everything after it.
+// Before that, whatever a translated call itself pressed (buttons, modifiers) is released: the call may
+// have pressed them and never reach its release. `options.limitMs` is the budget of a call whose duration
+// follows from its input (see translatedBudgetMs); `options.held` describes what the call could press.
 function callTimeoutMs(env) {
   const value = Number(env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS);
   return Number.isFinite(value) && value >= 1 ? value : CALL_TIMEOUT_MS;
 }
 
-function callOriginal(service, request, env) {
+// The time a translated call may take: the base bound (30 s) plus what its input implies, never more than
+// the hard cap (5 minutes, or the base if that is larger). A drag adds 20 ms per path point and 2 ms per
+// pixel of path length; a click adds its hold duration for every click; a key chord adds its hold duration.
+// Anything else keeps the base bound.
+export const DRAG_POINT_MS = 20;
+export const DRAG_PIXEL_MS = 2;
+export const BUDGET_CAP_MS = 300_000;
+export function translatedBudgetMs(method, input, base) {
+  let extra = 0;
+  if (method === 'drag' && Array.isArray(input.path)) {
+    let length = 0;
+    for (let index = 1; index < input.path.length; index++) {
+      length += Math.hypot(input.path[index].x - input.path[index - 1].x, input.path[index].y - input.path[index - 1].y);
+    }
+    extra = DRAG_POINT_MS * input.path.length + DRAG_PIXEL_MS * Math.ceil(length);
+  } else if (method === 'click' && finite(input.duration) && input.duration > 0) {
+    extra = input.duration * Math.max(1, finite(input.click_count) ? Math.floor(input.click_count) : 1);
+  } else if (method === 'press_key' && finite(input.duration) && input.duration > 0) {
+    extra = input.duration;
+  }
+  return Math.min(base + extra, Math.max(base, BUDGET_CAP_MS));
+}
+
+const BUTTON_NUMBERS = {left: 1, l: 1, middle: 2, m: 2, right: 3, r: 3};
+
+// What a translated call could leave pressed: the pointer buttons its action uses (a click's button, the
+// left button for a drag, the wheel buttons for a scroll; none for a move), and any key it holds (the
+// chord of a key press, or the `key` chord held during a pointer action).
+function heldBy(method, input, before) {
+  const keyboard = KEY_METHODS.has(method);
+  let buttons = [];
+  if (method === 'click') buttons = [BUTTON_NUMBERS[String(input.mouse_button ?? 'left').toLowerCase()] ?? 1];
+  else if (method === 'drag') buttons = [1];
+  else if (method === 'scroll') buttons = [4, 5];
+  return {before, buttons, keys: keyboard || typeof input.key === 'string'};
+}
+
+// Releases, with XTEST, the buttons and keys the call pressed: pressed now, not pressed when the action
+// started, and of a kind the call could press (modifiers only count when no key was part of the action).
+async function releaseHeld(held) {
+  const now = await deps.guard(0, null);
+  if (!now) return;
+  const buttons = now.buttons.filter(button => held.buttons.includes(button) && !held.before.buttons.includes(button));
+  const keys = held.keys ? now.keys.filter(key => !held.before.keys.includes(key)) : [];
+  if (buttons.length || keys.length) await deps.releaseHeld(buttons, keys);
+}
+
+function callOriginal(service, request, env, options = {}) {
   if (stopped) throw new Rejection(RESTARTING);
-  const limit = callTimeoutMs(env);
+  const limit = options.limitMs ?? callTimeoutMs(env);
   let timer;
-  const call = Promise.resolve().then(() => service.handleRpc(request));
+  let timedOut = false;
+  const call = Promise.resolve().then(() => service.handleRpc(request)).catch(async error => {
+    // A call that failed by itself may also have left something pressed.
+    if (!timedOut && options.held) { try { await releaseHeld(options.held); } catch { /* best effort */ } }
+    throw error;
+  });
   const expired = new Promise((_, reject) => {
-    timer = setTimeout(() => {
+    timer = setTimeout(async () => {
       stopped = true;
+      timedOut = true;
       call.catch(() => {});
+      if (options.held) { try { await releaseHeld(options.held); } catch { /* the worker stops either way */ } }
       try { deps.restartWorker(); } catch { /* the call is refused either way */ }
       reject(new Rejection(`The original Linux input service did not answer "${request.method ?? request.type}" within ` +
-        `${Math.round(limit / 1000)} s. LCU stopped it so that the call cannot act later; it restarts on the next request. ` +
+        `${Math.round(limit / 1000)} s. LCU stopped it so that the call cannot act later` +
+        `${options.held ? ' and released the buttons and keys it had pressed' : ''}; it restarts on the next request. ` +
         'Check the desktop state and repeat the action.'));
     }, limit);
   });
@@ -452,19 +657,40 @@ async function translate(service, request, env) {
   const converted = desktopInput(method, input, current, points);
   if (outsideScreen(method, converted, screen)) return PASS; // an off-screen target keeps the original error
 
-  if (POINTER_METHODS.has(method)) await requireTopmost(target.id, method === 'drag' ? converted.path[0] : converted);
-  return callOriginal(service, {type: 'execute', method, args: [converted]}, env);
+  const before = await requireClear(target.id, method, POINTER_METHODS.has(method) ? (method === 'drag' ? converted.path[0] : converted) : null);
+  return callOriginal(service, {type: 'execute', method, args: [converted]}, env, {
+    limitMs: translatedBudgetMs(method, converted, callTimeoutMs(env)),
+    held: heldBy(method, converted, before),
+  });
 }
 
 // XTEST follows normal pointer routing, so the desktop-level action lands on whatever window the X server
-// finds at the point. A notification, tooltip or override-redirect popup can cover a target that is
-// focused and in bounds; ask the server immediately before sending and refuse anything but the target
-// (or one of its descendants). The query only reads: nothing has been moved when it answers.
-async function requireTopmost(id, point) {
-  let inside = null;
-  try { inside = await deps.pointerOwner(id, Math.round(point.x), Math.round(point.y)); } catch { /* unknown */ }
-  if (inside === true) return;
-  throw new Rejection(inside === false
+// finds at the point, or goes to a client holding an active pointer grab. Immediately before sending, ask the
+// X server (one helper call, nothing is moved or sent): which buttons and keys are down now (the starting
+// state of this call, see heldBy), and for a pointer action whether another client holds an active pointer
+// grab (a popup menu, a drag in progress: the click would go to it whatever the window chain says) and
+// whether the target or one of its descendants is the window at the point (a notification, a tooltip or an
+// override-redirect popup can cover a target that is focused and in bounds). Anything but a free pointer and
+// the target at the point, or no answer at all, fails the call with an error and sends nothing.
+async function requireClear(id, method, point) {
+  let state = null;
+  try { state = await deps.guard(id, point && {x: Math.round(point.x), y: Math.round(point.y)}); } catch { /* unknown */ }
+  if (!state) {
+    throw new Rejection(point
+      ? `LCU could not confirm with the X server that the target window is the one at the point (${point.x}, ${point.y}) ` +
+        'and that no pointer grab is active, so no input was sent.'
+      : 'LCU could not read the X server\'s input state, so no input was sent.');
+  }
+  if (!point) return state;
+  if (state.grab === 1 || state.grab === 4) {
+    throw new Rejection('Another application holds an active pointer grab (a popup menu, a drag in progress or a similar ' +
+      'popup), so a click would go to it instead of the target and no input was sent. Close it or wait, then repeat the action.');
+  }
+  if (state.grab !== 0) {
+    throw new Rejection('LCU could not tell whether another application holds an active pointer grab, so no input was sent.');
+  }
+  if (state.owner === true) return state;
+  throw new Rejection(state.owner === false
     ? `Another window covers the point (${point.x}, ${point.y}) of the target window on the desktop (a notification, tooltip or ` +
       'popup), so no input was sent. Dismiss or wait for it, then repeat the action.'
     : `LCU could not confirm with the X server that the target window is the one at the point (${point.x}, ${point.y}), ` +

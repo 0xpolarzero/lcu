@@ -17,6 +17,8 @@ const PLAIN_MAPS = '7f00 r-xp /usr/lib/x86_64-linux-gnu/libc.so.6\n';
 const HOST = 'lcu-test-host';
 const sleepOnly = () => Promise.resolve();
 const canonicalKey = key => key.toLowerCase().replace(/_[lr]$/, '');
+const KEYCODES = {shift: 50, control: 37, ctrl: 37, alt: 64, super: 133, a: 38};
+const MODIFIER_CODES = [37, 50, 64, 133];
 
 let directory;
 let desk;
@@ -40,6 +42,11 @@ class Desktop {
     this.hang = null;       // {method, gate}: calls of this method never answer until the gate opens
     this.xresCalls = 0;
     this.restarts = 0;
+    this.grab = 0;          // result of the X server's grab probe: 0 free, 1 another client holds an active pointer grab
+    this.buttonsDown = new Set(); // pointer buttons the X server reports pressed
+    this.keycodesDown = new Set(); // key codes the X server reports pressed
+    this.releases = [];     // {buttons, keys} of every XTEST release the wrapper asked for
+    this.guards = [];       // every guard question asked (window id, point)
   }
 
   add(id, fields = {}) {
@@ -87,16 +94,33 @@ class Desktop {
       return null;
     }
     if (input.window) return {targeted: true};
+    // Desktop-level pointer input presses the button (and the held key chord) before it can hang or finish.
+    const pressedHere = [];
+    if (method === 'click' || method === 'drag') {
+      const button = method === 'drag' ? 1 : ({right: 3, middle: 2}[input.mouse_button] ?? 1);
+      this.buttonsDown.add(button);
+      pressedHere.push(() => this.buttonsDown.delete(button));
+    }
+    if (typeof input.key === 'string' && method !== 'press_key' && method !== 'key_down' && method !== 'key_up') {
+      for (const code of input.key.split('+').map(name => KEYCODES[canonicalKey(name)] ?? 200)) {
+        this.keycodesDown.add(code);
+        pressedHere.push(() => this.keycodesDown.delete(code));
+      }
+    }
     // Desktop-level input, as the original engine does it (XTEST): key_down presses every key of the chord
     // and keeps them down, key_up releases them, press_key presses and then releases every key of the chord.
     const keys = typeof input.key === 'string' ? input.key.split('+').map(canonicalKey) : [];
+    if (method === 'press_key') for (const key of keys) this.keycodesDown.add(KEYCODES[key] ?? 200);
+    if (this.hangAfterPress && (method === 'click' || method === 'drag' || method === 'press_key')) await this.hangAfterPress;
+    if (this.failAfterPress && (method === 'click' || method === 'drag' || method === 'press_key')) throw Error(this.failAfterPress);
+    for (const release of pressedHere) release();
     if (method === 'key_down') { for (const key of keys) this.down.add(key); }
     else if (method === 'key_up') { for (const key of keys) this.down.delete(key); }
     else if (method === 'press_key') {
       const base = keys.at(-1);
       const shifted = this.down.has('shift') || keys.slice(0, -1).includes('shift');
       this.typed.push({key: shifted ? base.toUpperCase() : base, windowId: this.focusedId()});
-      for (const key of keys) this.down.delete(key);
+      for (const key of keys) { this.down.delete(key); this.keycodesDown.delete(KEYCODES[key] ?? 200); }
     }
     return {desktop: true};
   }
@@ -128,9 +152,22 @@ function installDeps() {
     lines.push(machine === null ? 'WM_CLIENT_MACHINE:  not found.' : `WM_CLIENT_MACHINE(STRING) = "${machine}"`);
     return lines.join('\n') + '\n';
   };
-  wrapper.deps.pointerOwner = async (id, x, y) => {
-    if (desk.pointerUnknown) return null;
-    return !desk.overlays.some(r => x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height);
+  wrapper.deps.guard = async (id, point) => {
+    desk.guards.push([id, point ?? null]);
+    if (desk.guardUnknown) return null;
+    const state = {buttons: [...desk.buttonsDown], keys: [...desk.keycodesDown], modifiers: MODIFIER_CODES, grab: null, owner: null};
+    if (point) {
+      state.grab = desk.grab;
+      state.owner = desk.pointerUnknown ? null
+        : !desk.overlays.some(r => point.x >= r.x && point.y >= r.y && point.x < r.x + r.width && point.y < r.y + r.height);
+    }
+    return state;
+  };
+  wrapper.deps.releaseHeld = async (buttons, keys) => {
+    desk.releases.push({buttons, keys});
+    for (const button of buttons) desk.buttonsDown.delete(button);
+    for (const key of keys) desk.keycodesDown.delete(key);
+    return true;
   };
   wrapper.deps.restartWorker = () => { desk.restarts += 1; };
   wrapper.deps.xresPid = async id => {
@@ -493,7 +530,7 @@ test('an unanswerable pointer check refuses the action instead of guessing', asy
   desk.focus(1);
   desk.pointerUnknown = true;
   await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /could not confirm/i);
-  wrapper.deps.pointerOwner = async () => { throw Error('python3 missing'); };
+  wrapper.deps.guard = async () => { throw Error('python3 missing'); };
   await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /could not confirm/i);
   assert.equal(desk.desktopCalls('click').length, 0);
 });
@@ -502,9 +539,10 @@ test('the pointer check asks about the converted desktop point, immediately befo
   const a = desk.add(1);
   desk.focus(1);
   const asked = [];
-  wrapper.deps.pointerOwner = async (id, x, y) => { asked.push([id, x, y, desk.desktopCalls('click').length]); return true; };
+  const guard = wrapper.deps.guard;
+  wrapper.deps.guard = async (id, point) => { asked.push([id, point, desk.desktopCalls('click').length]); return guard(id, point); };
   await execute('click', {window: target(a), x: 10, y: 20});
-  assert.deepEqual(asked, [[1, 110, 100, 0]]);
+  assert.deepEqual(asked, [[1, {x: 110, y: 100}, 0]]);
 });
 
 test('a hung original call is bounded, stops the worker, and later queued input is refused and never interleaved', async () => {
@@ -596,4 +634,139 @@ test('untranslated requests do not start the X helper', async () => {
   delete process.env.LCU_LINUX_INPUT_TOOLKITS;
   await execute('scroll', {window: target(qt), direction: 'down', pixels: 10});
   assert.equal(desk.xresCalls, 1);
+});
+
+test('another client holding an active pointer grab refuses every pointer action and sends nothing', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.grab = 1; // a popup menu or a drag in progress: the window chain at the point is still the target
+  for (const [method, input] of [
+    ['click', {x: 10, y: 10}], ['click', {x: 10, y: 10, click_count: 2}], ['move', {x: 10, y: 10}],
+    ['scroll', {x: 10, y: 10, direction: 'down', pixels: 10}], ['drag', {path: [{x: 10, y: 10}, {x: 50, y: 50}]}],
+  ]) {
+    await assert.rejects(execute(method, {window: target(a), ...input}), /active pointer grab/i, method);
+  }
+  assert.equal(desk.desktopCalls('click', 'move', 'scroll', 'drag').length, 0);
+  // Keys are not pointer actions and do not ask about the grab; once the grab is gone the pointer works again.
+  await execute('press_key', {window: target(a), key: 'a'});
+  assert.equal(desk.typed.length, 1);
+  desk.grab = 0;
+  await execute('click', {window: target(a), x: 10, y: 10});
+  assert.equal(desk.desktopCalls('click').length, 1);
+});
+
+test('a frozen or undeterminable pointer grab state refuses the action', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  for (const grab of [4, 2, 3, null]) {
+    desk.grab = grab;
+    await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /pointer grab/i, String(grab));
+  }
+  desk.grab = 0;
+  desk.guardUnknown = true;
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /could not confirm/i);
+  await assert.rejects(execute('press_key', {window: target(a), key: 'a'}), /input state/i);
+  assert.equal(desk.desktopCalls('click', 'press_key').length, 0);
+});
+
+test('the time budget of a translated call follows from its input, with a hard cap', () => {
+  const budget = wrapper.translatedBudgetMs;
+  assert.equal(budget('click', {x: 1, y: 1}, 30_000), 30_000);
+  assert.equal(budget('move', {x: 1, y: 1}, 30_000), 30_000);
+  // 20 ms per point and 2 ms per pixel of path length, here 3 points over 100 px.
+  assert.equal(budget('drag', {path: [{x: 0, y: 0}, {x: 60, y: 0}, {x: 60, y: 40}]}, 30_000), 30_000 + 3 * 20 + 2 * 100);
+  assert.ok(budget('drag', {path: Array.from({length: 4000}, (_, i) => ({x: i % 300, y: 0}))}, 30_000) > 30_000 + 4000 * 20);
+  assert.equal(budget('drag', {path: Array.from({length: 100_000}, (_, i) => ({x: i, y: 0}))}, 30_000), 300_000);
+  assert.equal(budget('click', {duration: 2000, click_count: 3}, 30_000), 36_000);
+  assert.equal(budget('press_key', {key: 'a', duration: 5000}, 30_000), 35_000);
+  assert.equal(budget('press_key', {key: 'a', duration: 10_000_000}, 30_000), 300_000);
+  assert.equal(budget('drag', {path: [{x: 0, y: 0}, {x: 1, y: 1}]}, 600_000), 600_000, 'the cap never lowers the base bound');
+});
+
+test('a long translated drag that outlasts the base bound but not its budget succeeds and stops nothing', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1, {width: 300, height: 300});
+  desk.focus(1);
+  const path = Array.from({length: 4000}, (_, index) => ({x: index % 300, y: 10}));
+  let release;
+  desk.hangAfterPress = new Promise(resolve => { release = resolve; });
+  const dragging = execute('drag', {window: target(a), path});
+  await new Promise(resolve => setTimeout(resolve, 150)); // well past the 60 ms base bound
+  assert.deepEqual([...desk.buttonsDown], [1]);
+  release();
+  await dragging;
+  assert.equal(desk.restarts, 0);
+  assert.equal(desk.releases.length, 0);
+  assert.deepEqual([...desk.buttonsDown], []);
+  // The budget is not unlimited: a short drag hung after its press ends at its own, smaller budget.
+  desk.hangAfterPress = new Promise(() => {});
+  await assert.rejects(execute('drag', {window: target(a), path: [{x: 1, y: 1}, {x: 20, y: 1}]}), /did not answer/);
+});
+
+test('a drag that hangs after its button went down is released before the worker stops', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.hangAfterPress = new Promise(() => {});
+  await assert.rejects(execute('drag', {window: target(a), path: [{x: 10, y: 10}, {x: 40, y: 40}]}),
+    /did not answer "drag".*released the buttons and keys/);
+  assert.deepEqual([...desk.buttonsDown], [], 'Button1 must not stay pressed');
+  assert.deepEqual(desk.releases, [{buttons: [1], keys: []}]);
+  assert.equal(desk.restarts, 1);
+});
+
+test('a click on the right button that hangs releases that button only, and never what was pressed before', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.buttonsDown.add(1); // already down before the call (not this call's)
+  desk.keycodesDown.add(37); // a desktop-level key_down of an earlier request
+  desk.hangAfterPress = new Promise(() => {});
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10, mouse_button: 'right'}), /did not answer/);
+  assert.deepEqual(desk.releases, [{buttons: [3], keys: []}]);
+  assert.deepEqual([...desk.buttonsDown], [1]);
+  assert.deepEqual([...desk.keycodesDown], [37]);
+});
+
+test('a held key chord of a hung pointer action is released, an unrelated key is not', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.keycodesDown.add(133); // held earlier by someone else
+  desk.hangAfterPress = new Promise(() => {});
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10, key: 'Shift_L'}), /did not answer/);
+  assert.deepEqual(desk.releases, [{buttons: [1], keys: [50]}]);
+  assert.deepEqual([...desk.keycodesDown], [133]);
+});
+
+test('a key chord that hangs after its keys went down is released', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.hangAfterPress = new Promise(() => {});
+  await assert.rejects(execute('press_key', {window: target(a), key: 'shift+a'}), /did not answer/);
+  assert.deepEqual(desk.releases, [{buttons: [], keys: [50, 38]}]);
+  assert.deepEqual([...desk.keycodesDown], []);
+});
+
+test('a timeout before any translated input was sent releases nothing', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.add(2);
+  desk.focus(2);
+  desk.buttonsDown.add(1);
+  desk.hang = {method: 'activate_window', gate: new Promise(() => {})};
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /did not answer .*activate_window/);
+  assert.deepEqual(desk.releases, []);
+  assert.deepEqual([...desk.buttonsDown], [1]);
+});
+
+test('a translated call that fails by itself after its press releases what it pressed, without stopping the worker', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.failAfterPress = 'the engine failed';
+  await assert.rejects(execute('drag', {window: target(a), path: [{x: 10, y: 10}, {x: 40, y: 40}]}), /the engine failed/);
+  assert.equal(desk.restarts, 0);
+  assert.deepEqual(desk.releases, [{buttons: [1], keys: []}]);
+  assert.deepEqual([...desk.buttonsDown], []);
 });
