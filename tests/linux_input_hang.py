@@ -58,6 +58,8 @@ def alive(pid):
         return False
 
 
+# Earlier suites leave their last entry text behind; this fixture starts empty, so start from no file.
+(output / 'Gtk4Surface-entry.txt').unlink(missing_ok=True)
 support.start_fixture('gtk4_surface_fixture.py')
 session = support.Session(command, env={**os.environ, 'LCU_LINUX_INPUT_CALL_TIMEOUT_MS': str(LIMIT_MS)})
 try:
