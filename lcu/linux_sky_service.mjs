@@ -1,13 +1,17 @@
 // Forward the original Sky service unchanged, except for window-targeted input that the
-// original Linux engine delivers with XSendEvent to toolkits that ignore it (GTK 4: keys,
-// clicks, scroll, drag and pointer moves; Qt: scroll). For those windows only, the same
-// action is issued through the engine's own desktop-level call (XTEST) after the engine's
-// own activate_window, with window-relative coordinates converted to desktop coordinates.
-// No input is implemented here. Every other request, app, and any case this wrapper cannot
-// classify with confidence goes to the original service untouched. A translated request is
-// planned, focused, verified and sent inside one serialized queue; if the target cannot be
-// focused, the point is outside the target, or the target owns a modal dialog and the input is
-// a pointer action, the call fails with an explicit error and nothing is sent anywhere.
+// original Linux engine delivers with XSendEvent to toolkits that ignore it (GTK 4: press_key,
+// clicks, scroll, drag and pointer moves; Qt: scroll). For those windows only, the same action is
+// issued through the engine's own desktop-level call (XTEST) after the engine's own activate_window,
+// with window-relative coordinates converted to desktop coordinates. No input is implemented here,
+// and no key state is kept: key_down and key_up always go to the original service unchanged.
+// A window is translated only when the X server itself says which local process owns it (the
+// X-Resource extension, SO_PEERCRED on the server side) and that process is the one _NET_WM_PID
+// names, in this PID namespace; anything else is left to the original service. Every call that can
+// change focus or input state (translated or not: activate_window, desktop-level and window-targeted
+// input of any kind, pass-through fallbacks) runs through one queue, so nothing interleaves between a
+// translated request's final focus check and its input. Read-only calls bypass the queue. If the
+// target cannot be focused, the point is outside the target, or the target owns a modal dialog and
+// the input is a pointer action, a translated call fails with an explicit error and sends nothing.
 import {pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
 import {readFile, readlink} from 'node:fs/promises';
@@ -17,10 +21,52 @@ const TOOLKIT_TTL_MS = 10_000;
 const ACTIVATE_DEADLINE_MS = 1500;
 const ACTIVATE_POLL_MS = 40;
 const XPROP_TIMEOUT_MS = 3000;
+const XRES_TIMEOUT_MS = 3000;
 const DEFAULT_TOOLKITS = 'gtk4,qt-scroll';
 // Windows of these runtimes handle XSendEvent themselves even if they map a GTK 4 library
 // (Chromium and Electron mmap icudtl.dat; Firefox is libxul).
 const NOT_GTK4 = [/\/icudtl\.dat/, /\/libxul\.so/, /\/libffmpeg\.so/];
+
+// The local process the X server itself attributes to a window's client: XResQueryClientIds with
+// XRES_CLIENT_ID_PID_MASK (X-Resource 1.2) returns the SO_PEERCRED process id of the connection and
+// nothing for a client on another machine. Minimal ctypes use of libX11 and libXRes (Debian/Ubuntu
+// package libxres1); it prints one process id, or nothing, and every failure means "unknown".
+const XRES_PID_SCRIPT = `
+import ctypes, sys
+class Spec(ctypes.Structure):
+    _fields_ = [('client', ctypes.c_ulong), ('mask', ctypes.c_uint)]
+class Value(ctypes.Structure):
+    _fields_ = [('spec', Spec), ('length', ctypes.c_long), ('value', ctypes.c_void_p)]
+x11 = ctypes.CDLL('libX11.so.6')
+xres = ctypes.CDLL('libXRes.so.1')
+x11.XOpenDisplay.restype = ctypes.c_void_p
+x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+xres.XResQueryExtension.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+xres.XResQueryVersion.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+xres.XResQueryClientIds.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.POINTER(Spec),
+                                    ctypes.POINTER(ctypes.c_long), ctypes.POINTER(ctypes.POINTER(Value))]
+xres.XResGetClientPid.argtypes = [ctypes.POINTER(Value)]
+xres.XResGetClientPid.restype = ctypes.c_int
+xres.XResClientIdsDestroy.argtypes = [ctypes.c_long, ctypes.POINTER(Value)]
+display = x11.XOpenDisplay(None)
+if not display:
+    sys.exit(1)
+a, b = ctypes.c_int(), ctypes.c_int()
+if not xres.XResQueryExtension(display, ctypes.byref(a), ctypes.byref(b)):
+    sys.exit(1)
+if not xres.XResQueryVersion(display, ctypes.byref(a), ctypes.byref(b)) or (a.value, b.value) < (1, 2):
+    sys.exit(1)
+spec = Spec(int(sys.argv[1]), 1 << 1)
+count = ctypes.c_long()
+values = ctypes.POINTER(Value)()
+if xres.XResQueryClientIds(display, 1, ctypes.byref(spec), ctypes.byref(count), ctypes.byref(values)) != 0:  # Success is 0
+    sys.exit(1)
+pids = {xres.XResGetClientPid(ctypes.byref(values[i])) for i in range(count.value)}
+xres.XResClientIdsDestroy(count, values)
+pids.discard(-1)
+if len(pids) == 1:
+    print(pids.pop())
+`;
 
 // Replaceable by tests only.
 export const deps = {
@@ -32,17 +78,24 @@ export const deps = {
     execFile('xprop', args, {timeout: XPROP_TIMEOUT_MS, env: {...process.env, LC_ALL: 'C'}, maxBuffer: 1 << 16},
       (error, stdout) => error ? reject(error) : resolve(String(stdout)));
   }),
+  xresPid: windowId => new Promise(resolve => {
+    execFile('python3', ['-c', XRES_PID_SCRIPT, String(windowId)], {timeout: XRES_TIMEOUT_MS, maxBuffer: 1 << 12},
+      (error, stdout) => {
+        const pid = Number(String(stdout).trim());
+        resolve(!error && Number.isInteger(pid) && pid > 0 ? pid : null);
+      });
+  }),
 };
 
 let original;
 let queue = Promise.resolve();
 const toolkitByPid = new Map();
-// Translated key holds: the desktop key stays down while any (target, chord) owner holds it.
-let holds = [];
-const heldTokens = new Map();
 const PASS = Symbol('pass');
 
-const KEY_METHODS = new Set(['press_key', 'key_down', 'key_up']);
+// Atomic chords are translated; key_down and key_up never are (the original engine owns held keys).
+const KEY_METHODS = new Set(['press_key']);
+// Calls that neither move focus nor change input state; everything else (including unknown methods) is queued.
+const READ_ONLY_METHODS = new Set(['list_windows', 'list_apps', 'get_screenshot', 'get_window_state']);
 const POINTER_METHODS = new Set(['click', 'scroll', 'drag', 'move']);
 
 class Rejection extends Error {}
@@ -51,8 +104,6 @@ export function resetForTests() {
   original = undefined;
   queue = Promise.resolve();
   toolkitByPid.clear();
-  holds = [];
-  heldTokens.clear();
 }
 
 function enabledToolkits(env) {
@@ -115,8 +166,9 @@ async function processStart(pid) {
   }
 }
 
-// _NET_WM_PID is the client's PID on the client's machine (EWMH). It identifies a local process only
-// when this process shares the PID namespace, so a window from another namespace is never classified.
+// _NET_WM_PID is the client's own claim, in the client's PID namespace and on the client's machine (EWMH).
+// It identifies a local process only when the X server's record agrees (see classify) and this process
+// shares the process's PID namespace, so a window from another namespace is never classified.
 async function sharesPidNamespace(pid) {
   let theirs;
   try { theirs = await deps.readLink(`/proc/${pid}/ns/pid`); } catch { return false; }
@@ -143,10 +195,18 @@ async function detectToolkit(pid) {
   return toolkit;
 }
 
+// The toolkit is trusted only if the X server's own record of the window's client (a local process id
+// from SO_PEERCRED, absent for remote clients) equals _NET_WM_PID. Otherwise the window may belong to
+// a process in another PID namespace (Flatpak, containers) whose advertised id collides with an
+// unrelated local process, or to a remote client, and the request is left to the original service.
 async function classify(id) {
   const properties = await windowProperties(id);
   if (!properties.pid || !sameHost(properties.machine)) return {...properties, toolkit: null};
-  return {...properties, toolkit: await detectToolkit(properties.pid)};
+  const toolkit = await detectToolkit(properties.pid);
+  if (!toolkit) return {...properties, toolkit: null};
+  let authoritative = null;
+  try { authoritative = await deps.xresPid(id); } catch { /* unknown */ }
+  return {...properties, toolkit: authoritative === properties.pid ? toolkit : null};
 }
 
 function listWindows(service) {
@@ -228,42 +288,6 @@ async function modalChild(target, windows) {
   return found.find(window => window.focused) ?? found.at(-1) ?? null;
 }
 
-function chordTokens(key) {
-  const tokens = key.trim().toLowerCase() === '+' ? ['+'] : key.toLowerCase().split('+').map(item => item.trim()).filter(Boolean);
-  return tokens.length ? tokens : null;
-}
-
-function takeHold(targetId, tokens) {
-  const chord = tokens.join('+');
-  const index = holds.findIndex(hold => hold.targetId === targetId && hold.chord === chord);
-  if (index < 0) return null;
-  holds.splice(index, 1);
-  return chord;
-}
-
-function addOwners(tokens) {
-  const fresh = [];
-  for (const token of tokens) {
-    const count = heldTokens.get(token) ?? 0;
-    if (count === 0) fresh.push(token);
-    heldTokens.set(token, count + 1);
-  }
-  return fresh;
-}
-
-function dropOwners(tokens) {
-  const released = [];
-  for (const token of tokens) {
-    const count = (heldTokens.get(token) ?? 1) - 1;
-    if (count <= 0) { heldTokens.delete(token); released.push(token); } else heldTokens.set(token, count);
-  }
-  return released;
-}
-
-function keyForTokens(subset, tokens, original) {
-  return subset.length === tokens.length ? original : subset.join('+');
-}
-
 async function waitForFocus(service, id) {
   const deadline = Date.now() + ACTIVATE_DEADLINE_MS;
   for (;;) {
@@ -277,24 +301,13 @@ async function waitForFocus(service, id) {
   }
 }
 
-// Everything happens inside the serialized queue: the window list, the modal state and the focus are
-// read for this request only after every earlier translated request has finished.
+// Runs inside the serialized queue: the window list, the modal state and the focus are read for this
+// request only after every earlier queued call (translated or not) has finished.
 async function translate(service, request, env) {
   const {method} = request;
   const input = request.args[0];
   const target = input.window;
   const keyboard = KEY_METHODS.has(method);
-
-  if (method === 'key_up') {
-    // Release a translated hold at the desktop level, whatever happened to its window since.
-    const tokens = chordTokens(input.key);
-    const chord = tokens && takeHold(target.id, tokens);
-    if (!chord) return PASS;
-    const released = dropOwners(tokens);
-    if (!released.length) return null; // another owner still holds these keys
-    const {window: _window, ...rest} = input;
-    return service.handleRpc({type: 'execute', method, args: [{...rest, key: keyForTokens(released, tokens, input.key)}]});
-  }
 
   let plan;
   try {
@@ -337,20 +350,6 @@ async function translate(service, request, env) {
   const converted = desktopInput(method, input, current, points);
   if (outsideScreen(method, converted, screen)) return PASS; // an off-screen target keeps the original error
 
-  if (method === 'key_down') {
-    const tokens = chordTokens(input.key);
-    if (!tokens) return PASS;
-    const fresh = addOwners(tokens);
-    let result = null;
-    try {
-      if (fresh.length) result = await service.handleRpc({type: 'execute', method, args: [{...converted, key: keyForTokens(fresh, tokens, input.key)}]});
-    } catch (error) {
-      dropOwners(tokens);
-      throw error;
-    }
-    holds.push({targetId: target.id, chord: tokens.join('+')});
-    return result;
-  }
   return service.handleRpc({type: 'execute', method, args: [converted]});
 }
 
@@ -362,14 +361,25 @@ function candidate(request) {
   return !KEY_METHODS.has(request.method) || typeof input.key === 'string';
 }
 
+function readOnly(request) {
+  return request?.type === 'execute' && READ_ONLY_METHODS.has(request.method);
+}
+
 export async function handleRpc(request) {
   const env = globalThis.nodeRepl?.env ?? process.env;
   original ??= import(pathToFileURL(env.LCU_LINUX_SKY_SERVICE_PATH).href);
   const service = await original;
-  if (disabled(env) || !candidate(request)) return service.handleRpc(request);
-  // One translated action at a time: planning, activation, geometry and input must not interleave.
-  const run = queue.then(() => translate(service, request, env));
+  if (disabled(env) || readOnly(request)) return service.handleRpc(request);
+  // One input or focus-changing call at a time, translated or not: planning, activation, the final focus
+  // check and the input of a translated request must not interleave with any other such call, including
+  // activate_window, desktop-level input and the fallbacks below.
+  const run = queue.then(async () => {
+    if (candidate(request)) {
+      const result = await translate(service, request, env);
+      if (result !== PASS) return result;
+    }
+    return service.handleRpc(request);
+  });
   queue = run.catch(() => {});
-  const result = await run;
-  return result === PASS ? service.handleRpc(request) : result;
+  return run;
 }

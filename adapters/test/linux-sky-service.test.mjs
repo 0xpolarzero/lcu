@@ -1,6 +1,7 @@
 // In-memory regression tests for lcu/linux_sky_service.mjs. A fake desktop stands in for the original Sky
-// service (window list, focus, desktop-level input with a held-key model) and for xprop and /proc, so
-// every decision of the wrapper is observable without an X server. Desktop behavior is covered by
+// service (window list, focus, desktop-level input with the original engine's chord semantics: a chord
+// presses its keys in order and releases all of them, held or not) and for xprop, the X server's
+// X-Resource record and /proc, so every decision of the wrapper is observable without an X server. Desktop behavior is covered by
 // tests/gtk4_input.py and tests/linux_input_controls.py.
 import assert from 'node:assert/strict';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
@@ -15,6 +16,7 @@ const QT_MAPS = '7f00 r-xp /usr/lib/x86_64-linux-gnu/libQt6Core.so.6\n';
 const PLAIN_MAPS = '7f00 r-xp /usr/lib/x86_64-linux-gnu/libc.so.6\n';
 const HOST = 'lcu-test-host';
 const sleepOnly = () => Promise.resolve();
+const canonicalKey = key => key.toLowerCase().replace(/_[lr]$/, '');
 
 let directory;
 let desk;
@@ -29,6 +31,7 @@ class Desktop {
     this.down = new Set();
     this.activations = 0;
     this.afterActivate = null;
+    this.activateGate = null;
     this.listsAfterActivate = 0;
     this.stealAfterFirstList = null;
     this.hostname = HOST;
@@ -69,16 +72,22 @@ class Desktop {
     if (method === 'activate_window') {
       this.activations += 1;
       await new Promise(resolve => setImmediate(resolve)); // activation takes a moment under a real WM
+      if (this.activateGate) await this.activateGate;
       this.focus(input.window.id);
       if (this.afterActivate) this.afterActivate(input.window.id);
       return null;
     }
     if (input.window) return {targeted: true};
-    if (method === 'key_down') { for (const key of input.key.split('+')) this.down.add(key.toLowerCase()); }
-    else if (method === 'key_up') { for (const key of input.key.split('+')) this.down.delete(key.toLowerCase()); }
+    // Desktop-level input, as the original engine does it (XTEST): key_down presses every key of the chord
+    // and keeps them down, key_up releases them, press_key presses and then releases every key of the chord.
+    const keys = typeof input.key === 'string' ? input.key.split('+').map(canonicalKey) : [];
+    if (method === 'key_down') { for (const key of keys) this.down.add(key); }
+    else if (method === 'key_up') { for (const key of keys) this.down.delete(key); }
     else if (method === 'press_key') {
-      const upper = this.down.has('shift') || this.down.has('shift_l');
-      this.typed.push({key: upper ? input.key.toUpperCase() : input.key, windowId: this.focusedId()});
+      const base = keys.at(-1);
+      const shifted = this.down.has('shift') || keys.slice(0, -1).includes('shift');
+      this.typed.push({key: shifted ? base.toUpperCase() : base, windowId: this.focusedId()});
+      for (const key of keys) this.down.delete(key);
     }
     return {desktop: true};
   }
@@ -109,6 +118,11 @@ function installDeps() {
     const machine = window.machine === undefined ? HOST : window.machine;
     lines.push(machine === null ? 'WM_CLIENT_MACHINE:  not found.' : `WM_CLIENT_MACHINE(STRING) = "${machine}"`);
     return lines.join('\n') + '\n';
+  };
+  wrapper.deps.xresPid = async id => {
+    const window = desk.windows.find(candidate => candidate.id === id);
+    if (!window) return null;
+    return window.xresPid === undefined ? (window.pid ?? id) : window.xresPid;
   };
   wrapper.deps.readFile = async path => {
     const match = /^\/proc\/(\d+)\/(maps|stat)$/.exec(path);
@@ -173,76 +187,93 @@ test('focus that moves away before the input is sent rejects the call and sends 
   assert.equal(desk.desktopCalls('press_key').length, 0);
 });
 
-test('translated key holds are released at the desktop even after the target closes', async () => {
+test('key_down and key_up always go to the original service unchanged, with no activation or desktop call', async () => {
   const a = desk.add(1);
-  desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'shift'});
-  assert.ok(desk.down.has('shift'));
-  desk.windows = []; // the target closed
-  await execute('key_up', {window: target(a), key: 'shift'});
-  assert.equal(desk.down.size, 0, 'the desktop hold was left active');
-  assert.equal(desk.targetedCalls().length, 0, 'the release must not become a window-targeted no-op');
   const b = desk.add(2);
   desk.focus(2);
-  await execute('press_key', {window: target(b), key: 'k'});
-  assert.deepEqual(desk.typed, [{key: 'k', windowId: 2}], 'a later key came out shifted');
-});
-
-test('a hold released for a minimized target still releases the desktop key', async () => {
-  const a = desk.add(1);
-  desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'ctrl'});
-  a.hidden = true;
-  await execute('key_up', {window: target(a), key: 'ctrl'});
+  for (const method of ['key_down', 'key_up']) {
+    for (const key of ['shift', 'Shift_L', 'ctrl+shift']) {
+      await execute(method, {window: target(a), key});
+    }
+  }
+  assert.equal(desk.activations, 0);
+  assert.equal(desk.desktopCalls('key_down', 'key_up').length, 0);
+  const targeted = desk.targetedCalls();
+  assert.deepEqual(targeted.map(call => [call.method, call.args[0].key]),
+    [['key_down', 'shift'], ['key_down', 'Shift_L'], ['key_down', 'ctrl+shift'],
+      ['key_up', 'shift'], ['key_up', 'Shift_L'], ['key_up', 'ctrl+shift']]);
+  assert.equal(desk.focusedId(), b.id);
   assert.equal(desk.down.size, 0);
 });
 
-test('overlapping holds of the same key keep the desktop key down until the last owner releases', async () => {
+test('a translated chord is handed to the original engine whole, so its own modifier release applies', async () => {
   const a = desk.add(1);
-  const b = desk.add(2);
   desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'Shift'});
-  await execute('key_down', {window: target(b), key: 'shift'});
-  await execute('key_up', {window: target(a), key: 'shift'});
-  assert.ok(desk.down.has('shift'), "A's release dropped B's hold");
-  await execute('press_key', {window: target(b), key: 'k'});
-  assert.equal(desk.typed.at(-1).key, 'K');
-  await execute('key_up', {window: target(b), key: 'Shift'});
+  await execute('press_key', {window: target(a), key: 'ctrl+shift+a'});
+  assert.deepEqual(desk.desktopCalls('press_key')[0].args[0], {key: 'ctrl+shift+a'});
+  assert.deepEqual(desk.typed, [{key: 'A', windowId: 1}]);
+  assert.equal(desk.down.size, 0, 'the engine releases every key of a complete chord');
+  // Desktop-level holds belong to the engine: a later chord containing the held modifier ends it.
+  await desk.handleRpc({type: 'execute', method: 'key_down', args: [{key: 'shift'}]});
+  await execute('press_key', {window: target(a), key: 'shift+k'});
   assert.equal(desk.down.size, 0);
 });
 
-test('a duplicate hold by the same target needs both releases', async () => {
-  const a = desk.add(1);
-  desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'shift'});
-  await execute('key_down', {window: target(a), key: 'shift'});
-  await execute('key_up', {window: target(a), key: 'shift'});
-  assert.ok(desk.down.has('shift'));
-  await execute('key_up', {window: target(a), key: 'shift'});
-  assert.equal(desk.down.size, 0);
-});
-
-test('a release that matches no translated hold never reaches the desktop level', async () => {
+test('activate_window racing a translated key never moves the key to the other window', async () => {
   const a = desk.add(1);
   const b = desk.add(2);
-  desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'shift'});
-  await execute('key_up', {window: target(b), key: 'shift'});
-  assert.ok(desk.down.has('shift'), "B never held shift; its release must not drop A's hold");
-  await execute('key_up', {window: target(a), key: 'shift'});
-  assert.equal(desk.down.size, 0);
+  desk.add(3);
+  desk.focus(3);
+  const activateB = () => wrapper.handleRpc({type: 'execute', method: 'activate_window', args: [{window: target(b)}]});
+  // The key is issued first: it must be typed into A before B is activated.
+  await Promise.all([execute('press_key', {window: target(a), key: 'a'}), activateB()]);
+  assert.deepEqual(desk.typed, [{key: 'a', windowId: 1}]);
+  assert.equal(desk.focusedId(), 2);
+  // The activation is issued first: A is then activated again for its own key.
+  await Promise.all([activateB(), execute('press_key', {window: target(a), key: 'z'})]);
+  assert.deepEqual(desk.typed.at(-1), {key: 'z', windowId: 1});
+  assert.equal(desk.focusedId(), 1);
 });
 
-test('chords share modifiers by owner', async () => {
+test('no original call interleaves between a translated request and its input, including pass-through calls', async () => {
   const a = desk.add(1);
-  const b = desk.add(2);
-  desk.focus(1);
-  await execute('key_down', {window: target(a), key: 'ctrl+shift'});
-  await execute('key_down', {window: target(b), key: 'shift'});
-  await execute('key_up', {window: target(a), key: 'ctrl+shift'});
-  assert.deepEqual([...desk.down], ['shift']);
-  await execute('key_up', {window: target(b), key: 'shift'});
-  assert.equal(desk.down.size, 0);
+  const plain = desk.add(2);
+  desk.procs.get(2).maps = PLAIN_MAPS; // not GTK 4: its window-targeted key falls back to the original service
+  desk.add(3);
+  desk.focus(3);
+  let release;
+  desk.activateGate = new Promise(resolve => { release = resolve; });
+  const calls = [
+    execute('press_key', {window: target(a), key: 'a'}),
+    execute('press_key', {window: target(plain), key: 'p'}),
+    wrapper.handleRpc({type: 'execute', method: 'press_key', args: [{key: 'd'}]}),
+    wrapper.handleRpc({type: 'execute', method: 'type_text', args: [{text: 'x'}]}),
+  ];
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(desk.calls.every(call => call.method !== 'type_text' && !call.args?.[0]?.window?.title?.startsWith('w2')),
+    'a later call ran during the activation');
+  release();
+  await Promise.all(calls);
+  const names = desk.calls.filter(call => call.method !== 'list_windows').map(call =>
+    `${call.method}${call.args?.[0]?.window && call.method !== 'activate_window' ? ':targeted' : ''}`);
+  assert.deepEqual(names, ['activate_window', 'press_key', 'press_key:targeted', 'press_key', 'type_text']);
+  assert.deepEqual(desk.typed.map(item => [item.key, item.windowId]), [['a', 1], ['d', 1]]);
+});
+
+test('read-only calls are not held up by queued input', async () => {
+  const a = desk.add(1);
+  desk.add(2);
+  desk.focus(2);
+  let release;
+  desk.activateGate = new Promise(resolve => { release = resolve; });
+  const key = execute('press_key', {window: target(a), key: 'a'});
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const listed = await wrapper.handleRpc({type: 'execute', method: 'list_windows', args: []});
+  assert.equal(listed.length, 2);
+  assert.deepEqual(desk.typed, []);
+  release();
+  await key;
+  assert.deepEqual(desk.typed, [{key: 'a', windowId: 1}]);
 });
 
 test('points outside the target window are rejected instead of clicking another application', async () => {
@@ -341,6 +372,55 @@ test('windows owned by another machine, PID namespace or without a client machin
   const local = desk.add(5, {machine: HOST.toUpperCase()});
   await execute('press_key', {window: target(local), key: 'z'});
   assert.equal(desk.typed.length, 1, 'a window of this machine, in any case, is still translated');
+});
+
+test('a normal local GTK 4 client whose X-Resource record matches _NET_WM_PID is translated', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  await execute('press_key', {window: target(a), key: 'a'});
+  assert.deepEqual(desk.typed, [{key: 'a', windowId: 1}]);
+});
+
+test('a Flatpak-like client in another PID namespace whose advertised id collides with a local GTK 4 process is not translated', async () => {
+  // Window 1 is the foreign client: it advertises _NET_WM_PID 500 (an id of its own namespace) and the X
+  // server saw the real process 7777. Process 500 is an unrelated local GTK 4 program in our namespace.
+  const foreign = desk.add(1, {pid: 500, xresPid: 7777});
+  desk.focus(1);
+  await execute('press_key', {window: target(foreign), key: 'a'});
+  await execute('click', {window: target(foreign), x: 5, y: 5});
+  assert.equal(desk.typed.length, 0);
+  assert.equal(desk.desktopCalls('press_key', 'click').length, 0);
+  assert.equal(desk.targetedCalls().length, 2, 'both calls reach the original service unchanged');
+  assert.equal(desk.activations, 0);
+});
+
+test('a remote client has no X-Resource process id and is not translated, whatever it claims', async () => {
+  const remote = desk.add(1, {xresPid: null}); // claims this host and a local GTK 4 pid
+  desk.focus(1);
+  await execute('press_key', {window: target(remote), key: 'a'});
+  assert.equal(desk.typed.length, 0);
+  assert.equal(desk.targetedCalls().length, 1);
+});
+
+test('an unavailable X-Resource extension or a disagreeing process id fails closed', async () => {
+  const a = desk.add(1);
+  const b = desk.add(2, {xresPid: 4242});
+  desk.focus(1);
+  wrapper.deps.xresPid = async () => { throw Error('python3 missing'); };
+  await execute('press_key', {window: target(a), key: 'a'});
+  wrapper.deps.xresPid = async id => (id === 2 ? 4242 : null);
+  await execute('press_key', {window: target(a), key: 'b'});
+  await execute('press_key', {window: target(b), key: 'c'});
+  assert.equal(desk.typed.length, 0);
+  assert.equal(desk.targetedCalls().length, 3);
+});
+
+test('a matching X-Resource id does not override a different PID namespace', async () => {
+  const a = desk.add(1);
+  desk.procs.get(1).ns = 'pid:[4026532999]';
+  desk.focus(1);
+  await execute('press_key', {window: target(a), key: 'a'});
+  assert.equal(desk.typed.length, 0);
 });
 
 test('Qt is translated for scroll only', async () => {

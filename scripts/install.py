@@ -30,7 +30,7 @@ SYSTEM_PACKAGES = (
     'libtss2-mu-4.0.1-0t64', 'libtss2-tcti-device0t64', 'libudev1', 'libusb-1.0-0',
     'libx11-6', 'libx11-xcb1', 'libxcb-dri3-0', 'libxcb1', 'libxcomposite1',
     'libxdamage1', 'libxext6', 'libxfixes3', 'libxi6', 'libxkbcommon0', 'libxrandr2',
-    'libxtst6', 'mesa-vulkan-drivers', 'pulseaudio', 'pulseaudio-utils', 'python3',
+    'libxres1', 'libxtst6', 'mesa-vulkan-drivers', 'pulseaudio', 'pulseaudio-utils', 'python3',
     'x11-utils', 'xdg-utils', 'xz-utils',
 )
 

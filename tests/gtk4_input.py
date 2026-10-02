@@ -6,7 +6,7 @@ so a GTK 4 window never sees them. Desktop-level input (no `window`) uses the X 
 reaches GTK 4 normally, as xdotool does. AT-SPI actions and (in recent engines) `typeText` use neither path.
 This test pins the desktop-level paths, then proves that LCU's Linux input translation
 (lcu/linux_sky_service.mjs) makes the window-targeted calls work for GTK 4: keys, coordinate click, scroll,
-drag, a modal dialog, and that `LCU_LINUX_INPUT_TRANSLATION=off` restores the original behavior.
+drag, a modal dialog, that concurrent calls cannot interleave, and that `LCU_LINUX_INPUT_TRANSLATION=off` restores the original behavior.
 The oracles are files the independent fixtures write, never a call's success.
 """
 import json
@@ -58,16 +58,54 @@ def window_targeted(command):
         assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == ''), support.read('Gtk4Surface-entry.txt')
         session.run('await app.pressKey("y");')
         assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'y')
-        # key_down/key_up pair (engines from CUA 0.0.27 on): a held shift types a capital.
+        session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "shift+k"});')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yK'), support.read('Gtk4Surface-entry.txt')
+        # key_down/key_up (engines from CUA 0.0.27 on) are never translated: they reach the original engine
+        # unchanged, which delivers them with XSendEvent, so GTK 4 ignores the hold, nothing is focused or left
+        # held at the desktop, and the next key is not shifted.
         if session.run('nodeRepl.write(typeof sky.key_down === "function" ? "yes" : "no");') == 'yes':
+            session.activate('LCU GTK4 Entry')
             session.run('await sky.key_down({window: await byTitle("LCU GTK4 Surface"), key: "shift"});'
                         'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "k"});'
                         'await sky.key_up({window: await byTitle("LCU GTK4 Surface"), key: "shift"});')
-            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yK'), support.read('Gtk4Surface-entry.txt')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yKk'), support.read('Gtk4Surface-entry.txt')
+            session.run('await sky.press_key({key: "j"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yKkj'), support.read('Gtk4Surface-entry.txt')
+            session.run('await sky.press_key({key: "ctrl+a"}); await sky.press_key({key: "BackSpace"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
         else:
-            print('INFO: this engine has no key_down/key_up; hold translation not exercised', flush=True)
-            session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "shift+k"});')
-            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'yK'), support.read('Gtk4Surface-entry.txt')
+            print('INFO: this engine has no key_down/key_up; pass-through not exercised', flush=True)
+            session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "ctrl+a"});'
+                        'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "BackSpace"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
+
+        # Serialization: a translated key to the Surface racing activate_window of another window, in both orders; the
+        # Entry window (the other contender) must never receive the Surface's key. Then a desktop-level key (an
+        # untranslated call) issued together with a translated one must come after it, in the same window.
+        entry_before = entry_text()
+        for order in range(4):
+            session.activate('LCU GTK4 Entry')
+            calls = ['sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "r"})',
+                     'sky.activate_window({window: await byTitle("LCU GTK4 Entry")})']
+            if order % 2:
+                calls.reverse()
+            session.run(f'await Promise.all([{",".join(calls)}]);')
+            time.sleep(0.3)
+            assert entry_text() == entry_before, ('a key reached the Entry window', order, entry_text())
+            session.activate('LCU GTK4 Surface')
+            session.run('await sky.press_key({key: "ctrl+a"}); await sky.press_key({key: "BackSpace"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
+        session.activate('LCU GTK4 Entry')
+        session.run('await Promise.all([sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "q"}),'
+                    'sky.press_key({key: "w"})]);')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'qw'), \
+            ('the desktop-level key overtook the translated key', support.read('Gtk4Surface-entry.txt'), entry_text())
+        assert entry_text() == entry_before
+        session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "ctrl+a"});'
+                    'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "BackSpace"});')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
+        session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "y"});')
+        assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == 'y')
 
         # Coordinate click on another, unfocused window: window-relative coordinates.
         session.activate('LCU GTK4 Surface')
@@ -104,23 +142,6 @@ def window_targeted(command):
                               ' catch (error) { nodeRepl.write("error: " + error.message); }')
         assert refused.startswith('error: ') and 'modal' in refused, refused
         assert session.focused_id() == modal['id']
-        if session.run('nodeRepl.write(typeof sky.key_down === "function" ? "yes" : "no");') == 'yes':
-            # A translated hold taken on the dialog is released at the desktop level after the dialog closed.
-            session.run('globalThis.dialog = await byTitle("LCU GTK4 Modal");'
-                        'await sky.key_down({window: dialog, key: "shift"});')
-            (support.output / 'Gtk4Surface-close-modal').write_text('1')
-            assert support.settle(lambda: all(w.get('title') != 'LCU GTK4 Modal' for w in session.windows()))
-            session.run('await sky.key_up({window: dialog, key: "shift"});')
-            session.activate('LCU GTK4 Surface')
-            before = support.read('Gtk4Surface-entry.txt')
-            session.run('await sky.press_key({key: "k"});')
-            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == before + 'k'), \
-                ('a hold on a closed window was left active', before, support.read('Gtk4Surface-entry.txt'))
-            session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "ctrl+a"});'
-                        'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "BackSpace"});')
-            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
-            (support.output / 'Gtk4Surface-open-modal').write_text('1')
-            session.window('LCU GTK4 Modal')
         (support.output / 'Gtk4Surface-close-modal').write_text('1')
         assert support.settle(lambda: all(w.get('title') != 'LCU GTK4 Modal' for w in session.windows()))
         session.activate('LCU GTK4 Entry')
