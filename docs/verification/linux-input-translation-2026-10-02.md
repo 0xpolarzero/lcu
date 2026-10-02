@@ -36,3 +36,17 @@ Not measured: fractional scaling, other window managers or compositing, real Goo
 `tests/gtk4_input.py` and `tests/gtk4_surface_fixture.py` (GTK 4: keys, chords, held modifier, click on an unfocused window, scroll offset, drag displacement, a modal dialog, a missing window, `LCU_LINUX_INPUT_TRANSLATION=off`), `tests/linux_input_controls.py` with `tests/qt_fixture.py` (GTK 3 click, a core-event X11 window, Qt keys and click, a Chromium-like process, Qt scroll translated and untranslated with the opt-out control; the focused window stays the same wherever the original path is kept) and `tests/adapter_paths.py` (GTK 4 window-targeted keys and click through the bare client, Codex relay, Claude relay, the Pi/Oh My Pi shared client and the Hermes bridge). `tests/codex_mcp_env.py` records that Codex CLI 0.159.1 drops an LCU variable from its own environment and passes one set under `[mcp_servers.lcu.env]`, directly and behind the relay.
 
 Gate results are in the [0.8.3 release notes](../releases/0.8.3.md).
+
+## 0.8.4: review findings fixed
+
+A review of 0.8.3 found seven defects in the translation. The service-level ones were reproduced before the fix with an in-memory fake desktop (`adapters/test/linux-sky-service.test.mjs`: window list and focus, desktop-level input with a held-key model, `xprop` and `/proc`), which failed 14 of 19 cases against the 0.8.3 logic:
+
+1. Planning ran before serialization on a stale focus snapshot: concurrent requests to B then A activated B and then sent A's key to B. Planning, activation and verification now all run inside the queue, the focus is verified immediately before sending, and a mismatch is an error.
+2. Translated holds lost their release routing: after the target closed or minimized, `key_up` became a window-targeted no-op and the desktop key stayed down, and `down(A,shift) down(B,shift) up(A,shift)` released B's. Holds are tracked per (target, chord) with per-key owner counts and always released at the desktop level; the effect oracle is a later desktop `k` typed in lowercase.
+3. A stale point could click another application: the start point of pointer actions is validated against the target's current client rectangle.
+4. Modal redirection kept the parent's geometry: it is now keyboard only, and pointer input to such a parent is an error naming the dialog.
+5. A caller-supplied `NODE_REPL_TRUSTED_SERVICES` (`{}` or custom-only) received an added `sky` entry: supplied maps are now kept verbatim unless they name the original Sky service.
+6. The toolkit cache survived PID reuse: it is keyed by (PID, `/proc/<pid>/stat` start time) and revalidated.
+7. `_NET_WM_PID` of a window from another machine or PID namespace was trusted: `WM_CLIENT_MACHINE` must equal the local host name and `/proc/<pid>/ns/pid` must equal LCU's own, otherwise the request is untouched.
+
+The desktop suites gained a hold released after its window closed (the stuck-shift effect oracle), refused pointer input to a modal parent and an out-of-bounds click refusal. Gate results are in the [0.8.4 release notes](../releases/0.8.4.md).

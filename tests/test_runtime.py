@@ -187,6 +187,25 @@ class UpstreamRuntimeTests(unittest.TestCase):
         self.assertEqual(env['NODE_REPL_TRUSTED_SERVICES'], supplied)
         self.assertNotIn('LCU_LINUX_SKY_SERVICE_PATH', env)
 
+    def test_caller_supplied_service_maps_are_preserved_verbatim(self):
+        self.install_linux_input_wrapper()
+        for supplied in ('{}', '{"custom": "/custom/service.mjs"}', '{"browser": "@oai/browser-desktop/service"}',
+                         '{"sky": "/custom/sky.mjs", "other": "x"}', '[]', 'not json'):
+            with self.subTest(supplied=supplied), patch.dict(
+                    os.environ, {'NODE_REPL_TRUSTED_SERVICES': supplied}, clear=True):
+                env = environment(self.root)
+            self.assertEqual(env['NODE_REPL_TRUSTED_SERVICES'], supplied)
+            self.assertNotIn('LCU_LINUX_SKY_SERVICE_PATH', env)
+
+    def test_an_explicit_original_sky_entry_is_replaced_and_other_entries_survive(self):
+        self.install_linux_input_wrapper()
+        supplied = json.dumps({'sky': '@oai/sky/service', 'other': '/custom/service.mjs'})
+        with patch.dict(os.environ, {'NODE_REPL_TRUSTED_SERVICES': supplied}, clear=True):
+            env = environment(self.root)
+        self.assertEqual(json.loads(env['NODE_REPL_TRUSTED_SERVICES']),
+                         {'sky': str(self.root / 'lcu/linux_sky_service.mjs'), 'other': '/custom/service.mjs'})
+        self.assertIn('LCU_LINUX_SKY_SERVICE_PATH', env)
+
     def test_a_tested_pair_that_handles_a_toolkit_natively_is_not_translated_for_it(self):
         self.install_linux_input_wrapper(self.pair_entry(native_input=['gtk4']))
         with patch.dict(os.environ, {}, clear=True):

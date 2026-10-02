@@ -98,9 +98,39 @@ def window_targeted(command):
         assert support.settle(lambda: support.read('Gtk4Surface-modal-entry.txt') == 'm'), support.read('Gtk4Surface-modal-entry.txt')
         assert support.read('Gtk4Surface-entry.txt') == before, 'the parent received a key meant for the modal dialog'
         assert session.focused_id() == modal['id']
+        # Pointer input to the parent of a modal dialog is refused (the parent's coordinates do not describe the
+        # dialog); the dialog itself can still be targeted explicitly.
+        refused = session.run('try { await sky.click({window: await byTitle("LCU GTK4 Surface"), x: 40, y: 40}); nodeRepl.write("no error"); }'
+                              ' catch (error) { nodeRepl.write("error: " + error.message); }')
+        assert refused.startswith('error: ') and 'modal' in refused, refused
+        assert session.focused_id() == modal['id']
+        if session.run('nodeRepl.write(typeof sky.key_down === "function" ? "yes" : "no");') == 'yes':
+            # A translated hold taken on the dialog is released at the desktop level after the dialog closed.
+            session.run('globalThis.dialog = await byTitle("LCU GTK4 Modal");'
+                        'await sky.key_down({window: dialog, key: "shift"});')
+            (support.output / 'Gtk4Surface-close-modal').write_text('1')
+            assert support.settle(lambda: all(w.get('title') != 'LCU GTK4 Modal' for w in session.windows()))
+            session.run('await sky.key_up({window: dialog, key: "shift"});')
+            session.activate('LCU GTK4 Surface')
+            before = support.read('Gtk4Surface-entry.txt')
+            session.run('await sky.press_key({key: "k"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == before + 'k'), \
+                ('a hold on a closed window was left active', before, support.read('Gtk4Surface-entry.txt'))
+            session.run('await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "ctrl+a"});'
+                        'await sky.press_key({window: await byTitle("LCU GTK4 Surface"), key: "BackSpace"});')
+            assert support.settle(lambda: support.read('Gtk4Surface-entry.txt') == '')
+            (support.output / 'Gtk4Surface-open-modal').write_text('1')
+            session.window('LCU GTK4 Modal')
         (support.output / 'Gtk4Surface-close-modal').write_text('1')
         assert support.settle(lambda: all(w.get('title') != 'LCU GTK4 Modal' for w in session.windows()))
         session.activate('LCU GTK4 Entry')
+
+        # A point outside the target window's client rectangle is refused instead of clicking whatever is there.
+        outside = session.run('try { await sky.click({window: await byTitle("LCU GTK4 Button"), x: 5000, y: 5000}); nodeRepl.write("no error"); }'
+                              ' catch (error) { nodeRepl.write("error: " + error.message); }')
+        assert outside.startswith('error: ') and 'outside' in outside, outside
+        assert not (support.output / 'Gtk4-click').exists()
+        assert session.focused_id() == entry_window['id'], 'a refused click must not change focus'
 
         # A window that is not listed keeps the engine's own error; nothing is sent to the desktop.
         error = session.run('try { await sky.press_key({window: {app: "x11:1", id: 1, title: "gone", x: 0, y: 0, width: 5, height: 5, focused: false, modal: false, window_type: "normal"}, key: "q"}); nodeRepl.write("no error"); } catch (error) { nodeRepl.write("error: " + error.message); }')

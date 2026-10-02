@@ -207,10 +207,20 @@ def _configure_linux_input(root, runtime, env, metadata):
         pass
     if not toolkits:
         return
+    # The original launcher keeps a caller-supplied service map verbatim. Wrap Sky only when no map is
+    # supplied, or when the caller's map names the original Sky service explicitly (or already this wrapper).
+    raw_services = env.get('NODE_REPL_TRUSTED_SERVICES')
+    if raw_services is not None:
+        try:
+            supplied = json.loads(raw_services)
+        except ValueError:
+            return
+        if not isinstance(supplied, dict) or supplied.get('sky') not in ('@oai/sky/service', str(wrapper)):
+            return  # an empty, custom-only or custom-Sky map is the caller's and stays exactly as given
     try:
         _override_trusted_service(env, wrapper, os.pathsep, 'Linux', computer_gated=True)
     except ValueError:
-        return  # a caller-supplied Sky service takes precedence over this optional wrapper
+        return
     env['LCU_LINUX_SKY_SERVICE_PATH'] = str(service)
     env['LCU_LINUX_INPUT_TOOLKITS'] = ','.join(toolkits)
 
