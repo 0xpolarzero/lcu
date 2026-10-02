@@ -1,14 +1,14 @@
 """A translated drag has a time budget that follows its path, and a timed-out one leaves nothing pressed.
 
-LCU bounds every original call (LCU_LINUX_INPUT_CALL_TIMEOUT_MS, here 3 s). A translated drag adds 20 ms per
+LCU bounds every original call (LCU_LINUX_INPUT_CALL_TIMEOUT_MS, here 2 s). A translated drag adds 20 ms per
 path point and 2 ms per pixel of path length to that bound, so a long valid drag is not killed halfway; and when
 a translated call does time out after it pressed Button1 (or a held modifier), LCU releases what the call itself
 pressed with XTEST before it stops the worker, so a later pointer motion cannot continue the drag.
 
-1. A 500-point drag takes about 5 s with the original engine (about 10 ms per point), longer than the 3 s base
+1. An 800-point drag takes 3.5 to 8 s with the original engine (4 to 10 ms per point, by host), longer than the 2 s base
    bound, and must complete with its release delivered (the fixture's drag-end) and the same engine process.
 2. A 60-point drag with a held Shift is started; the real engine process is stopped (SIGSTOP) as soon as the X
-   server reports Button1 pressed. The call times out at its budget (about 4.3 s). The X server must then report
+   server reports Button1 pressed. The call times out at its budget (about 3.3 s). The X server must then report
    no pointer button and no Shift pressed, the drag area must have received the release (drag-end), and the engine
    must be replaced. The oracles are the X server's own input state and the fixture's files.
 """
@@ -23,7 +23,7 @@ import linux_input_support as support
 
 command = sys.argv[1:] or ['/opt/lcu/current/bin/lcu']
 output = Path(os.environ['LCU_TEST_OUTPUT'])
-BASE_MS = 3000
+BASE_MS = 2000
 SHIFT = 50  # the X key code of Shift_L on a standard keyboard map
 
 
@@ -45,14 +45,14 @@ try:
     assert engine, 'no original engine process was found under this session'
 
     started = time.monotonic()
-    result = session.run(drag_call(500))
+    result = session.run(drag_call(800))
     waited = time.monotonic() - started
     assert result == 'no error', result
     assert waited > BASE_MS / 1000, f'the drag finished within the base bound ({waited:.1f} s); the engine got faster, lengthen it'
     assert support.settle(lambda: support.read('Gtk4Surface-drag.txt') is not None), 'the drag was not delivered'
     assert support.buttons_down() == [], support.buttons_down()
     assert support.engines(root) == engine, 'a successful long drag must not replace the engine'
-    print(f'INFO: a 500-point drag took {waited:.1f} s against a {BASE_MS / 1000:.0f} s base bound and completed', flush=True)
+    print(f'INFO: a 800-point drag took {waited:.1f} s against a {BASE_MS / 1000:.0f} s base bound and completed', flush=True)
 
     # Hang the engine after the press.
     (output / 'Gtk4Surface-drag.txt').unlink()
