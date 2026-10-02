@@ -6,12 +6,18 @@
 // and no key state is kept: key_down and key_up always go to the original service unchanged.
 // A window is translated only when the X server itself says which local process owns it (the
 // X-Resource extension, SO_PEERCRED on the server side) and that process is the one _NET_WM_PID
-// names, in this PID namespace; anything else is left to the original service. Every call that can
+// names, in this PID namespace; anything else is left to the original service. That identity is
+// trusted only after the same helper connection proved that the X server shares this PID namespace
+// (the server's record of the helper's own client equals the helper's getpid()). Every call that can
 // change focus or input state (translated or not: activate_window, desktop-level and window-targeted
 // input of any kind, pass-through fallbacks) runs through one queue, so nothing interleaves between a
-// translated request's final focus check and its input. Read-only calls bypass the queue. If the
-// target cannot be focused, the point is outside the target, or the target owns a modal dialog and
-// the input is a pointer action, a translated call fails with an explicit error and sends nothing.
+// translated request's final focus check and its input. Read-only calls bypass the queue. Each
+// original call made from the queue is bounded; on a timeout the trusted worker (and with it the
+// original engine process) is stopped so a late call cannot deliver input, and the call fails. If the
+// target cannot be focused, the point is outside the target, the X server reports another window
+// (a notification, a tooltip, an override-redirect popup) under a desktop-level pointer action's
+// first point, or the target owns a modal dialog and the input is a pointer action, a translated call
+// fails with an explicit error and sends nothing.
 import {pathToFileURL} from 'node:url';
 import {execFile} from 'node:child_process';
 import {readFile, readlink} from 'node:fs/promises';
@@ -22,25 +28,65 @@ const ACTIVATE_DEADLINE_MS = 1500;
 const ACTIVATE_POLL_MS = 40;
 const XPROP_TIMEOUT_MS = 3000;
 const XRES_TIMEOUT_MS = 3000;
+const CALL_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOLKITS = 'gtk4,qt-scroll';
 // Windows of these runtimes handle XSendEvent themselves even if they map a GTK 4 library
 // (Chromium and Electron mmap icudtl.dat; Firefox is libxul).
 const NOT_GTK4 = [/\/icudtl\.dat/, /\/libxul\.so/, /\/libffmpeg\.so/];
 
-// The local process the X server itself attributes to a window's client: XResQueryClientIds with
-// XRES_CLIENT_ID_PID_MASK (X-Resource 1.2) returns the SO_PEERCRED process id of the connection and
-// nothing for a client on another machine. Minimal ctypes use of libX11 and libXRes (Debian/Ubuntu
-// package libxres1); it prints one process id, or nothing, and every failure means "unknown".
-const XRES_PID_SCRIPT = `
-import ctypes, sys
+// Two questions only the X server can answer, asked through minimal ctypes use of libX11 and libXRes
+// (Debian/Ubuntu package libxres1). Every failure prints nothing, which means "unknown".
+//   pid WINDOW: the local process the X server attributes to the window's client: XResQueryClientIds
+//     with XRES_CLIENT_ID_PID_MASK (X-Resource 1.2) returns the SO_PEERCRED process id of the connection
+//     and nothing for a client on another machine. SO_PEERCRED ids are relative to the PID namespace
+//     of the X server, so first the helper's own client is queried, over the same connection, and its
+//     id must equal os.getpid(); a server in another PID namespace fails that proof and nothing is printed.
+//     (The helper's client is represented by a 1x1 window it creates and never maps.)
+//   at WINDOW X Y: prints 1 when the deepest mapped window the X server finds at root point (X, Y) is
+//     WINDOW or one of its descendants (the chain from the root down passes through WINDOW, so a
+//     window-manager frame above it is fine), 0 when it is any other window, such as an overlay.
+//     XTranslateCoordinates only reads; it moves nothing and honors input shapes.
+export const XRES_HELPER_SCRIPT = `
+import ctypes, os, sys
 class Spec(ctypes.Structure):
     _fields_ = [('client', ctypes.c_ulong), ('mask', ctypes.c_uint)]
 class Value(ctypes.Structure):
     _fields_ = [('spec', Spec), ('length', ctypes.c_long), ('value', ctypes.c_void_p)]
 x11 = ctypes.CDLL('libX11.so.6')
-xres = ctypes.CDLL('libXRes.so.1')
 x11.XOpenDisplay.restype = ctypes.c_void_p
 x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+x11.XDefaultRootWindow.restype = ctypes.c_ulong
+x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+x11.XCreateSimpleWindow.restype = ctypes.c_ulong
+x11.XCreateSimpleWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint,
+                                    ctypes.c_uint, ctypes.c_ulong, ctypes.c_ulong]
+x11.XFlush.argtypes = [ctypes.c_void_p]
+x11.XTranslateCoordinates.restype = ctypes.c_int
+x11.XTranslateCoordinates.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                      ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_ulong)]
+display = x11.XOpenDisplay(None)
+if not display:
+    sys.exit(1)
+mode = sys.argv[1]
+
+if mode == 'at':
+    target, px, py = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+    root = x11.XDefaultRootWindow(display)
+    chain, current = [], root
+    while len(chain) < 64:
+        dx, dy, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()
+        if not x11.XTranslateCoordinates(display, root, current, px, py, ctypes.byref(dx), ctypes.byref(dy), ctypes.byref(child)):
+            sys.exit(1)
+        if child.value == 0:
+            break
+        current = child.value
+        chain.append(current)
+    else:
+        sys.exit(1)
+    print(1 if target in chain else 0)
+    sys.exit(0)
+
+xres = ctypes.CDLL('libXRes.so.1')
 xres.XResQueryExtension.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
 xres.XResQueryVersion.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
 xres.XResQueryClientIds.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.POINTER(Spec),
@@ -48,24 +94,32 @@ xres.XResQueryClientIds.argtypes = [ctypes.c_void_p, ctypes.c_long, ctypes.POINT
 xres.XResGetClientPid.argtypes = [ctypes.POINTER(Value)]
 xres.XResGetClientPid.restype = ctypes.c_int
 xres.XResClientIdsDestroy.argtypes = [ctypes.c_long, ctypes.POINTER(Value)]
-display = x11.XOpenDisplay(None)
-if not display:
-    sys.exit(1)
 a, b = ctypes.c_int(), ctypes.c_int()
 if not xres.XResQueryExtension(display, ctypes.byref(a), ctypes.byref(b)):
     sys.exit(1)
 if not xres.XResQueryVersion(display, ctypes.byref(a), ctypes.byref(b)) or (a.value, b.value) < (1, 2):
     sys.exit(1)
-spec = Spec(int(sys.argv[1]), 1 << 1)
-count = ctypes.c_long()
-values = ctypes.POINTER(Value)()
-if xres.XResQueryClientIds(display, 1, ctypes.byref(spec), ctypes.byref(count), ctypes.byref(values)) != 0:  # Success is 0
-    sys.exit(1)
-pids = {xres.XResGetClientPid(ctypes.byref(values[i])) for i in range(count.value)}
-xres.XResClientIdsDestroy(count, values)
-pids.discard(-1)
-if len(pids) == 1:
-    print(pids.pop())
+
+def client_pid(xid):
+    spec = Spec(xid, 1 << 1)
+    count = ctypes.c_long()
+    values = ctypes.POINTER(Value)()
+    if xres.XResQueryClientIds(display, 1, ctypes.byref(spec), ctypes.byref(count), ctypes.byref(values)) != 0:  # Success is 0
+        return None
+    pids = {xres.XResGetClientPid(ctypes.byref(values[i])) for i in range(count.value)}
+    xres.XResClientIdsDestroy(count, values)
+    pids.discard(-1)
+    return pids.pop() if len(pids) == 1 else None
+
+if mode == 'pid':
+    # A 1x1 window that is never mapped: a resource of this connection's own client, for the proof.
+    own = x11.XCreateSimpleWindow(display, x11.XDefaultRootWindow(display), 0, 0, 1, 1, 0, 0, 0)
+    x11.XFlush(display)
+    if client_pid(own) != os.getpid():  # the server is not in this PID namespace (or lies)
+        sys.exit(1)
+    pid = client_pid(int(sys.argv[2]))
+    if pid:
+        print(pid)
 `;
 
 // Replaceable by tests only.
@@ -78,17 +132,31 @@ export const deps = {
     execFile('xprop', args, {timeout: XPROP_TIMEOUT_MS, env: {...process.env, LC_ALL: 'C'}, maxBuffer: 1 << 16},
       (error, stdout) => error ? reject(error) : resolve(String(stdout)));
   }),
-  xresPid: windowId => new Promise(resolve => {
-    execFile('python3', ['-c', XRES_PID_SCRIPT, String(windowId)], {timeout: XRES_TIMEOUT_MS, maxBuffer: 1 << 12},
-      (error, stdout) => {
-        const pid = Number(String(stdout).trim());
-        resolve(!error && Number.isInteger(pid) && pid > 0 ? pid : null);
-      });
-  }),
+  // The X server's process id for the window's client, only when the server shares this PID namespace; else null.
+  xresPid: async windowId => {
+    const pid = Number(await xHelper(['pid', String(windowId)]));
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  },
+  // true: the deepest mapped window at the root point is the window or its descendant; false: another window; null: unknown.
+  pointerOwner: async (windowId, x, y) => {
+    const answer = await xHelper(['at', String(windowId), String(x), String(y)]);
+    return answer === '1' ? true : answer === '0' ? false : null;
+  },
+  // Stops this trusted worker, and with it the original engine process, so that no timed-out call can act late.
+  // node_repl reports the exit and starts a fresh worker for the next request.
+  restartWorker: () => { setImmediate(() => process.exit(70)); },
 };
+
+function xHelper(args) {
+  return new Promise(resolve => {
+    execFile('python3', ['-c', XRES_HELPER_SCRIPT, ...args], {timeout: XRES_TIMEOUT_MS, maxBuffer: 1 << 12},
+      (error, stdout) => resolve(error ? '' : String(stdout).trim()));
+  });
+}
 
 let original;
 let queue = Promise.resolve();
+let stopped = false;
 const toolkitByPid = new Map();
 const PASS = Symbol('pass');
 
@@ -103,6 +171,7 @@ class Rejection extends Error {}
 export function resetForTests() {
   original = undefined;
   queue = Promise.resolve();
+  stopped = false;
   toolkitByPid.clear();
 }
 
@@ -168,11 +237,12 @@ async function processStart(pid) {
 
 // _NET_WM_PID is the client's own claim, in the client's PID namespace and on the client's machine (EWMH).
 // It identifies a local process only when the X server's record agrees (see classify) and this process
-// shares the process's PID namespace, so a window from another namespace is never classified.
+// shares the process's PID namespace, so a window from another namespace is never classified. Any
+// failure to read either namespace link means "not shared".
 async function sharesPidNamespace(pid) {
   let theirs;
   try { theirs = await deps.readLink(`/proc/${pid}/ns/pid`); } catch { return false; }
-  try { return theirs === await deps.readLink('/proc/self/ns/pid'); } catch { return true; }
+  try { return theirs === await deps.readLink('/proc/self/ns/pid'); } catch { return false; }
 }
 
 async function detectToolkit(pid) {
@@ -196,21 +266,52 @@ async function detectToolkit(pid) {
 }
 
 // The toolkit is trusted only if the X server's own record of the window's client (a local process id
-// from SO_PEERCRED, absent for remote clients) equals _NET_WM_PID. Otherwise the window may belong to
-// a process in another PID namespace (Flatpak, containers) whose advertised id collides with an
-// unrelated local process, or to a remote client, and the request is left to the original service.
-async function classify(id) {
+// from SO_PEERCRED, absent for remote clients, and only asked of a server proven to share this PID
+// namespace) equals _NET_WM_PID. Otherwise the window may belong to a process in another PID namespace
+// (Flatpak, containers) whose advertised id collides with an unrelated local process, or to a remote
+// client, and the request is left to the original service. `wanted` is checked before the X helper is
+// started, so an untranslated request (a Qt key, a Chromium window, a hidden window) never pays for it.
+async function classify(id, wanted) {
   const properties = await windowProperties(id);
   if (!properties.pid || !sameHost(properties.machine)) return {...properties, toolkit: null};
   const toolkit = await detectToolkit(properties.pid);
-  if (!toolkit) return {...properties, toolkit: null};
+  if (!toolkit || !wanted(toolkit, properties)) return {...properties, toolkit: null};
   let authoritative = null;
   try { authoritative = await deps.xresPid(id); } catch { /* unknown */ }
   return {...properties, toolkit: authoritative === properties.pid ? toolkit : null};
 }
 
-function listWindows(service) {
-  return service.handleRpc({type: 'execute', method: 'list_windows', args: []});
+// Every call the queue makes to the original service is bounded. A call that does not answer in time is
+// not merely abandoned (it could still deliver its input later, in the middle of a later request): the
+// worker is stopped, which ends the original engine process, and the queue refuses everything after it.
+function callTimeoutMs(env) {
+  const value = Number(env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS);
+  return Number.isFinite(value) && value >= 1 ? value : CALL_TIMEOUT_MS;
+}
+
+function callOriginal(service, request, env) {
+  if (stopped) throw new Rejection(RESTARTING);
+  const limit = callTimeoutMs(env);
+  let timer;
+  const call = Promise.resolve().then(() => service.handleRpc(request));
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      stopped = true;
+      call.catch(() => {});
+      try { deps.restartWorker(); } catch { /* the call is refused either way */ }
+      reject(new Rejection(`The original Linux input service did not answer "${request.method ?? request.type}" within ` +
+        `${Math.round(limit / 1000)} s. LCU stopped it so that the call cannot act later; it restarts on the next request. ` +
+        'Check the desktop state and repeat the action.'));
+    }, limit);
+  });
+  return Promise.race([call, expired]).finally(() => clearTimeout(timer));
+}
+
+const RESTARTING = 'The original Linux input service is restarting after a call that did not answer, so this call was ' +
+  'not sent. Repeat the action.';
+
+function listWindows(service, env) {
+  return callOriginal(service, {type: 'execute', method: 'list_windows', args: []}, env);
 }
 
 function finite(value) {
@@ -288,10 +389,10 @@ async function modalChild(target, windows) {
   return found.find(window => window.focused) ?? found.at(-1) ?? null;
 }
 
-async function waitForFocus(service, id) {
+async function waitForFocus(service, id, env) {
   const deadline = Date.now() + ACTIVATE_DEADLINE_MS;
   for (;;) {
-    const windows = await listWindows(service);
+    const windows = await listWindows(service, env);
     if ((Array.isArray(windows) ? windows.find(window => window.id === id) : null)?.focused) return;
     if (Date.now() >= deadline) {
       throw new Rejection('LCU could not give keyboard focus to the target window, so its window-targeted input was not sent. ' +
@@ -311,9 +412,10 @@ async function translate(service, request, env) {
 
   let plan;
   try {
-    const classified = await classify(target.id);
-    if (!applies(classified.toolkit, method, enabledToolkits(env)) || classified.hidden) return PASS;
-    const windows = await listWindows(service);
+    const toolkits = enabledToolkits(env);
+    const classified = await classify(target.id, (toolkit, properties) => applies(toolkit, method, toolkits) && !properties.hidden);
+    if (!classified.toolkit) return PASS;
+    const windows = await listWindows(service, env);
     const current = Array.isArray(windows) ? windows.find(window => window.id === target.id) : null;
     if (!current) return PASS; // the original service reports its normal error
     const points = pointsOf(method, input, current);
@@ -334,12 +436,12 @@ async function translate(service, request, env) {
 
   const {points, focus, screen} = plan;
   if (!focus.focused) {
-    await service.handleRpc({type: 'execute', method: 'activate_window', args: [{window: focus}]});
-    await waitForFocus(service, focus.id);
+    await callOriginal(service, {type: 'execute', method: 'activate_window', args: [{window: focus}]}, env);
+    await waitForFocus(service, focus.id, env);
   }
   // Read the geometry and the focus again immediately before sending: windows move, CSD shadows differ,
   // and anything else may have taken the focus since.
-  const windows = await listWindows(service);
+  const windows = await listWindows(service, env);
   const current = Array.isArray(windows) ? windows.find(window => window.id === target.id) : null;
   if (!current) throw new Rejection('The target window disappeared before its input could be sent.');
   if (!(Array.isArray(windows) ? windows.find(window => window.id === focus.id) : null)?.focused) {
@@ -350,7 +452,23 @@ async function translate(service, request, env) {
   const converted = desktopInput(method, input, current, points);
   if (outsideScreen(method, converted, screen)) return PASS; // an off-screen target keeps the original error
 
-  return service.handleRpc({type: 'execute', method, args: [converted]});
+  if (POINTER_METHODS.has(method)) await requireTopmost(target.id, method === 'drag' ? converted.path[0] : converted);
+  return callOriginal(service, {type: 'execute', method, args: [converted]}, env);
+}
+
+// XTEST follows normal pointer routing, so the desktop-level action lands on whatever window the X server
+// finds at the point. A notification, tooltip or override-redirect popup can cover a target that is
+// focused and in bounds; ask the server immediately before sending and refuse anything but the target
+// (or one of its descendants). The query only reads: nothing has been moved when it answers.
+async function requireTopmost(id, point) {
+  let inside = null;
+  try { inside = await deps.pointerOwner(id, Math.round(point.x), Math.round(point.y)); } catch { /* unknown */ }
+  if (inside === true) return;
+  throw new Rejection(inside === false
+    ? `Another window covers the point (${point.x}, ${point.y}) of the target window on the desktop (a notification, tooltip or ` +
+      'popup), so no input was sent. Dismiss or wait for it, then repeat the action.'
+    : `LCU could not confirm with the X server that the target window is the one at the point (${point.x}, ${point.y}), ` +
+      'so no input was sent.');
 }
 
 function candidate(request) {
@@ -374,11 +492,12 @@ export async function handleRpc(request) {
   // check and the input of a translated request must not interleave with any other such call, including
   // activate_window, desktop-level input and the fallbacks below.
   const run = queue.then(async () => {
+    if (stopped) throw new Rejection(RESTARTING);
     if (candidate(request)) {
       const result = await translate(service, request, env);
       if (result !== PASS) return result;
     }
-    return service.handleRpc(request);
+    return callOriginal(service, request, env);
   });
   queue = run.catch(() => {});
   return run;

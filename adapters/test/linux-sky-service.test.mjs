@@ -36,6 +36,10 @@ class Desktop {
     this.stealAfterFirstList = null;
     this.hostname = HOST;
     this.ns = 'pid:[4026531836]';
+    this.overlays = [];     // rectangles of windows (not the target) stacked over the desktop
+    this.hang = null;       // {method, gate}: calls of this method never answer until the gate opens
+    this.xresCalls = 0;
+    this.restarts = 0;
   }
 
   add(id, fields = {}) {
@@ -62,6 +66,11 @@ class Desktop {
     this.calls.push(request);
     const {method, args = []} = request;
     const input = args[0] ?? {};
+    if (this.hang && this.hang.method === method) {
+      this.hang.started = (this.hang.started ?? 0) + 1;
+      await this.hang.gate; // a late call: it would act now, after the wrapper gave up on it
+      this.late = (this.late ?? []).concat(request);
+    }
     if (method === 'list_windows') {
       if (this.activations > 0 && this.stealAfterFirstList) {
         this.listsAfterActivate += 1;
@@ -119,7 +128,13 @@ function installDeps() {
     lines.push(machine === null ? 'WM_CLIENT_MACHINE:  not found.' : `WM_CLIENT_MACHINE(STRING) = "${machine}"`);
     return lines.join('\n') + '\n';
   };
+  wrapper.deps.pointerOwner = async (id, x, y) => {
+    if (desk.pointerUnknown) return null;
+    return !desk.overlays.some(r => x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height);
+  };
+  wrapper.deps.restartWorker = () => { desk.restarts += 1; };
   wrapper.deps.xresPid = async id => {
+    desk.xresCalls += 1;
     const window = desk.windows.find(candidate => candidate.id === id);
     if (!window) return null;
     return window.xresPid === undefined ? (window.pid ?? id) : window.xresPid;
@@ -133,7 +148,10 @@ function installDeps() {
     return `${match[1]} (we ird) name) S 1 ${rest.join(' ')} ${proc.start} 0 0\n`;
   };
   wrapper.deps.readLink = async path => {
-    if (path === '/proc/self/ns/pid') return desk.ns;
+    if (path === '/proc/self/ns/pid') {
+      if (desk.selfNsUnreadable) throw Error('EACCES');
+      return desk.ns;
+    }
     const match = /^\/proc\/(\d+)\/ns\/pid$/.exec(path);
     const proc = match && desk.procs.get(Number(match[1]));
     if (!proc) throw Error('ENOENT');
@@ -145,10 +163,11 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'lcu-sky-'));
   const module = join(directory, 'service.mjs');
   writeFileSync(module, 'export const handleRpc = request => globalThis.__lcuFakeSky.handleRpc(request);\n');
-  for (const key of ['LCU_LINUX_SKY_SERVICE_PATH', 'LCU_LINUX_INPUT_TRANSLATION', 'LCU_LINUX_INPUT_TOOLKITS']) savedEnv[key] = process.env[key];
+  for (const key of ['LCU_LINUX_SKY_SERVICE_PATH', 'LCU_LINUX_INPUT_TRANSLATION', 'LCU_LINUX_INPUT_TOOLKITS', 'LCU_LINUX_INPUT_CALL_TIMEOUT_MS']) savedEnv[key] = process.env[key];
   process.env.LCU_LINUX_SKY_SERVICE_PATH = module;
   delete process.env.LCU_LINUX_INPUT_TRANSLATION;
   delete process.env.LCU_LINUX_INPUT_TOOLKITS;
+  delete process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS;
   desk = new Desktop();
   globalThis.__lcuFakeSky = desk;
   wrapper.resetForTests();
@@ -446,4 +465,135 @@ test('a window that is not listed keeps the original service result', async () =
   desk.add(1);
   await execute('press_key', {window: {id: 99, app: 'x11:99', title: 'gone'}, key: 'a'});
   assert.equal(desk.targetedCalls().length, 1);
+});
+
+test('an overlay covering the target at the click point refuses every desktop-level pointer action and sends nothing', async () => {
+  const a = desk.add(1); // client 300x200 at 100,80
+  desk.focus(1);
+  desk.overlays.push({x: 150, y: 100, width: 60, height: 40}); // a notification over desktop (150..210, 100..140)
+  for (const [method, input] of [
+    ['click', {x: 60, y: 30}], ['click', {x: 60, y: 30, click_count: 2}], ['move', {x: 60, y: 30}],
+    ['scroll', {x: 60, y: 30, direction: 'down', pixels: 10}],
+    ['drag', {path: [{x: 60, y: 30}, {x: 200, y: 150}]}],
+  ]) {
+    await assert.rejects(execute(method, {window: target(a), ...input}), /another window covers/i, method);
+  }
+  assert.equal(desk.desktopCalls('click', 'move', 'scroll', 'drag').length, 0);
+  // Elsewhere in the target the action is delivered; only a drag's start point is checked, not its end.
+  await execute('click', {window: target(a), x: 10, y: 10});
+  await execute('drag', {window: target(a), path: [{x: 10, y: 10}, {x: 60, y: 30}]});
+  assert.equal(desk.desktopCalls('click', 'drag').length, 2);
+  // Keys are not pointer actions.
+  await execute('press_key', {window: target(a), key: 'a'});
+  assert.equal(desk.typed.length, 1);
+});
+
+test('an unanswerable pointer check refuses the action instead of guessing', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.pointerUnknown = true;
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /could not confirm/i);
+  wrapper.deps.pointerOwner = async () => { throw Error('python3 missing'); };
+  await assert.rejects(execute('click', {window: target(a), x: 10, y: 10}), /could not confirm/i);
+  assert.equal(desk.desktopCalls('click').length, 0);
+});
+
+test('the pointer check asks about the converted desktop point, immediately before the call', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  const asked = [];
+  wrapper.deps.pointerOwner = async (id, x, y) => { asked.push([id, x, y, desk.desktopCalls('click').length]); return true; };
+  await execute('click', {window: target(a), x: 10, y: 20});
+  assert.deepEqual(asked, [[1, 110, 100, 0]]);
+});
+
+test('a hung original call is bounded, stops the worker, and later queued input is refused and never interleaved', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  const a = desk.add(1);
+  desk.add(2);
+  desk.focus(2);
+  let release;
+  desk.hang = {method: 'activate_window', gate: new Promise(resolve => { release = resolve; })};
+  const first = execute('press_key', {window: target(a), key: 'a'});
+  const second = execute('press_key', {window: target(a), key: 'b'});
+  const third = wrapper.handleRpc({type: 'execute', method: 'type_text', args: [{text: 'x'}]});
+  await assert.rejects(first, /did not answer .*activate_window/);
+  await assert.rejects(second, /restarting/);
+  await assert.rejects(third, /restarting/);
+  assert.equal(desk.restarts, 1);
+  // The hung activation finally completes; nothing queued after it was sent, so nothing is interleaved with it.
+  release();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(desk.typed, []);
+  assert.equal(desk.desktopCalls('press_key').length, 0);
+  assert.ok(desk.calls.every(call => call.method !== 'type_text'));
+  // A later call, even after the late completion, is still refused: the worker is about to be replaced.
+  await assert.rejects(execute('press_key', {window: target(a), key: 'c'}), /restarting/);
+  assert.equal(desk.restarts, 1);
+});
+
+test('a hung pass-through call is bounded as well', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '60';
+  desk.hang = {method: 'type_text', gate: new Promise(() => {})};
+  await assert.rejects(wrapper.handleRpc({type: 'execute', method: 'type_text', args: [{text: 'x'}]}), /did not answer .*type_text/);
+  assert.equal(desk.restarts, 1);
+});
+
+test('a call that answers in time does not stop anything', async () => {
+  process.env.LCU_LINUX_INPUT_CALL_TIMEOUT_MS = '200';
+  const a = desk.add(1);
+  desk.focus(1);
+  await execute('press_key', {window: target(a), key: 'a'});
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(desk.restarts, 0);
+  await execute('press_key', {window: target(a), key: 'b'});
+  assert.equal(desk.typed.length, 2);
+});
+
+test('an unreadable own PID namespace fails closed for every process', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  desk.selfNsUnreadable = true;
+  await execute('press_key', {window: target(a), key: 'a'});
+  await execute('click', {window: target(a), x: 5, y: 5});
+  assert.equal(desk.typed.length, 0);
+  assert.equal(desk.desktopCalls('click').length, 0);
+  assert.equal(desk.targetedCalls().length, 2, 'both go to the original service unchanged');
+  assert.equal(desk.xresCalls, 0);
+});
+
+test('a server in another PID namespace (no X-Resource id proven for the helper) is never translated', async () => {
+  const a = desk.add(1);
+  desk.focus(1);
+  // The helper's own-client proof fails, so it prints nothing even though the window's id would match.
+  wrapper.deps.xresPid = async () => null;
+  await execute('press_key', {window: target(a), key: 'a'});
+  assert.equal(desk.typed.length, 0);
+  assert.equal(desk.targetedCalls().length, 1);
+});
+
+test('untranslated requests do not start the X helper', async () => {
+  const qt = desk.add(1);
+  desk.procs.get(1).maps = QT_MAPS;
+  const chromium = desk.add(2);
+  desk.procs.get(2).maps = GTK4_MAPS + '7f00 r-xp /opt/app/icudtl.dat\n';
+  const hidden = desk.add(3, {hidden: true});
+  const plain = desk.add(4);
+  desk.procs.get(4).maps = PLAIN_MAPS;
+  const foreign = desk.add(5, {machine: 'remote-box'});
+  desk.focus(1);
+  await execute('press_key', {window: target(qt), key: 'a'});
+  await execute('click', {window: target(qt), x: 5, y: 5});
+  await execute('press_key', {window: target(chromium), key: 'a'});
+  await execute('press_key', {window: target(hidden), key: 'a'});
+  await execute('press_key', {window: target(plain), key: 'a'});
+  await execute('press_key', {window: target(foreign), key: 'a'});
+  process.env.LCU_LINUX_INPUT_TOOLKITS = 'qt-scroll';
+  await execute('press_key', {window: target(desk.add(6)), key: 'a'});
+  assert.equal(desk.xresCalls, 0);
+  assert.equal(desk.targetedCalls().length, 7);
+  // A translatable request does ask.
+  delete process.env.LCU_LINUX_INPUT_TOOLKITS;
+  await execute('scroll', {window: target(qt), direction: 'down', pixels: 10});
+  assert.equal(desk.xresCalls, 1);
 });

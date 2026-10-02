@@ -6,7 +6,7 @@ so a GTK 4 window never sees them. Desktop-level input (no `window`) uses the X 
 reaches GTK 4 normally, as xdotool does. AT-SPI actions and (in recent engines) `typeText` use neither path.
 This test pins the desktop-level paths, then proves that LCU's Linux input translation
 (lcu/linux_sky_service.mjs) makes the window-targeted calls work for GTK 4: keys, coordinate click, scroll,
-drag, a modal dialog, that concurrent calls cannot interleave, and that `LCU_LINUX_INPUT_TRANSLATION=off` restores the original behavior.
+drag, an override-redirect overlay covering the target (refused, nothing reaches the overlay), a modal dialog, that concurrent calls cannot interleave, and that `LCU_LINUX_INPUT_TRANSLATION=off` restores the original behavior.
 The oracles are files the independent fixtures write, never a call's success.
 """
 import json
@@ -114,6 +114,42 @@ def window_targeted(command):
         assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'window-targeted click did not reach GTK 4'
         (support.output / 'Gtk4-click').unlink()
         assert session.focused_id() == button_window['id']
+        # An AT-SPI element action is not translated and still works.
+        state = session.run('nodeRepl.write(await button.getAXState());')
+        assert 'Press' in state, state
+
+        # An override-redirect window (a notification, a tooltip, a popup) covering the focused target at the
+        # click point: XTEST would click the overlay, so LCU asks the X server what is under the point and refuses.
+        # The target is already focused, so no activation re-raises it above the overlay.
+        support.start_fixture('x11_overlay_fixture.py')
+        assert support.settle(lambda: support.read('overlay-state') == 'hidden'), 'the overlay fixture did not start'
+        button_window = session.window('LCU GTK4 Button')
+        (support.output / 'overlay-show').write_text(
+            f'{button_window["x"] + 100},{button_window["y"] + 50},120,80')
+        assert support.settle(lambda: support.read('overlay-state') == 'shown')
+        time.sleep(0.3)
+        for call in ('click({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80})',
+                     'click({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80, click_count: 2})',
+                     'move({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80})',
+                     'scroll({window: await byTitle("LCU GTK4 Button"), x: 150, y: 80, direction: "down", pixels: 50})',
+                     'drag({window: await byTitle("LCU GTK4 Button"), path: [{x: 150, y: 80}, {x: 160, y: 85}]})'):
+            covered = session.run(f'try {{ await sky.{call}; nodeRepl.write("no error"); }}'
+                                  ' catch (error) { nodeRepl.write("error: " + error.message); }')
+            assert covered.startswith('error: ') and 'Another window covers' in covered, (call, covered)
+        time.sleep(0.5)
+        assert not (support.output / 'Gtk4-click').exists(), 'a click reached GTK 4 through the overlay'
+        assert support.read('overlay-click.txt') is None, ('input reached the overlay', support.read('overlay-click.txt'))
+        # Away from the overlay the same target still takes the click, and with the overlay gone the original point works.
+        session.run('await button.click([20, 20]);')
+        assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'a click beside the overlay did not arrive'
+        (support.output / 'Gtk4-click').unlink()
+        (support.output / 'overlay-hide').write_text('1')
+        assert support.settle(lambda: support.read('overlay-state') == 'hidden')
+        time.sleep(0.3)
+        session.run('await button.click([150, 80]);')
+        assert support.settle(lambda: (support.output / 'Gtk4-click').exists()), 'a click did not arrive once the overlay left'
+        (support.output / 'Gtk4-click').unlink()
+        assert support.read('overlay-click.txt') is None
         # An AT-SPI element action is not translated and still works.
         state = session.run('nodeRepl.write(await button.getAXState());')
         assert 'Press' in state, state

@@ -32,3 +32,5 @@ python3 "$test_dir/adapter_paths.py" "${command[@]}"
 # GTK 4 reads only XInput2: see the notes in the test about window-targeted versus desktop-level input.
 python3 "$test_dir/gtk4_input.py" "${command[@]}"
 python3 "$test_dir/linux_input_controls.py" "${command[@]}"
+python3 "$test_dir/linux_input_hang.py" "${command[@]}"
+python3 "$test_dir/linux_xres_namespace.py"
