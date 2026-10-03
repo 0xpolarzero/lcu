@@ -1,6 +1,6 @@
-# Draft issue for OpenAI: Linux computer use ignores window-targeted input in GTK 4 apps
+# OpenAI issue: Linux computer use ignores window-targeted input in GTK 4 apps
 
-Not filed yet. Intended for https://github.com/openai/codex/issues.
+Filed 2026-10-03 as https://github.com/openai/codex/issues/50578.
 
 ---
 
