@@ -152,12 +152,14 @@ def main(argv=None):
     existing_app = Path(args.existing_app).expanduser() if args.existing_app is not None else DEFAULT_APP_PATH
     if not existing_app.is_dir():
         raise ValueError(setup.app_prerequisite_message(existing_app, alternate_location=True))
+    if args.reconcile:
+        raise ValueError('--reconcile runs after installation: use `lcu setup --reconcile` from the installed release.')
     account, names = setup.validate(args)
     prefix = checked_prefix(args.prefix)
     if args.runtime_only:
         if (args.agent or args.export or args.project or args.scope != 'user' or args.check_desktop
                 or args.session != 'discover' or args.browser_host or args.chrome or args.audio
-                or args.no_chrome or args.no_audio or args.approval):
+                or args.no_chrome or args.no_audio or args.approval or args.allow_missing):
             raise ValueError('--runtime-only cannot include agent setup options')
     elif not names and not args.export and (args.yes or not sys.stdin.isatty()):
         raise ValueError('Select --agent NAME, --agent all, --agent auto, --export PATH, or --runtime-only')
@@ -185,7 +187,7 @@ def main(argv=None):
         for flag in ('project', 'export'):
             if getattr(args, flag):
                 forwarded += ['--' + flag, str(getattr(args, flag))]
-        for flag in ('yes', 'check_desktop', 'chrome', 'audio', 'no_chrome', 'no_audio'):
+        for flag in ('yes', 'check_desktop', 'chrome', 'audio', 'no_chrome', 'no_audio', 'allow_missing'):
             if getattr(args, flag):
                 forwarded += ['--' + flag.replace('_', '-')]
         if args.approval:

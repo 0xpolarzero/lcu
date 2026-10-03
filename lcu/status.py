@@ -32,6 +32,7 @@ def collect(root):
     observed = tested.observe(root, descriptor, resolved[3])
     changed = tested.changed_since_install(descriptor, {'version': observed['app_version'],
                                                          'runtime': observed['runtime']})
+    saved = saved_setup()
     return {
         'lcu_version': version,
         'release': str(root),
@@ -40,7 +41,8 @@ def collect(root):
         'app': {'path': str(resolved[0]), 'version': observed['app_version'], 'runtime': observed['runtime']},
         'compatibility': tested.assess(root, **observed),
         'changed_since_install': changed,
-        'setup': saved_setup(),
+        'setup': saved,
+        'pending': saved['pending'] if saved else [],
     }
 
 
@@ -69,3 +71,6 @@ def main(root, argv=None):
     if saved:
         print(f"Saved setup: chrome {'on' if saved['chrome'] else 'off'}, audio {'on' if saved['audio'] else 'off'}, "
               f"approval {saved['approval']}.")
+        if saved['pending']:
+            print('Pending harnesses (not installed yet; `lcu setup --reconcile` registers them): '
+                  + ', '.join(saved['pending']) + '.')

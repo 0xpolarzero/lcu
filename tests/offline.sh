@@ -130,4 +130,5 @@ test ! -e /opt/lcu/apps
 test ! -e /opt/lcu/cache
 python3 -m unittest discover -b -s /src/tests -p 'test_*.py' -q
 python3 /src/tests/registration.py
+python3 /src/tests/pending_registration.py
 runuser -u lcutester -- dbus-run-session -- bash /src/tests/desktop.sh

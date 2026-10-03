@@ -126,6 +126,10 @@ Claude Code uses the official Node runtime, `adapters/claude.mjs`, and the selec
 
 The corrected installed relay passed guarded registration and original Chrome Stop cleanup. A current guarded run also cleaned up child A/B turns on their matching stop events and the parent on Stop. A synthetic HTTP 400 fired `StopFailure` with matching session/prompt context, but no original MCP `Interrupt` reached the fixture; Claude reported the failure as `unknown`. See [lifecycle finish evidence](verification/claude-lifecycle-finish-2026-09-26.md). Earlier direct-registration Claude saves predate the relay and do not prove current relay behavior. See also [Claude relay evidence](verification/claude-relay-2026-09-25.md) and the [Claude hook reference](https://code.claude.com/docs/en/hooks).
 
+## Harnesses installed after setup
+
+Registration stays with each harness's own tool: `pi install`, `omp plugin link`, `hermes plugins enable`, and the pinned add-mcp for Codex and Claude Code. LCU adds no configuration writer for them. Pi, OMP and Hermes cannot be registered without their executable, so `lcu setup --allow-missing` records an absent one as pending in `setup.json`, and `lcu setup --reconcile` later runs the same registration step once the executable exists, with the saved Chrome, audio and approval mode. Codex and Claude Code write plain user configuration and register immediately. The user-facing behavior is in [Harnesses installed later](INSTALLATION.md#harnesses-installed-later). Reconcile only calls the existing registration code; a pre-written Pi extension, OMP link or Hermes plugin entry is deliberately not used because those registries belong to the harness.
+
 ## Approval boundary
 
 The supported native-app and external Chrome flows have not produced generic schema-field or URL-mode approval requests. Those unobserved shapes are not baseline parity failures. Current tests preserve the original message, origin, and requested native-app persistence scope; a host that cannot present a request fails closed.
