@@ -390,16 +390,19 @@ class InstalledInstructionTests(unittest.TestCase):
         self.assertIn('--audio', audio_metadata['destinationSetup'])
 
     def test_setup_state_round_trips_and_rejects_malformed(self):
-        self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False, 'approval': 'ask'})
+        self.assertEqual(load_setup_state(self.home), {'chrome': False, 'audio': False, 'approval': 'ask',
+                                                       'pending': [], 'pending_context': None})
         save_setup_state(self.home, chrome=True, audio=False)
-        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask'})
+        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask',
+                                                       'pending': [], 'pending_context': None})
         self.assertEqual(json.loads(setup_state_path(self.home).read_text()),
                          {'chrome': True, 'audio': False, 'approval': 'ask'})
         save_setup_state(self.home, chrome=True, audio=False, approval='auto')
         self.assertEqual(load_setup_state(self.home)['approval'], 'auto')
         # A state file from before approval modes existed means ask.
         setup_state_path(self.home).write_text('{"chrome": true, "audio": false}')
-        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask'})
+        self.assertEqual(load_setup_state(self.home), {'chrome': True, 'audio': False, 'approval': 'ask',
+                                                       'pending': [], 'pending_context': None})
         setup_state_path(self.home).write_text('{"chrome": true, "audio": false, "approval": "yolo"}')
         with self.assertRaisesRegex(ValueError, 'Malformed LCU setup state'):
             load_setup_state(self.home)

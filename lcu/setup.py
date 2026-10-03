@@ -137,26 +137,56 @@ def setup_state_path(home):
                         else (home / '.local/state/lcu/setup.json'))
 
 
+# Harnesses whose native registration needs their own executable; Codex and Claude Code
+# register through add-mcp and their config files without the CLI installed.
+NEEDS_BINARY = ('pi', 'omp', 'hermes')
+
+
 def load_setup_state(home):
-    """Return saved opt-ins; tolerate a missing file, reject a malformed one."""
+    """Return saved opt-ins and pending harnesses; tolerate a missing file, reject a malformed one."""
     path = setup_state_path(home)
     data = read_file(path)
+    empty = {'chrome': False, 'audio': False, 'approval': 'ask', 'pending': [], 'pending_context': None}
     if data is None:
-        return {'chrome': False, 'audio': False, 'approval': 'ask'}
+        return empty
     try:
         parsed = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.') from exc
-    # `approval` was added after `chrome` and `audio`; an older file means "ask".
+    # `approval` and `pending` were added after `chrome` and `audio`; an older file means "ask" and none pending.
+    pending = parsed.get('pending', []) if isinstance(parsed, dict) else None
+    context = parsed.get('pending_context') if isinstance(parsed, dict) else None
     if (not isinstance(parsed, dict) or not all(isinstance(parsed.get(key), bool) for key in ('chrome', 'audio'))
-            or parsed.get('approval', 'ask') not in ('ask', 'auto')):
+            or parsed.get('approval', 'ask') not in ('ask', 'auto')
+            or not isinstance(pending, list) or not all(item in NEEDS_BINARY for item in pending)
+            or (context is not None and not (
+                isinstance(context, dict) and context.get('scope') in ('user', 'project')
+                and context.get('session') in ('discover', 'direct')
+                and isinstance(context.get('project'), (str, type(None)))))):
         raise ValueError(f'Malformed LCU setup state at {path}; delete it and rerun setup.')
-    return {'chrome': parsed['chrome'], 'audio': parsed['audio'], 'approval': parsed.get('approval', 'ask')}
+    return {'chrome': parsed['chrome'], 'audio': parsed['audio'], 'approval': parsed.get('approval', 'ask'),
+            'pending': list(dict.fromkeys(pending)), 'pending_context': context if pending else None}
 
 
-def save_setup_state(home, *, chrome, audio, approval='ask'):
-    atomic_write(setup_state_path(home),
-                 (json.dumps({'chrome': chrome, 'audio': audio, 'approval': approval}, indent=2) + '\n').encode())
+def save_setup_state(home, *, chrome, audio, approval='ask', pending=(), pending_context=None):
+    pending = list(dict.fromkeys(pending))
+    document = {'chrome': chrome, 'audio': audio, 'approval': approval}
+    # Absent when nothing is pending, so the file stays readable by earlier LCU versions.
+    if pending:
+        document['pending'] = pending
+        document['pending_context'] = pending_context
+    atomic_write(setup_state_path(home), (json.dumps(document, indent=2) + '\n').encode())
+
+
+def harness_search_path(home, path=None):
+    """PATH plus the user-level directories harness installers use, for a harness installed after login."""
+    path = os.environ.get('PATH', '') if path is None else path
+    extra = [str(home / name) for name in ('.local/bin', '.bun/bin', '.npm-global/bin', '.cargo/bin')]
+    return os.pathsep.join(dict.fromkeys([*[p for p in path.split(os.pathsep) if p], *extra]))
+
+
+def harness_installed(name, home, path=None):
+    return bool(shutil.which(CLIENTS[name].executable, path=harness_search_path(home, path)))
 
 
 def installer_environment(home, names, environ=None):
@@ -629,6 +659,13 @@ def parser():
                    help='auto adds only LCU\'s own harness approval entries so its tools run without a per-call prompt; '
                         'ask removes exactly those entries and leaves harness defaults (the default, kept from the previous setup)')
     p.add_argument('--session', choices=['discover', 'direct'], default='direct' if sys.platform in ('darwin', 'win32') else 'discover', help='discover attaches through lcu-session (XFCE); direct uses the current desktop account')
+    p.add_argument('--allow-missing', action='store_true',
+                   help='Skip pi, omp and hermes when their executable is not installed yet and record them as pending '
+                        '(Codex and Claude Code still register); exit 0 when that is the only problem. '
+                        '`lcu setup --reconcile` registers them once they appear')
+    p.add_argument('--reconcile', action='store_true',
+                   help='Register pending harnesses that are now installed, using the saved opt-ins and approval mode; '
+                        'non-interactive, idempotent, and silent when there is nothing to do')
     p.add_argument('--browser-host', action='store_true', help=argparse.SUPPRESS)
     p.add_argument('--check-desktop', action='store_true',
                    help='Require live desktop readiness after setup; never opens System Settings automatically')
@@ -639,6 +676,16 @@ def parser():
 def validate(args):
     if args.browser_host:
         raise ValueError('--browser-host was removed; use `lcu setup --agent AGENT --chrome` for external Chrome. Embedded in-app browser hosting is not supported.')
+    if args.reconcile:
+        used = [flag for flag, value in (
+            ('--agent', args.agent), ('--export', args.export), ('--approval', args.approval),
+            ('--chrome', args.chrome), ('--no-chrome', args.no_chrome), ('--audio', args.audio),
+            ('--no-audio', args.no_audio), ('--project', args.project), ('--check-desktop', args.check_desktop),
+            ('--allow-missing', args.allow_missing), ('--scope', args.scope != 'user')) if value]
+        if used:
+            raise ValueError('--reconcile uses the saved setup and cannot be combined with ' + ', '.join(used) + '.')
+    if args.allow_missing and args.export:
+        raise ValueError('--allow-missing configures a harness; it cannot be combined with --export.')
     if args.chrome and args.no_chrome:
         raise ValueError('Use either --chrome or --no-chrome, not both.')
     if args.audio and args.no_audio:
@@ -764,6 +811,73 @@ def run_desktop_doctor(command, *, timeout=None, runner=None):
     return runner(command, **options)
 
 
+def runtime_paths(args, account, session=None):
+    """Release root, runtime launcher, session launcher and the desktop command for the selected session mode."""
+    session = session or args.session
+    if sys.platform == 'win32':
+        release_root = Path(__file__).resolve().parents[1]
+        runtime = args.prefix / 'lcu.cmd'
+        launcher = args.prefix / 'windows_launcher.py'
+        desktop_command = [sys.executable, '-B', str(launcher)]
+    else:
+        release_root = args.prefix / 'current'
+        runtime = release_root / 'bin/lcu'
+        launcher = release_root / 'bin/lcu-session'
+        desktop_command = ([str(runtime)] if session == 'direct' else
+                           [str(launcher), '--user', account.pw_name, '--', str(runtime)])
+    return release_root, runtime, launcher, desktop_command
+
+
+def reconcile(args, account, home):
+    """Register pending harnesses that have appeared since setup; quiet and cheap when there are none."""
+    path = harness_search_path(home)
+
+    def ready_harnesses(state):
+        return [name for name in state['pending'] if harness_installed(name, home, path)]
+
+    try:
+        # Unlocked first look: the common login-time run reads one small file and exits.
+        if not ready_harnesses(load_setup_state(home)):
+            return
+        with setup_lock(home):
+            # Another setup or reconcile may have registered them while this one waited.
+            state = load_setup_state(home)
+            ready = ready_harnesses(state)
+            if not ready:
+                return
+            context = state['pending_context'] or {'scope': 'user', 'project': None, 'session': args.session}
+            project = Path(context['project']) if context['project'] else None
+            if context['scope'] == 'project' and (not project or not project.is_dir()):
+                raise ValueError(f'Saved project directory is missing: {context["project"]}. '
+                                 'Rerun `lcu setup --agent all --allow-missing --scope project --project PATH`.')
+            release_root, runtime, launcher, desktop_command = runtime_paths(args, account, context['session'])
+            for item in (runtime, launcher):
+                if not item.is_file() or not os.access(item, os.X_OK):
+                    raise ValueError(f'Managed runtime missing or inaccessible: {item}.')
+            runtime_flags = (['--chrome'] if state['chrome'] else []) + (['--audio'] if state['audio'] else [])
+            direct_runtime = desktop_command if sys.platform == 'win32' else [str(runtime)]
+            subprocess.run(direct_runtime + ['--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
+            tools_root = release_root / 'agent-tools'
+            environment = {**os.environ, 'PATH': path}
+            installer_environment(home, ready, environment)
+            installer_paths(tools_root)
+            print('LCU: registering ' + ', '.join(CLIENTS[name].label for name in ready)
+                  + ' (installed since setup) with the saved settings.')
+            failures = configure(ready, home, [*desktop_command, *runtime_flags], tools_root, release_root,
+                                 scope=context['scope'], project=project, setup_command=str(runtime),
+                                 environ=environment, approval='auto' if state['approval'] == 'auto' else None)
+            failed = {item[0] for item in failures}
+            remaining = [name for name in state['pending'] if name not in ready or name in failed]
+            save_setup_state(home, chrome=state['chrome'], audio=state['audio'], approval=state['approval'],
+                             pending=remaining, pending_context=context)
+            if failures:
+                raise ValueError(f'{len(failures)} registration step(s) failed; still pending: '
+                                 + ', '.join(remaining) + '. Fix the errors above; the next reconcile retries.')
+            print('Registered: ' + ', '.join(ready) + '. Restart or reconnect those harnesses.')
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        parser().exit(1, f'Reconcile failed: {exc}\n')
+
+
 def main(argv=None):
     p = parser()
     args = p.parse_args(argv)
@@ -791,29 +905,28 @@ def main(argv=None):
                               PATH=f'{account.pw_dir}/.local/bin:/usr/local/bin:/usr/bin:/bin', LANG='C.UTF-8')
             os.chdir(account.pw_dir)
         home = Path(account.pw_dir)
-        if sys.platform == 'win32':
-            release_root = Path(__file__).resolve().parents[1]
-            runtime = args.prefix / 'lcu.cmd'
-            launcher = args.prefix / 'windows_launcher.py'
-            desktop_command = [sys.executable, '-B', str(launcher)]
-        else:
-            release_root = args.prefix / 'current'
-            runtime = release_root / 'bin/lcu'
-            launcher = release_root / 'bin/lcu-session'
-            desktop_command = ([str(runtime)] if args.session == 'direct' else
-                               [str(launcher), '--user', account.pw_name, '--', str(runtime)])
+        if args.reconcile:
+            return reconcile(args, account, home)
+        release_root, runtime, launcher, desktop_command = runtime_paths(args, account)
         for path in (runtime, launcher):
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise ValueError(f'Managed runtime missing or inaccessible: {path}. Run scripts/install.sh first, or select its --prefix.')
         if names == ['auto']:
             names = detect(home)
-            if not names:
+            if not names and not args.allow_missing:
                 raise ValueError('No agents detected. Select --agent explicitly (works before the agent is installed), or use --export.')
         if not names and not args.export:
             if not sys.stdin.isatty():
                 raise ValueError('Noninteractive setup requires --agent ID (repeatable), --agent all, --agent auto, or --export PATH.')
             names = choose_agents(home)
         validate_agent_scope(names, args.scope)
+        missing = []
+        setup_environment = None
+        if args.allow_missing:
+            # Registration through each harness's own CLI needs that CLI; defer those harnesses.
+            setup_environment = {**os.environ, 'PATH': harness_search_path(home)}
+            missing = [name for name in names if name in NEEDS_BINARY and not harness_installed(name, home)]
+            names = [name for name in names if name not in missing]
         direct_runtime = desktop_command if sys.platform == 'win32' else [str(runtime)]
         subprocess.run(direct_runtime + ['--version'], check=True, timeout=20, stdout=subprocess.DEVNULL)
         tools_root = release_root / 'agent-tools'
@@ -862,7 +975,12 @@ def main(argv=None):
             if args.export:
                 print(f'Export tools to {args.export}')
             else:
-                print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
+                if missing:
+                    for name in missing:
+                        print(f'{CLIENTS[name].label}: not installed; will register when it appears '
+                              f'(`{setup_command} setup --reconcile` registers it with these settings).')
+                if names:
+                    print(f'Configure {", ".join(names)} for {account.pw_name} ({args.scope} scope).')
                 print('Existing LCU MCP entries will be updated and any old LCU skill removed; unrelated configuration is preserved.')
                 if 'codex' in names:
                     print('Codex: install and trust the original Stop, Interrupt, and SubagentStop cleanup hooks for LCU.')
@@ -905,7 +1023,8 @@ def main(argv=None):
             else:
                 failures = configure(names, home, command, tools_root, release_root,
                                      scope=args.scope, project=args.project,
-                                     setup_command=setup_command, approval=approval_action)
+                                     setup_command=setup_command, approval=approval_action,
+                                     environ=setup_environment) if names else []
                 if failures:
                     retry = [*direct_runtime, 'setup', '--prefix', str(args.prefix), '--user', account.pw_name,
                              '--scope', args.scope, '--session', args.session, '--yes']
@@ -914,12 +1033,25 @@ def main(argv=None):
                     retry += ['--chrome'] if chrome else ['--no-chrome']
                     retry += ['--audio'] if audio else ['--no-audio']
                     retry += ['--approval', approval_mode]
+                    if args.allow_missing:
+                        retry += ['--allow-missing']
                     for name in dict.fromkeys(item[0] for item in failures):
                         retry += ['--agent', name]
                     raise ValueError(f'{len(failures)} registration step(s) failed. Completed steps remain installed. '
                                      + 'After resolving the errors, retry: ' + shlex.join(retry))
             # Remember opt-ins only after successful registration or export.
-            save_setup_state(home, chrome=chrome, audio=audio, approval=approval_mode)
+            # Harnesses registered now leave the pending set; a later reconcile applies the saved
+            # chrome, audio and approval mode to the rest.
+            pending = [] if args.export else [name for name in dict.fromkeys([*state['pending'], *missing])
+                                              if name not in names]
+            save_setup_state(home, chrome=chrome, audio=audio, approval=approval_mode, pending=pending,
+                             pending_context=({'scope': args.scope, 'session': args.session,
+                                               'project': str(args.project) if args.project else None}
+                                              if missing else state['pending_context']) if pending else None)
+            if not args.export and (missing or pending):
+                print('Registered now: ' + (', '.join(names) or 'none') + '.')
+                print('Pending (not installed): ' + (', '.join(pending) or 'none')
+                      + f'. Install them, then run `{setup_command} setup --reconcile` (safe at every login).')
         print('Configuration prepared. Restart/reconnect the selected agent, then ask it to use LCU to inspect the desktop.')
         if args.chrome:
             try:
