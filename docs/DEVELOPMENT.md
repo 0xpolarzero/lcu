@@ -9,7 +9,7 @@ Use the [release installation guide](INSTALLATION.md) unless you are changing LC
 Clone the repository and read its version:
 
 ~~~sh
-git clone https://github.com/0xpolarzero/lcu.git
+git clone https://github.com/amontlabs/lcu.git
 cd lcu
 LCU_VERSION=$(python3 -c 'from scripts.bundle import VERSION; print(VERSION)')
 ~~~

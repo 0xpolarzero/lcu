@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LCU: Codex computer use, decoupled from the Codex app</title>
   <meta name="description" content="LCU gives Claude Code, Codex CLI and Pi the original computer-use runtime from the ChatGPT desktop app installed on your machine, with no Codex sign-in. Open source, MIT licensed.">
-  <link rel="canonical" href="https://lcu.polarzero.xyz/">
+  <link rel="canonical" href="https://lcu.amontlabs.com/">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#050608">
   <meta property="og:type" content="website">
   <meta property="og:title" content="LCU: Codex computer use, decoupled from the Codex app">
   <meta property="og:description" content="The original computer-use runtime from your installed ChatGPT desktop app, in Claude Code, Codex CLI and Pi. No Codex sign-in.">
-  <meta property="og:url" content="https://lcu.polarzero.xyz/">
-  <meta property="og:image" content="https://lcu.polarzero.xyz/media/lcu-showreel-poster.jpg">
+  <meta property="og:url" content="https://lcu.amontlabs.com/">
+  <meta property="og:image" content="https://lcu.amontlabs.com/media/lcu-showreel-poster.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="img/lcu-icon.svg" type="image/svg+xml">
   <link rel="icon" href="img/icon-32.png" sizes="32x32" type="image/png">
@@ -55,7 +55,7 @@
           <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
           <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
         </button>
-        <a class="nav-gh" href="https://github.com/0xpolarzero/lcu">GitHub<span aria-hidden="true"> ↗</span></a>
+        <a class="nav-gh" href="https://github.com/amontlabs/lcu">GitHub<span aria-hidden="true"> ↗</span></a>
       </div>
     </div>
   </header>
@@ -69,9 +69,9 @@
         <p class="lede">Give Claude Code, Codex CLI or Pi the original computer-use runtime from the ChatGPT desktop app, with no Codex sign-in. The app stays installed on your machine and supplies the runtime; LCU handles setup and harness integration.</p>
         <div class="cta">
           <a class="btn btn-primary" href="#install">Install</a>
-          <a class="btn btn-glass" href="https://github.com/0xpolarzero/lcu">View on GitHub<span aria-hidden="true"> ↗</span></a>
+          <a class="btn btn-glass" href="https://github.com/amontlabs/lcu">View on GitHub<span aria-hidden="true"> ↗</span></a>
         </div>
-        <p class="meta"><a href="https://github.com/0xpolarzero/lcu/releases/latest">Latest release</a><span aria-hidden="true">·</span>MIT<span aria-hidden="true">·</span>macOS Apple Silicon<span aria-hidden="true">·</span>Linux ARM64 / x86-64</p>
+        <p class="meta"><a href="https://github.com/amontlabs/lcu/releases/latest">Latest release</a><span aria-hidden="true">·</span>MIT<span aria-hidden="true">·</span>macOS Apple Silicon<span aria-hidden="true">·</span>Linux ARM64 / x86-64</p>
       </div>
 
       <figure class="wrap reel">
@@ -164,7 +164,7 @@
               <li>Pi</li>
             </ul>
             <h3>Works in the harness you already use.</h3>
-            <p>Other harnesses integrate through the <a href="https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md#shared-client-contract">shared JavaScript client</a>.</p>
+            <p>Other harnesses integrate through the <a href="https://github.com/amontlabs/lcu/blob/main/docs/ADAPTERS.md#shared-client-contract">shared JavaScript client</a>.</p>
           </article>
 
           <article class="card reveal">
@@ -190,7 +190,7 @@
               <p class="card-label">Original runtime</p>
               <h3>Nothing reimplemented.</h3>
               <p>LCU doesn’t implement browser control, screenshots, accessibility or input. It runs the original runtime, keeps the original instructions byte-for-byte, and preserves the original approval prompts.</p>
-              <p class="card-links"><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/PROVENANCE.md">Provenance</a><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/INSTRUCTIONS.md">Instructions</a></p>
+              <p class="card-links"><a href="https://github.com/amontlabs/lcu/blob/main/docs/PROVENANCE.md">Provenance</a><a href="https://github.com/amontlabs/lcu/blob/main/docs/INSTRUCTIONS.md">Instructions</a></p>
             </div>
             <ul class="checks">
               <li><span>Runtime</span><span>original</span></li>
@@ -214,7 +214,7 @@
             <button class="copy" type="button" data-copy="prompt-install">Copy</button>
           </div>
           <pre id="prompt-install" tabindex="0"><code>Install and configure LCU for this harness using the latest release.
-Follow https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md
+Follow https://raw.githubusercontent.com/amontlabs/lcu/main/docs/INSTALLATION.md
 Check my OS, architecture, and prerequisites, then guide me through any required permissions.</code></pre>
         </div>
         <p class="hint reveal">Then restart your harness, ask it to use LCU to take a screenshot of a harmless window, and approve the request. That’s the first check that everything works.</p>
@@ -229,7 +229,7 @@ Check my OS, architecture, and prerequisites, then guide me through any required
               <li><span>Linux · ARM64</span><code>linux-arm64.tar.gz</code></li>
               <li><span>Linux · x86-64</span><code>linux-x64.tar.gz</code></li>
             </ul>
-            <p class="card-links"><a href="https://github.com/0xpolarzero/lcu/releases/latest">Latest release</a><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/INSTALLATION.md">Installation guide</a></p>
+            <p class="card-links"><a href="https://github.com/amontlabs/lcu/releases/latest">Latest release</a><a href="https://github.com/amontlabs/lcu/blob/main/docs/INSTALLATION.md">Installation guide</a></p>
           </article>
 
           <article class="card reveal">
@@ -242,9 +242,9 @@ Check my OS, architecture, and prerequisites, then guide me through any required
                 <button class="copy" type="button" data-copy="prompt-chrome">Copy</button>
               </div>
               <pre id="prompt-chrome" tabindex="0"><code>Enable Chrome control in my LCU setup using the installation guide:
-https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desktop-and-browser</code></pre>
+https://raw.githubusercontent.com/amontlabs/lcu/main/docs/INSTALLATION.md#desktop-and-browser</code></pre>
             </div>
-            <p>Enable the official extension in your Chrome profile and restart your harness. Sites still require approval. Claude Code’s Chrome support is experimental; see the <a href="https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md">adapter notes</a>.</p>
+            <p>Enable the official extension in your Chrome profile and restart your harness. Sites still require approval. Claude Code’s Chrome support is experimental; see the <a href="https://github.com/amontlabs/lcu/blob/main/docs/ADAPTERS.md">adapter notes</a>.</p>
           </article>
         </div>
         <p class="sr-only" role="status" aria-live="polite" id="copy-status"></p>
@@ -263,7 +263,7 @@ https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desk
               <li><strong>The official ChatGPT desktop app.</strong> It supplies the runtime and instructions. <a href="https://chatgpt.com/download/">Download it from OpenAI</a>; LCU never installs it for you.</li>
               <li><strong>Python 3.12+.</strong></li>
               <li><strong>Your harness:</strong> Claude Code, Codex CLI or Pi, installed and signed in.</li>
-              <li><strong>Codex CLI users:</strong> <a href="https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md#codex-cli">update before setup</a> to get the required <code>mcp_tool</code> hook support.</li>
+              <li><strong>Codex CLI users:</strong> <a href="https://github.com/amontlabs/lcu/blob/main/docs/ADAPTERS.md#codex-cli">update before setup</a> to get the required <code>mcp_tool</code> hook support.</li>
             </ul>
           </article>
 
@@ -293,7 +293,7 @@ https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desk
                 </tr>
               </tbody>
             </table>
-            <p class="card-links"><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/PARITY-STATUS.md">Tested behavior and remaining gaps</a></p>
+            <p class="card-links"><a href="https://github.com/amontlabs/lcu/blob/main/docs/PARITY-STATUS.md">Tested behavior and remaining gaps</a></p>
           </article>
         </div>
       </div>
@@ -308,12 +308,12 @@ https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desk
       </div>
       <nav aria-label="Project links">
         <ul class="footer-links">
-          <li><a href="https://github.com/0xpolarzero/lcu">GitHub</a></li>
-          <li><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/INSTALLATION.md">Installation</a></li>
-          <li><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md">Adapters</a></li>
-          <li><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/PARITY-STATUS.md">Verification</a></li>
-          <li><a href="https://github.com/0xpolarzero/lcu/blob/main/docs/PROVENANCE.md">Provenance</a></li>
-          <li><a href="https://github.com/0xpolarzero/lcu/blob/main/LICENSE">MIT License</a></li>
+          <li><a href="https://github.com/amontlabs/lcu">GitHub</a></li>
+          <li><a href="https://github.com/amontlabs/lcu/blob/main/docs/INSTALLATION.md">Installation</a></li>
+          <li><a href="https://github.com/amontlabs/lcu/blob/main/docs/ADAPTERS.md">Adapters</a></li>
+          <li><a href="https://github.com/amontlabs/lcu/blob/main/docs/PARITY-STATUS.md">Verification</a></li>
+          <li><a href="https://github.com/amontlabs/lcu/blob/main/docs/PROVENANCE.md">Provenance</a></li>
+          <li><a href="https://github.com/amontlabs/lcu/blob/main/LICENSE">MIT License</a></li>
         </ul>
       </nav>
       <p class="footer-note">LCU is an independent open-source project. It isn’t affiliated with or endorsed by OpenAI. It uses the ChatGPT app installed on your machine, which keeps its own terms.</p>

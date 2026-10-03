@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0xpolarzero/lcu.git",
+    "url": "git+https://github.com/amontlabs/lcu.git",
     "directory": "adapters"
   },
   "type": "module",

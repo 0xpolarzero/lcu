@@ -1,6 +1,6 @@
 # Installation
 
-Install LCU from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest), then register it in your harness. For source changes, see [Building from source](DEVELOPMENT.md#building-from-source).
+Install LCU from the [latest release](https://github.com/amontlabs/lcu/releases/latest), then register it in your harness. For source changes, see [Building from source](DEVELOPMENT.md#building-from-source).
 
 ## The `lcu` command
 
@@ -16,7 +16,7 @@ Where a command below is written as `lcu ...`, run it through the installed path
 
 ## If you are the installing agent
 
-1. Check the OS, architecture, desktop account, and current harness. Adapters are `pi`, `codex`, `claude-code`, `omp` (Oh My Pi), and `hermes` (Hermes Agent); select the user's harness explicitly. OMP and Hermes are experimental; inspect their [verification limits](ADAPTERS.md) before claiming desktop behavior. If the harness has no adapter, report that gap and consult [the adapter contract](https://github.com/0xpolarzero/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
+1. Check the OS, architecture, desktop account, and current harness. Adapters are `pi`, `codex`, `claude-code`, `omp` (Oh My Pi), and `hermes` (Hermes Agent); select the user's harness explicitly. OMP and Hermes are experimental; inspect their [verification limits](ADAPTERS.md) before claiming desktop behavior. If the harness has no adapter, report that gap and consult [the adapter contract](https://github.com/amontlabs/lcu/blob/main/docs/ADAPTERS.md). Do not substitute another harness.
 2. Check the prerequisites below. The official desktop app, Python, and selected harness must already be installed. If anything is missing, report the prerequisite and its installation link; LCU does not install or authenticate them.
 3. Download the matching archive and SHA-256 sidecar from the latest release, verify the checksum, and extract it. Follow the installation section for that platform from inside the extracted directory.
 4. For unattended setup, add `--yes` to the command that selects the harness. Preserve the user's sandbox and approval settings. Enable Chrome, computer-audio recording or `--approval auto` only if the user requested it.
@@ -41,7 +41,7 @@ Choose the archive for the machine where LCU will run:
 | Linux ARM64 | `linux-arm64.tar.gz` |
 | Linux x86-64 | `linux-x64.tar.gz` |
 
-Download that archive and its matching `.sha256` file from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest). Or run this from a terminal on the target machine; it selects the archive, checks its SHA-256, and opens the extracted directory:
+Download that archive and its matching `.sha256` file from the [latest release](https://github.com/amontlabs/lcu/releases/latest). Or run this from a terminal on the target machine; it selects the archive, checks its SHA-256, and opens the extracted directory:
 
 ~~~sh
 case "$(uname -s)-$(uname -m)" in
@@ -50,10 +50,10 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) LCU_TARGET=linux-x64 ;;
   *) echo "Unsupported LCU platform" >&2; exit 1 ;;
 esac
-LCU_TAG=$(curl -fsSL https://api.github.com/repos/0xpolarzero/lcu/releases/latest |
+LCU_TAG=$(curl -fsSL https://api.github.com/repos/amontlabs/lcu/releases/latest |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])')
 LCU_ARCHIVE="lcu-${LCU_TAG#v}-${LCU_TARGET}.tar.gz"
-LCU_URL="https://github.com/0xpolarzero/lcu/releases/download/$LCU_TAG"
+LCU_URL="https://github.com/amontlabs/lcu/releases/download/$LCU_TAG"
 mkdir -p lcu-release &&
 cd lcu-release &&
 curl -fLO "$LCU_URL/$LCU_ARCHIVE" &&

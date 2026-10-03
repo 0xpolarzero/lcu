@@ -16,7 +16,7 @@ Copy this into your agent:
 
 ```text
 Install and configure LCU for this harness using the latest release.
-Follow https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md
+Follow https://raw.githubusercontent.com/amontlabs/lcu/main/docs/INSTALLATION.md
 Check my OS, architecture, and prerequisites, then guide me through any required permissions.
 ```
 
@@ -39,7 +39,7 @@ Windows 11 x64 remains a [candidate](docs/INSTALLATION.md#windows-11-x64-candida
 
 ## Install manually
 
-Download the archive and matching `.sha256` file from the [latest release](https://github.com/0xpolarzero/lcu/releases/latest):
+Download the archive and matching `.sha256` file from the [latest release](https://github.com/amontlabs/lcu/releases/latest):
 
 | Platform | Archive |
 | --- | --- |
@@ -57,7 +57,7 @@ Ask your agent:
 
 ```text
 Enable Chrome control in my LCU setup using the installation guide:
-https://raw.githubusercontent.com/0xpolarzero/lcu/main/docs/INSTALLATION.md#desktop-and-browser
+https://raw.githubusercontent.com/amontlabs/lcu/main/docs/INSTALLATION.md#desktop-and-browser
 ```
 
 Enable the official extension in your Chrome profile and restart your harness. Then ask it to use LCU to list Chrome tabs. Sites still require approval. Claude Code's Chrome support remains experimental because some interruptions do not trigger tab cleanup; see [adapter limitations](docs/ADAPTERS.md).
